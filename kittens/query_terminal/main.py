@@ -230,6 +230,21 @@ class BackgroundOpacity(Query):
 
 
 @query
+class HDRHeadroom(Query):
+    name: str = 'hdr_headroom'
+    help_text: str = 'The maximum brightness available as a multiple of SDR white, 1 when there is no HDR headroom, see :doc:`/hdr-protocol`'
+
+    @staticmethod
+    def get_result(opts: Options, window_id: int, os_window_id: int) -> str:
+        from kitty.fast_data_types import hdr_headroom_of
+
+        ans = hdr_headroom_of(os_window_id)
+        if ans is None:
+            ans = 1.0
+        return f'{ans:g}'
+
+
+@query
 class ClipboardControl(Query):
     name: str = 'clipboard_control'
     help_text: str = 'The config option :opt:`clipboard_control` in :file:`kitty.conf` for allowing reads/writes to/from the clipboard'

@@ -281,7 +281,8 @@ emulator must understand pixel data in three formats, 24-bit RGB, 32-bit RGBA an
 PNG. This is specified using the ``f`` key in the control data. ``f=32`` (which is the
 default) indicates 32-bit RGBA data and ``f=24`` indicates 24-bit RGB data and ``f=100``
 indicates PNG data. The PNG format is supported both for convenience, and as a compact way
-of transmitting paletted images.
+of transmitting paletted images. Terminals may additionally support ``f=64``, 64-bit
+floating point RGBA data for HDR images, see the :doc:`hdr-protocol`.
 
 RGB and RGBA data
 ~~~~~~~~~~~~~~~~~~~

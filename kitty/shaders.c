@@ -105,7 +105,7 @@ color_vec4(GLint location, color_type color, GLfloat alpha) {
 // Write a color into a std140 float4 whose fourth component is unused. Uses
 // the same table as the shaders so the result is identical to converting the
 // color in the shader.
-static float
+float
 effective_hdr_headroom(const OSWindow *w) {
     if (!OPT(hdr)) return 1.f;
     return MAX(1.f, MIN(w->hdr_headroom, OPT(hdr_max_headroom)));
@@ -3035,12 +3035,29 @@ take_screenshot_of_rectangular_region(OSWindow *os_window, Region region, unsign
     // Calculate the source region dimensions
     unsigned src_height = region.bottom - region.top;
     unsigned src_width = region.right - region.left;
+    // An HDR window has a linear float framebuffer rather than an sRGB one
+    GLint fb = 0, component_type = 0;
+    glGetIntegerv(GL_DRAW_FRAMEBUFFER_BINDING, &fb);
+    if (!fb) glGetFramebufferAttachmentParameteriv(GL_FRAMEBUFFER, GL_BACK_LEFT, GL_FRAMEBUFFER_ATTACHMENT_COMPONENT_TYPE, &component_type);
+    const bool is_float = component_type == GL_FLOAT;
 
     if (no_scaling) {
         *thumb_w = src_width;
         *thumb_h = src_height;
         glPixelStorei(GL_PACK_ALIGNMENT, 1);
-        glReadPixels((GLint)region.left, (GLint)(vh - region.bottom), (GLsizei)src_width, (GLsizei)src_height, GL_RGBA, GL_UNSIGNED_BYTE, dst_buf);
+        if (is_float) {
+            const size_t count = (size_t)src_width * src_height * 4;
+            float *buf = malloc(count * sizeof(float));
+            if (buf) {
+                glReadPixels((GLint)region.left, (GLint)(vh - region.bottom), (GLsizei)src_width, (GLsizei)src_height, GL_RGBA, GL_FLOAT, buf);
+                for (size_t i = 0; i < count; i++) {
+                    float v = MAX(0.f, MIN(buf[i], 1.f));
+                    if (i % 4 != 3) v = v <= 0.0031308f ? 12.92f * v : 1.055f * powf(v, 1.f / 2.4f) - 0.055f;
+                    dst_buf[i] = (unsigned char)(v * 255.f + 0.5f);
+                }
+                free(buf);
+            }
+        } else glReadPixels((GLint)region.left, (GLint)(vh - region.bottom), (GLsizei)src_width, (GLsizei)src_height, GL_RGBA, GL_UNSIGNED_BYTE, dst_buf);
         glPixelStorei(GL_PACK_ALIGNMENT, 4);
         return;
     }
@@ -3061,7 +3078,7 @@ take_screenshot_of_rectangular_region(OSWindow *os_window, Region region, unsign
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
 
     // Copy the current framebuffer to the texture
-    glCopyTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, 0, 0, vw, vh, 0);
+    glCopyTexImage2D(GL_TEXTURE_2D, 0, is_float ? GL_RGBA16F : GL_RGBA, 0, 0, vw, vh, 0);
 
     // Create a temporary framebuffer for GPU-based scaling
     GLuint temp_texture = 0, temp_framebuffer = 0;
@@ -3092,6 +3109,7 @@ take_screenshot_of_rectangular_region(OSWindow *os_window, Region region, unsign
 
     // Set the source texture size for proper downscaling
     glUniform2f(program_uniform_location(SCREENSHOT_PROGRAM, "src_size"), (float)vw, (float)vh);
+    glUniform1f(program_uniform_location(SCREENSHOT_PROGRAM, "src_is_linear"), is_float ? 1.f : 0.f);
 
     // Bind the source texture
     glActiveTexture(GL_TEXTURE0 + GRAPHICS_UNIT);

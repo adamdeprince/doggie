@@ -886,6 +886,10 @@ def change_background_opacity(os_window_id: int, opacity: float) -> bool:
 def background_opacity_of(os_window_id: int) -> Optional[float]:
     pass
 
+
+def hdr_headroom_of(os_window_id: int) -> Optional[float]:
+    pass
+
 def read_command_response(fd: int, timeout: float, list: List[bytes]) -> None:
     pass
 

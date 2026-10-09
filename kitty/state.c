@@ -1329,6 +1329,15 @@ PYWRAP1(background_opacity_of) {
     Py_RETURN_NONE;
 }
 
+PYWRAP1(hdr_headroom_of) {
+    id_type os_window_id = PyLong_AsUnsignedLongLong(args);
+    if (PyErr_Occurred()) return NULL;
+    WITH_OS_WINDOW(os_window_id)
+    return PyFloat_FromDouble((double)effective_hdr_headroom(os_window));
+    END_WITH_OS_WINDOW
+    Py_RETURN_NONE;
+}
+
 PYWRAP1(set_window_padding) {
     id_type os_window_id, tab_id, window_id;
     unsigned int left, top, right, bottom;
@@ -2090,6 +2099,7 @@ static PyMethodDef module_methods[] = {
     MW(run_with_activation_token, METH_O),
     MW(change_background_opacity, METH_VARARGS),
     MW(background_opacity_of, METH_O),
+    MW(hdr_headroom_of, METH_O),
     MW(update_window_visibility, METH_VARARGS),
     MW(sync_os_window_title, METH_VARARGS),
     MW(get_os_window_title, METH_VARARGS),

@@ -21,18 +21,18 @@ vertex_main(uint vertex_id: SV_VertexID, uniform float4 src_rect, uniform float4
 uniform Sampler2D image;
 
 float3
-safe_unpremult_to_linear(float4 s) {
+safe_unpremult_to_linear(float4 s, float src_is_linear) {
     // Avoid division by zero by replacing 0.0 alpha with 1.0.
     // If alpha is 0.0, the division is safe, and lerp masks the result to 0.0 anyway.
     float safe_alpha = lerp(1.0f, s.a, step(0.00001f, s.a));
     float3 unpremult = s.rgb / safe_alpha;
     // Select between the computed linear color and float3(0.0) based on alpha presence
-    return lerp(float3(0.0f), srgb2linear(unpremult), step(0.00001f, s.a));
+    return lerp(float3(0.0f), lerp(srgb2linear(unpremult), unpremult, src_is_linear), step(0.00001f, s.a));
 }
 
 [shader("fragment")]
 float4
-fragment_main(float2 texcoord: TEXCOORD, uniform float2 src_size)
+fragment_main(float2 texcoord: TEXCOORD, uniform float2 src_size, uniform float src_is_linear)
     : SV_Target {
     float4 s00, s10, s01, s11;
     float2 texel_size = 1.0 / src_size;
@@ -65,10 +65,10 @@ fragment_main(float2 texcoord: TEXCOORD, uniform float2 src_size)
     }
 
     // Unpremultiply and convert to linear for each sample
-    float3 linear00 = safe_unpremult_to_linear(s00);
-    float3 linear10 = safe_unpremult_to_linear(s10);
-    float3 linear01 = safe_unpremult_to_linear(s01);
-    float3 linear11 = safe_unpremult_to_linear(s11);
+    float3 linear00 = safe_unpremult_to_linear(s00, src_is_linear);
+    float3 linear10 = safe_unpremult_to_linear(s10, src_is_linear);
+    float3 linear01 = safe_unpremult_to_linear(s01, src_is_linear);
+    float3 linear11 = safe_unpremult_to_linear(s11, src_is_linear);
 
     // Average the alpha values
     float avg_alpha = (s00.a + s10.a + s01.a + s11.a) * 0.25;
