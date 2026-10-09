@@ -44,6 +44,9 @@ from kitty.fast_data_types import (
     GRAPHICS_ALPHA_MASK_PROGRAM,
     GRAPHICS_PREMULT_PROGRAM,
     GRAPHICS_PROGRAM,
+    HDR_BG,
+    HDR_FG,
+    HDR_MASK,
     MARK,
     MARK_MASK,
     MAX_CUSTOM_SHADER_GROUPS,
@@ -384,6 +387,9 @@ class SlangFile(NamedTuple):
                 ans['DECORATION_SHIFT'] = str(DECORATION)
                 ans['MARK_SHIFT'] = str(MARK)
                 ans['DECORATION_MASK'] = str(DECORATION_MASK)
+                ans['HDR_FG_SHIFT'] = str(HDR_FG)
+                ans['HDR_BG_SHIFT'] = str(HDR_BG)
+                ans['HDR_MASK'] = str(HDR_MASK)
                 ans['COLOR_NOT_SET'] = str(COLOR_NOT_SET)
                 ans['COLOR_IS_SPECIAL'] = str(COLOR_IS_SPECIAL)
                 ans['COLOR_IS_INDEX'] = str(COLOR_IS_INDEX)

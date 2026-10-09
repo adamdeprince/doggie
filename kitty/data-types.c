@@ -999,9 +999,12 @@ PyInit_fast_data_types(void) {
     s(DIM, dim);
     s(DECORATION, decoration);
     s(BLINK, blink);
+    s(HDR_FG, hdr_fg);
+    s(HDR_BG, hdr_bg);
 #undef s
     PyModule_AddIntConstant(m, "MARK_MASK", MARK_MASK);
     PyModule_AddIntConstant(m, "DECORATION_MASK", DECORATION_MASK);
+    PyModule_AddIntConstant(m, "HDR_MASK", HDR_MASK);
     PyModule_AddStringMacro(m, ERROR_PREFIX);
 #ifdef KITTY_VCS_REV
     PyModule_AddStringMacro(m, KITTY_VCS_REV);

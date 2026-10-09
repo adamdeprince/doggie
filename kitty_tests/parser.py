@@ -940,6 +940,8 @@ class TestParser(BaseTest):
         pb('\033[58;2;1;2;3m', ('select_graphic_rendition', '58:2:1:2:3'))
         pb('\033[38;2;1;2;3m', ('select_graphic_rendition', '38:2:1:2:3'))
         pb('\033[1001:2:1:2:3m', ('select_graphic_rendition', '1001:2:1:2:3'))
+        pb('\033[56:200;57m', ('select_graphic_rendition', '56:200'), ('select_graphic_rendition', '57'))
+        self.ae((s.cursor.hdr_fg, s.cursor.hdr_bg), (4, 0))
         pb(
             '\033[38:2:1:2:3;48:5:9;58;5;7m',
             ('select_graphic_rendition', '38:2:1:2:3'),

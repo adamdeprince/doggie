@@ -105,6 +105,12 @@ color_vec4(GLint location, color_type color, GLfloat alpha) {
 // Write a color into a std140 float4 whose fourth component is unused. Uses
 // the same table as the shaders so the result is identical to converting the
 // color in the shader.
+static float
+effective_hdr_headroom(const OSWindow *w) {
+    if (!OPT(hdr)) return 1.f;
+    return MAX(1.f, MIN(w->hdr_headroom, OPT(hdr_max_headroom)));
+}
+
 static void
 linear_color_vec4(GLfloat *dest, color_type color) {
     dest[0] = srgb_lut[(color >> 16) & 0xFF];
@@ -882,7 +888,7 @@ cell_update_uniform_block(
 
         GLuint columns, lines, sprites_xnum, sprites_ynum, cursor_shape, cell_width, cell_height;
         GLuint cursor_x1, cursor_x2, cursor_y1, cursor_y2;
-        GLfloat cursor_opacity, inactive_text_alpha, fg_override_threshold, row_offset, dim_opacity, blink_opacity;
+        GLfloat cursor_opacity, inactive_text_alpha, fg_override_threshold, row_offset, dim_opacity, blink_opacity, hdr_headroom;
 
         GLuint bg_colors0, bg_colors1, bg_colors2, bg_colors3, bg_colors4, bg_colors5, bg_colors6, bg_colors7;
         GLfloat bg_opacities0, bg_opacities1, bg_opacities2, bg_opacities3, bg_opacities4, bg_opacities5, bg_opacities6, bg_opacities7;
@@ -1042,6 +1048,7 @@ cell_update_uniform_block(
     rd->cell_height = os_window->fonts_data->fcm.cell_height;
     rd->inactive_text_alpha = inactive_text_alpha;
     rd->dim_opacity = OPT(dim_opacity);
+    rd->hdr_headroom = effective_hdr_headroom(os_window);
 
 #undef COLOR
     rd->url_style = OPT(url_style);
@@ -1051,6 +1058,8 @@ cell_update_uniform_block(
     linear_color_vec4(rd->highlight_bg_lin, highlight_bg);
     linear_color_vec4(rd->main_cursor_fg_lin, main_cursor_fg);
     linear_color_vec4(rd->main_cursor_bg_lin, main_cursor_bg);
+    const float cursor_gain = MIN(OPT(cursor_brightness), rd->hdr_headroom);
+    for (unsigned i = 0; i < 3; i++) rd->main_cursor_bg_lin[i] *= cursor_gain;
     linear_color_vec4(rd->url_color_lin, OPT(url_color));
     linear_color_vec4(rd->extra_cursor_fg_lin, dynamic_color_for_gpu(cp, rd->extra_cursor_fg));
     linear_color_vec4(rd->extra_cursor_bg_lin, dynamic_color_for_gpu(cp, rd->extra_cursor_bg));

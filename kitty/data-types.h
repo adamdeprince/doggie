@@ -158,6 +158,8 @@ typedef struct ImageAnchorPosition {
 #define BLANK_CHAR 0
 #define COL_MASK 0xFFFFFFFF
 #define DECORATION_FG_CODE 58
+#define HDR_FG_CODE 56
+#define HDR_BG_CODE 57
 
 // PUA character used as an image placeholder.
 #define IMAGE_PLACEHOLDER_CHAR 0x10EEEE
@@ -264,7 +266,7 @@ typedef struct {
 
     struct {
         bool bold, italic, reverse, strikethrough, dim, blink;
-        uint8_t decoration;
+        uint8_t decoration, hdr_fg, hdr_bg;
         color_type fg, bg, decoration_fg;
     } sgr;
 } Cursor;

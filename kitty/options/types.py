@@ -23,6 +23,7 @@ choices_for_allow_remote_control = typing.Literal['password', 'socket-only', 'so
 choices_for_background_image_layout = typing.Literal['mirror-tiled', 'scaled', 'tiled', 'clamped', 'centered', 'cscaled']
 choices_for_default_pointer_shape = typing.Literal['arrow', 'beam', 'text', 'pointer', 'hand', 'help', 'wait', 'progress', 'crosshair', 'cell', 'vertical-text', 'move', 'e-resize', 'ne-resize', 'nw-resize', 'n-resize', 'se-resize', 'sw-resize', 's-resize', 'w-resize', 'ew-resize', 'ns-resize', 'nesw-resize', 'nwse-resize', 'zoom-in', 'zoom-out', 'alias', 'copy', 'not-allowed', 'no-drop', 'grab', 'grabbing']
 choices_for_focus_follows_mouse = typing.Literal['no', 'n', 'false', 'y', 'yes', 'true', 'drop']
+choices_for_hdr = typing.Literal['no', 'auto', 'always']
 choices_for_linux_display_server = typing.Literal['auto', 'wayland', 'x11']
 choices_for_macos_colorspace = typing.Literal['srgb', 'default', 'displayp3']
 choices_for_macos_show_window_title_in = typing.Literal['all', 'menubar', 'none', 'window']
@@ -341,6 +342,7 @@ option_names = (
     'cursor',
     'cursor_beam_thickness',
     'cursor_blink_interval',
+    'cursor_brightness',
     'cursor_shape',
     'cursor_shape_unfocused',
     'cursor_stop_blinking_after',
@@ -374,6 +376,8 @@ option_names = (
     'force_ltr',
     'foreground',
     'forward_stdio',
+    'hdr',
+    'hdr_max_headroom',
     'hide_window_decorations',
     'inactive_border_color',
     'inactive_tab_background',
@@ -570,6 +574,7 @@ class Options:
     cursor: kitty.fast_data_types.Color | None = Color(204, 204, 204)
     cursor_beam_thickness: float = 1.5
     cursor_blink_interval: tuple[float, kitty.options.utils.EasingFunction, kitty.options.utils.EasingFunction] = (-1.0, kitty.options.utils.EasingFunction(), kitty.options.utils.EasingFunction())
+    cursor_brightness: float = 1.0
     cursor_shape: int = 1
     cursor_shape_unfocused: int = 4
     cursor_stop_blinking_after: float = 15.0
@@ -598,6 +603,8 @@ class Options:
     force_ltr: bool = False
     foreground: Color = Color(221, 221, 221)
     forward_stdio: bool = False
+    hdr: choices_for_hdr = 'no'
+    hdr_max_headroom: float = 4.0
     hide_window_decorations: int = 0
     inactive_border_color: Color = Color(204, 204, 204)
     inactive_tab_background: Color = Color(153, 153, 153)

@@ -935,6 +935,9 @@ class Parser:
     def cursor_blink_interval(self, val: str, ans: dict[str, typing.Any]) -> None:
         ans['cursor_blink_interval'] = cursor_blink_interval(val)
 
+    def cursor_brightness(self, val: str, ans: dict[str, typing.Any]) -> None:
+        ans['cursor_brightness'] = positive_float(val)
+
     def cursor_shape(self, val: str, ans: dict[str, typing.Any]) -> None:
         ans['cursor_shape'] = to_cursor_shape(val)
 
@@ -1048,6 +1051,17 @@ class Parser:
 
     def forward_stdio(self, val: str, ans: dict[str, typing.Any]) -> None:
         ans['forward_stdio'] = to_bool(val)
+
+    def hdr(self, val: str, ans: dict[str, typing.Any]) -> None:
+        val = val.lower()
+        if val not in self.choices_for_hdr:
+            raise ValueError(f"The value {val} is not a valid choice for hdr")
+        ans["hdr"] = val
+
+    choices_for_hdr = frozenset(('no', 'auto', 'always'))
+
+    def hdr_max_headroom(self, val: str, ans: dict[str, typing.Any]) -> None:
+        ans['hdr_max_headroom'] = positive_float(val)
 
     def hide_window_decorations(self, val: str, ans: dict[str, typing.Any]) -> None:
         ans['hide_window_decorations'] = hide_window_decorations(val)

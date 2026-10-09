@@ -89,7 +89,7 @@ typedef struct Options {
     float macos_thicken_font;
     WindowTitleIn macos_show_window_title_in;
     char *bell_path, *bell_theme, *macos_ns_window_layer;
-    float background_opacity, dim_opacity;
+    float background_opacity, dim_opacity, cursor_brightness, hdr_max_headroom;
 
     ScrollbarVisibilityPolicy scrollbar;
     bool scrollbar_interactive, scrollbar_jump_on_click;
@@ -156,7 +156,7 @@ typedef struct Options {
         double outer, inner;
     } tab_bar_margin_height;
     long macos_menubar_title_max_length;
-    int macos_colorspace;
+    int macos_colorspace, hdr;
     struct {
         float val;
         AdjustmentUnit unit;
@@ -582,6 +582,7 @@ typedef struct OSWindow {
         float alpha;
         bool os_forces_opaque, supports_transparency;
     } background_opacity;
+    float hdr_headroom;
     FONTS_DATA_HANDLE fonts_data;
     id_type temp_font_group_id;
     enum RENDER_STATE render_state;

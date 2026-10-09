@@ -59,6 +59,13 @@ cursor_reset_display_attrs(Cursor *self) {
 }
 
 
+static uint8_t
+hdr_code(int percent) {
+    // quarter steps above SDR white, see HDR_MASK
+    int code = (percent - 100 + 12) / 25;
+    return MAX(0, MIN(code, (int)HDR_MASK));
+}
+
 static void
 parse_color(int *params, unsigned int *i, unsigned int count, uint32_t *result) {
     unsigned int attr;
@@ -111,6 +118,16 @@ cursor_from_sgr(Cursor *self, int *params, unsigned int count, bool is_group) {
                 break;
             case 5: self->sgr.blink = true; break;
             case 7: self->sgr.reverse = true; break;
+            case HDR_FG_CODE:
+            case HDR_BG_CODE: {
+                uint8_t val = 0;
+                if (is_group && i < count) {
+                    val = hdr_code(params[i]);
+                    i++;
+                }
+                if (attr == HDR_FG_CODE) self->sgr.hdr_fg = val;
+                else self->sgr.hdr_bg = val;
+            } break;
             case 9: self->sgr.strikethrough = true; break;
             case 21: self->sgr.decoration = 2; break;
             case 221: self->sgr.bold = false; break;
@@ -191,6 +208,16 @@ apply_sgr_to_cells(GPUCell *first_cell, unsigned int cell_count, int *params, un
             }
             case 5: S(blink, true);
             case 7: S(reverse, true);
+            case HDR_FG_CODE:
+            case HDR_BG_CODE: {
+                uint8_t val = 0;
+                if (is_group && i < count) {
+                    val = hdr_code(params[i]);
+                    i++;
+                }
+                if (attr == HDR_FG_CODE) { S(hdr_fg, val); }
+                S(hdr_bg, val);
+            }
             case 9: S(strike, true);
             case 21: S(decoration, 2);
             case 221: S(bold, false);
@@ -344,6 +371,8 @@ SGR_UINT_GETSET(decoration)
 SGR_UINT_GETSET(fg)
 SGR_UINT_GETSET(bg)
 SGR_UINT_GETSET(decoration_fg)
+SGR_UINT_GETSET(hdr_fg)
+SGR_UINT_GETSET(hdr_bg)
 
 static PyMemberDef members[] = {
     {"x", T_UINT, offsetof(Cursor, x), 0, "x"},
@@ -354,7 +383,7 @@ static PyMemberDef members[] = {
 
 static PyGetSetDef getseters[] = {
     GETSET(bold) GETSET(italic) GETSET(reverse) GETSET(strikethrough) GETSET(dim) GETSET(blink) GETSET(text_blink) GETSET(decoration) GETSET(fg) GETSET(bg)
-        GETSET(decoration_fg){NULL} /* Sentinel */
+        GETSET(decoration_fg) GETSET(hdr_fg) GETSET(hdr_bg){NULL} /* Sentinel */
 };
 
 static PyMethodDef methods[] = {
