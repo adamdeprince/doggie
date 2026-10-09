@@ -92,7 +92,7 @@ typedef struct {
 
 typedef struct {
     uint32_t gap, id, width, height, x, y, base_frame_id, bgcolor;
-    bool is_opaque, is_4byte_aligned, alpha_blend, transient;
+    bool is_opaque, is_4byte_aligned, alpha_blend, transient, is_float;
 } Frame;
 
 typedef enum { ANIMATION_STOPPED = 0, ANIMATION_LOADING = 1, ANIMATION_RUNNING = 2 } AnimationState;
@@ -138,7 +138,7 @@ typedef struct {
     size_t data_sz;
     uint8_t *data;
     bool is_4byte_aligned;
-    bool is_opaque, loading_completed_successfully;
+    bool is_opaque, loading_completed_successfully, is_float;
     uint32_t width, height;
     GraphicsCommand start_command;
     ImageAndFrame loading_for;
@@ -158,6 +158,7 @@ typedef struct {
     struct {
         size_t count, capacity;
         ImageRenderData *item;
+        bool has_hdr;
     } render_data;
     bool layers_dirty;
     // The number of images below MIN_ZINDEX / 2, then the number of refs between MIN_ZINDEX / 2 and -1 inclusive, then the number of refs above 0 inclusive.
@@ -248,6 +249,7 @@ bool grman_update_layers(
     CellPixelSize);
 void grman_scroll_images(GraphicsManager *self, const ScrollData *, CellPixelSize fg);
 bool grman_has_any_images(GraphicsManager *self);
+bool grman_has_hdr_images(GraphicsManager *self);
 void grman_resize(GraphicsManager *, index_type, index_type, index_type, index_type, index_type, index_type);
 void grman_rescale(GraphicsManager *self, CellPixelSize fg);
 void grman_remove_cell_images(GraphicsManager *self, int32_t top, int32_t bottom);

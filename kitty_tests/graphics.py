@@ -451,6 +451,12 @@ class TestGraphics(BaseTest):
             img = sl(p, s=1, v=1, f=f)
             self.ae(bool(img['is_4byte_aligned']), f == 32)
 
+        # Test HDR load
+        self.ae(pl('abcdefgh', s=1, v=1, a='q', f=64), 'OK')
+        self.ae(pl('abcdefg', s=1, v=1, f=64), 'ENODATA:Insufficient image data: 7 < 8')
+        sl('abcdefgh' * 6, s=3, v=2, f=64)
+        self.ae(pl('abcdefgh', s=1, v=1, f=64, a='f', r=1), 'EINVAL:Animation frames are not supported for HDR images')
+
         # Test chunked load
         self.assertIsNone(pl('abcd', s=2, v=2, m=1))
         self.assertIsNone(pl('efgh', m=1))

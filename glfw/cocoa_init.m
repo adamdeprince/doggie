@@ -291,6 +291,7 @@ static GLFWapplicationshouldhandlereopenfun handle_reopen_callback = NULL;
 
     for (window = _glfw.windowListHead; window; window = window->next) {
         if (window->context.client != GLFW_NO_API) [window->context.nsgl.object update];
+        _glfwInputWindowDamage(window); // HDR headroom may have changed
     }
 
     _glfwPollMonitorsNS();

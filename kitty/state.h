@@ -583,6 +583,7 @@ typedef struct OSWindow {
         bool os_forces_opaque, supports_transparency;
     } background_opacity;
     float hdr_headroom;
+    bool hdr_active, hdr_content;
     FONTS_DATA_HANDLE fonts_data;
     id_type temp_font_group_id;
     enum RENDER_STATE render_state;
@@ -748,7 +749,7 @@ bool update_cursor_trail(CursorTrail *ct, Window *w, monotonic_t now, OSWindow *
 void set_gpu_viewport(unsigned w, unsigned h);
 void free_texture(uint32_t *);
 void free_framebuffer(uint32_t *);
-void send_image_to_gpu(uint32_t *, const void *, int32_t, int32_t, bool, bool, bool, RepeatStrategy);
+void send_image_to_gpu(uint32_t *, const void *, int32_t, int32_t, bool, bool, bool, bool, RepeatStrategy);
 void send_sprite_to_gpu(FONTS_DATA_HANDLE fg, sprite_index, pixel *, sprite_index);
 void blank_canvas(float, color_type, bool);
 void blank_os_window(OSWindow *);

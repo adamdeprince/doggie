@@ -27,14 +27,17 @@ uniform Sampler2D image;
 
 [shader("fragment")]
 float4
-fragment_main(float2 texcoord: TEXCOORD, uniform float3 amask_fg, uniform float4 amask_bg_premult, uniform float extra_alpha)
+fragment_main(float2 texcoord: TEXCOORD, uniform float3 amask_fg, uniform float4 amask_bg_premult, uniform float extra_alpha, uniform float hdr_headroom)
     : SV_Target {
     float4 color = image.Sample(texcoord);
     if (is_alpha_mask) {
         color = float4(amask_fg, color.r);
         color = vec4_premul(color);
         color = alpha_blend_premul(color, amask_bg_premult);
-    } else color.a *= extra_alpha;
+    } else {
+        color.a *= extra_alpha;
+        color.rgb = min(color.rgb, float3(hdr_headroom)); // HDR images, SDR ones are never above 1
+    }
 
     if (texture_is_not_premultiplied) color = vec4_premul(color);
 

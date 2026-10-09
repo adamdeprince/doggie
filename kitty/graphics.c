@@ -692,7 +692,7 @@ get_free_client_id(const GraphicsManager *self) {
     }
 
 #define MAX_DATA_SZ (4u * 100000000u)
-enum FORMATS { RGB = 24, RGBA = 32, PNG = 100 };
+enum FORMATS { RGB = 24, RGBA = 32, RGBA16F = 64, PNG = 100 };
 
 static bool
 is_file_transmission(const unsigned char transmission_type) {
@@ -900,10 +900,12 @@ initialize_load_data(
             break;
         case RGB:
         case RGBA:
+        case RGBA16F:
             self->currently_loading.data_sz = (size_t)g->data_width * g->data_height * (data_fmt / 8);
             if (!self->currently_loading.data_sz) ABRT("EINVAL", "Zero width/height not allowed");
-            self->currently_loading.is_4byte_aligned = data_fmt == RGBA || (self->currently_loading.width % 4 == 0);
+            self->currently_loading.is_4byte_aligned = data_fmt != RGB || (self->currently_loading.width % 4 == 0);
             self->currently_loading.is_opaque = data_fmt == RGB;
+            self->currently_loading.is_float = data_fmt == RGBA16F;
             break;
         default: ABRT("EINVAL", "Unknown image format: %u", data_fmt);
     }
@@ -932,13 +934,13 @@ initialize_load_data(
     }
 
 static void
-upload_to_gpu(GraphicsManager *self, Image *img, const bool is_opaque, const bool is_4byte_aligned, const uint8_t *data) {
+upload_to_gpu(GraphicsManager *self, Image *img, const bool is_opaque, const bool is_float, const bool is_4byte_aligned, const uint8_t *data) {
     if (!self->context_made_current_for_this_command) {
         if (!self->window_id) return;
         if (!make_window_context_current(self->window_id)) return;
         self->context_made_current_for_this_command = true;
     }
-    if (img->texture) { send_image_to_gpu(&img->texture->id, data, img->width, img->height, is_opaque, is_4byte_aligned, true, REPEAT_CLAMP); }
+    if (img->texture) { send_image_to_gpu(&img->texture->id, data, img->width, img->height, is_opaque, is_float, is_4byte_aligned, true, REPEAT_CLAMP); }
 }
 
 static Image *
@@ -993,7 +995,7 @@ handle_add_command(GraphicsManager *self, const GraphicsCommand *g, const uint8_
     self->currently_loading.loading_for = (const ImageAndFrame){0};
     img = process_image_data(self, img, g, fmt);
     if (!img) return NULL;
-    size_t required_sz = (size_t)(self->currently_loading.is_opaque ? 3 : 4) * self->currently_loading.width * self->currently_loading.height;
+    size_t required_sz = (size_t)(self->currently_loading.is_opaque ? 3 : self->currently_loading.is_float ? 8 : 4) * self->currently_loading.width * self->currently_loading.height;
     if (self->currently_loading.data_sz != required_sz)
         ABRT(
             "EINVAL",
@@ -1009,6 +1011,7 @@ handle_add_command(GraphicsManager *self, const GraphicsCommand *g, const uint8_
         img->root_frame = (const Frame){
             .id = ++img->frame_id_counter,
             .is_opaque = self->currently_loading.is_opaque,
+            .is_float = self->currently_loading.is_float,
             .is_4byte_aligned = self->currently_loading.is_4byte_aligned,
             .width = img->width,
             .height = img->height,
@@ -1016,7 +1019,7 @@ handle_add_command(GraphicsManager *self, const GraphicsCommand *g, const uint8_
         };
         if (!is_query) {
             // Upload before caching, the cache takes ownership of the data
-            upload_to_gpu(self, img, img->root_frame.is_opaque, img->root_frame.is_4byte_aligned, self->currently_loading.data);
+            upload_to_gpu(self, img, img->root_frame.is_opaque, img->root_frame.is_float, img->root_frame.is_4byte_aligned, self->currently_loading.data);
             if (!add_load_data_to_cache(self, (const ImageAndFrame){.image_id = img->internal_id, .frame_id = img->root_frame.id}, img->root_frame.transient)) {
                 if (PyErr_Occurred()) PyErr_Print();
                 ABRT("ENOSPC", "Failed to store image data in cache");
@@ -1514,6 +1517,7 @@ grman_update_layers(
 
     // Iterate over all visible refs and create render data
     self->render_data.count = 0;
+    self->render_data.has_hdr = false;
 
     for (image_map_itr imgitr = vt_first(&self->images_by_internal_id); !vt_is_end(imgitr);) {
         Image *img = imgitr.data->val;
@@ -1570,6 +1574,7 @@ grman_update_layers(
             zero_at_ptr(rd);
             rd->dest_rect = r;
             rd->src_rect = ref->src_rect;
+            self->render_data.has_hdr |= img->root_frame.is_float;
             self->render_data.count++;
             rd->z_index = ref->z_index;
             rd->image_id = img->internal_id;
@@ -1649,7 +1654,7 @@ change_gap(Image *img, Frame *f, int32_t gap) {
 
 typedef struct {
     uint8_t *buf;
-    bool is_4byte_aligned, is_opaque, transient;
+    bool is_4byte_aligned, is_opaque, transient, is_float;
 } CoalescedFrameData;
 
 typedef struct {
@@ -1727,6 +1732,7 @@ get_coalesced_frame_data_standalone(const Image *img, const Frame *f, uint8_t *f
         ans.buf = frame_data;
         ans.is_4byte_aligned = f->is_4byte_aligned;
         ans.is_opaque = f->is_opaque;
+        ans.is_float = f->is_float;
         return ans;
     }
     const unsigned bytes_per_pixel = f->is_opaque ? 3 : 4;
@@ -1829,7 +1835,7 @@ update_current_frame(GraphicsManager *self, Image *img, const CoalescedFrameData
         }
         data = &cfd;
     }
-    upload_to_gpu(self, img, data->is_opaque, data->is_4byte_aligned, data->buf);
+    upload_to_gpu(self, img, data->is_opaque, data->is_float, data->is_4byte_aligned, data->buf);
     if (needs_load) free(data->buf);
     img->current_frame_shown_at = monotonic();
 }
@@ -1874,6 +1880,7 @@ handle_animation_frame_load_command(GraphicsManager *self, GraphicsCommand *g, I
         self->currently_loading.loading_for = (const ImageAndFrame){0};
         if (g->data_width > MAX_IMAGE_DIMENSION || g->data_height > MAX_IMAGE_DIMENSION)
             ABRT("EINVAL", "Image too large, width or height greater than %u", MAX_IMAGE_DIMENSION);
+        if (img->root_frame.is_float || fmt == RGBA16F) ABRT("EINVAL", "Animation frames are not supported for HDR images");
         if (!initialize_load_data(self, g, img, tt, fmt, frame_number - 1)) return NULL;
     }
     LoadData *load_data = &self->currently_loading;
@@ -2169,6 +2176,10 @@ handle_compose_command(GraphicsManager *self, bool *is_dirty, const GraphicsComm
         set_command_failed_response("ENOENT", "No destination frame number %u exists in image id: %u\n", g->other_frame_number, img->client_id);
         return;
     }
+    if (img->root_frame.is_float) {
+        set_command_failed_response("EINVAL", "Composition is not supported for HDR images");
+        return;
+    }
     // Use uint64_t to avoid overflow when testing for validity. All dimensions are 32bit numbers.
     const uint64_t width = g->width ? g->width : img->width;
     const uint64_t height = g->height ? g->height : img->height;
@@ -2403,6 +2414,11 @@ grman_scroll_images(GraphicsManager *self, const ScrollData *data, CellPixelSize
 bool
 grman_has_any_images(GraphicsManager *self) {
     return vt_size(&self->images_by_internal_id) > 0;
+}
+
+bool
+grman_has_hdr_images(GraphicsManager *self) {
+    return self->render_data.has_hdr;
 }
 
 static bool
@@ -2804,7 +2820,7 @@ image_as_dict(GraphicsManager *self, Image *img) {
         U(animation_duration),
         "data",
         cfd.buf,
-        (Py_ssize_t)((cfd.is_opaque ? 3 : 4) * img->width * img->height),
+        (Py_ssize_t)((cfd.is_opaque ? 3 : cfd.is_float ? 8 : 4) * img->width * img->height),
         "extra_frames",
         frames);
     free(cfd.buf);

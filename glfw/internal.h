@@ -315,7 +315,7 @@ struct _GLFWwndconfig {
     bool scaleToMonitor;
     int blur_radius;
     struct {
-        bool retina;
+        bool retina, hdr;
         int color_space;
         char frameName[256];
     } ns;
@@ -880,6 +880,8 @@ unsigned long long _glfwPlatformAddTimer(monotonic_t interval, bool repeats, GLF
 void _glfwPlatformUpdateTimer(unsigned long long timer_id, monotonic_t interval, bool enabled);
 void _glfwPlatformRemoveTimer(unsigned long long timer_id);
 int _glfwPlatformSetWindowBlur(_GLFWwindow *handle, int value);
+float _glfwPlatformGetWindowHDRHeadroom(_GLFWwindow *window);
+void _glfwPlatformSetWindowHDRActive(_GLFWwindow *window, bool active);
 MonitorGeometry _glfwPlatformGetMonitorGeometry(_GLFWmonitor *monitor);
 bool _glfwPlatformGrabKeyboard(bool grab);
 void glfw_handle_scroll_event_for_momentum(_GLFWwindow *w, const GLFWScrollEvent *ev, bool stopped, bool is_finger_based);

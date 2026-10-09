@@ -4098,3 +4098,11 @@ _glfwPlatformDragDataReady(const char *mime_type, const char *data UNUSED, size_
     return 0;
 }
 // }}}
+
+float
+_glfwPlatformGetWindowHDRHeadroom(_GLFWwindow *window UNUSED) {
+    return 1.f;
+}
+
+void
+_glfwPlatformSetWindowHDRActive(_GLFWwindow *window UNUSED, bool active UNUSED) {}
