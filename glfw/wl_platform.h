@@ -59,6 +59,7 @@ typedef VkBool32(APIENTRY *PFN_vkGetPhysicalDeviceWaylandPresentationSupportKHR)
 #include "wayland-primary-selection-unstable-v1-client-protocol.h"
 #include "wayland-xdg-activation-v1-client-protocol.h"
 #include "wayland-cursor-shape-v1-client-protocol.h"
+#include "wayland-tablet-unstable-v2-client-protocol.h"
 #include "wayland-fractional-scale-v1-client-protocol.h"
 #include "wayland-viewporter-client-protocol.h"
 #include "wayland-kwin-blur-v1-client-protocol.h"
@@ -339,6 +340,20 @@ typedef struct _GLFWWaylandTouchPoint {
     double x, y;
 } _GLFWWaylandTouchPoint;
 
+// A tablet tool. Its events collect in ev and are reported at the frame event
+typedef struct _GLFWWaylandTabletTool {
+    struct zwp_tablet_tool_v2 *tool;
+    struct wp_cursor_shape_device_v1 *cursor_shape_device;
+    // The window the tool is in proximity over, and the serial of its proximity_in
+    _GLFWwindow *window;
+    uint32_t serial;
+    GLFWTabletEvent ev;
+    // The changes since the last frame, which become pointer events when the
+    // application does not consume the tablet event
+    bool entered, left, moved;
+    unsigned pressed, released;  // bits numbered by GLFW mouse button
+} _GLFWWaylandTabletTool;
+
 // Wayland-specific global data
 //
 typedef struct _GLFWlibraryWayland {
@@ -393,6 +408,9 @@ typedef struct _GLFWlibraryWayland {
     struct zwp_keyboard_shortcuts_inhibit_manager_v1 *keyboard_shortcuts_inhibit_manager;
     struct zwp_pointer_gestures_v1 *pointer_gestures;
     struct zwp_pointer_gesture_hold_v1 *pointer_gesture_hold;
+    struct zwp_tablet_manager_v2 *tablet_manager;
+    struct zwp_tablet_seat_v2 *tablet_seat;
+    _GLFWWaylandTabletTool *tablet_tool;  // the tool in proximity, if any
     struct zxdg_output_manager_v1 *xdg_output_manager;
     struct zwlr_virtual_pointer_manager_v1 *virtual_pointer_manager;
     struct zwlr_virtual_pointer_v1 *virtual_pointer;
@@ -548,6 +566,7 @@ struct wl_cursor *_glfwLoadCursor(GLFWCursorShape, struct wl_cursor_theme *);
 void destroy_data_offer(_GLFWWaylandDataOffer *);
 const char *_glfwWaylandCompositorName(void);
 void _glfwWaylandConfirmDragSession(void);
+void _glfwWaylandSetTabletToolCursor(_GLFWWaylandTabletTool *tool);
 
 typedef struct wayland_cursor_shape {
     int which;

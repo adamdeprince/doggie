@@ -321,6 +321,14 @@ _glfwInputTouch(_GLFWwindow *window, const GLFWTouchEvent *ev) {
     if (window->callbacks.touch) window->callbacks.touch((GLFWwindow *)window, ev);
 }
 
+// Notifies shared code of a tablet tool event, returning whether the
+// application consumed it
+//
+bool
+_glfwInputTablet(_GLFWwindow *window, const GLFWTabletEvent *ev) {
+    return window->callbacks.tablet && window->callbacks.tablet((GLFWwindow *)window, ev);
+}
+
 // Notifies shared code of a mouse button click event
 //
 void
@@ -1104,6 +1112,16 @@ glfwSetTouchCallback(GLFWwindow *handle, GLFWtouchfun cbfun) {
 
     _GLFW_REQUIRE_INIT_OR_RETURN(NULL);
     _GLFW_SWAP_POINTERS(window->callbacks.touch, cbfun);
+    return cbfun;
+}
+
+GLFWAPI GLFWtabletfun
+glfwSetTabletCallback(GLFWwindow *handle, GLFWtabletfun cbfun) {
+    _GLFWwindow *window = (_GLFWwindow *)handle;
+    assert(window != NULL);
+
+    _GLFW_REQUIRE_INIT_OR_RETURN(NULL);
+    _GLFW_SWAP_POINTERS(window->callbacks.tablet, cbfun);
     return cbfun;
 }
 

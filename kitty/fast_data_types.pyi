@@ -1399,6 +1399,11 @@ def mouse_selection(os_window_id: int, tab_id: int, window_id: int, code: int, b
 def send_mouse_event(
     screen: Screen, cell_x: int, cell_y: int, button: int, action: int, mods: int, pixel_x: int = 0, pixel_y: int = 0, in_left_half_of_cell: bool = False
 ) -> bool: ...
+def send_pointer_report(
+    screen: Screen, kind: int, phase: int, device: int, contact: int, x: int, y: int, buttons: int = 0, mods: int = 0, tool: int = 1, valid: int = 0,
+    p: int = 0, tx: int = 0, ty: int = 0, twist: int = 0, tangent: int = 0, z: int = 0, dist: int = 0, wheel: int = 0, wclicks: int = 0,
+    serial: int = 0, hwid: int = 0, vid: int = 0, pid: int = 0
+) -> bool: ...
 def set_window_logo(os_window_id: int, tab_id: int, window_id: int, path: str, position: str, alpha: float, png_data: bytes = b'') -> None:
     pass
 

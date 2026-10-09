@@ -882,6 +882,11 @@ touch_callback(GLFWwindow *w, const GLFWTouchEvent *ev) {
         }
         timed_debug_print("\x1b[33mTouch\x1b[m %s modifiers: %s%s\n", touch_event_type_name(ev->type), format_mods(ev->keyboard_modifiers), points);
     }
+    if (touch_pointer_event(ev)) {
+        request_tick_callback();
+        global_state.callback_os_window = NULL;
+        return;
+    }
     const int mods = ev->keyboard_modifiers;
     // The OS window of a gesture can close before its fingers lift, and then it
     // gets no more events
@@ -928,6 +933,24 @@ touch_callback(GLFWwindow *w, const GLFWTouchEvent *ev) {
     if (ev->type == GLFW_TOUCH_END) touch_gesture_reset();
     request_tick_callback();
     global_state.callback_os_window = NULL;
+}
+
+static bool
+tablet_callback(GLFWwindow *w, const GLFWTabletEvent *ev) {
+    if (!set_callback_window(w)) return false;
+    OSWindow *osw = global_state.callback_os_window;
+    osw->last_mouse_activity_at = monotonic();
+    if (ev->type == GLFW_TABLET_POINT) {
+        osw->mouse_x = ev->x * osw->viewport_x_ratio;
+        osw->mouse_y = ev->y * osw->viewport_y_ratio;
+    }
+    const bool consumed = is_window_ready_for_callbacks() && tablet_event(ev);
+    debug_input(
+        "\x1b[33mTablet\x1b[m type: %d tool: %d buttons: %u axes: %u x: %.1f y: %.1f pressure: %.3f consumed: %d\n",
+        ev->type, ev->tool, ev->buttons, ev->axes, ev->x, ev->y, ev->pressure, consumed);
+    if (consumed) request_tick_callback();
+    global_state.callback_os_window = NULL;
+    return consumed;
 }
 // }}}
 
@@ -2504,6 +2527,7 @@ create_os_window(PyObject UNUSED *self, PyObject *args, PyObject *kw) {
     glfwSetCursorEnterCallback(glfw_window, cursor_enter_callback);
     glfwSetScrollCallback(glfw_window, scroll_callback);
     glfwSetTouchCallback(glfw_window, touch_callback);
+    glfwSetTabletCallback(glfw_window, tablet_callback);
     glfwSetKeyboardCallback(glfw_window, key_callback);
 
     glfwSetDragSourceCallback(glfw_window, drag_source_callback);

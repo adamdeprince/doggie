@@ -618,6 +618,68 @@ typedef struct GLFWTouchEvent {
     const GLFWTouchPoint *points;
 } GLFWTouchEvent;
 
+// A graphics tablet tool is reported with everything it measures beyond the
+// pointer position. The pointer events for the same input follow only when
+// the tablet callback does not consume the event.
+typedef enum GLFWTabletEventType {
+    // The position, buttons and measurements of a tool in proximity
+    GLFW_TABLET_POINT = 1,
+    // The tool left proximity
+    GLFW_TABLET_OUT = 2,
+    // The system took the tool over, discard what it did so far
+    GLFW_TABLET_CANCEL = 3,
+} GLFWTabletEventType;
+
+typedef enum GLFWTabletTool {
+    GLFW_TABLET_TOOL_UNKNOWN = 0,
+    GLFW_TABLET_TOOL_PEN = 1,
+    GLFW_TABLET_TOOL_ERASER = 2,
+    GLFW_TABLET_TOOL_BRUSH = 3,
+    GLFW_TABLET_TOOL_PENCIL = 4,
+    GLFW_TABLET_TOOL_AIRBRUSH = 5,
+    GLFW_TABLET_TOOL_MOUSE = 6,
+    GLFW_TABLET_TOOL_LENS = 7,
+} GLFWTabletTool;
+
+// The measurements a tool reports, as bits of GLFWTabletEvent.axes
+typedef enum GLFWTabletAxis {
+    GLFW_TABLET_PRESSURE = 1,
+    GLFW_TABLET_TILT = 2,
+    GLFW_TABLET_TWIST = 4,
+    GLFW_TABLET_TANGENT = 8,
+    GLFW_TABLET_Z = 16,
+    GLFW_TABLET_DISTANCE = 32,
+    GLFW_TABLET_WHEEL = 64,
+} GLFWTabletAxis;
+
+// The buttons held on a tool, as bits of GLFWTabletEvent.buttons
+typedef enum GLFWTabletButton {
+    GLFW_TABLET_BUTTON_TIP = 1,
+    GLFW_TABLET_BUTTON_BARREL = 2,
+    GLFW_TABLET_BUTTON_BARREL2 = 4,
+    GLFW_TABLET_BUTTON_BACK = 8,
+    GLFW_TABLET_BUTTON_FORWARD = 16,
+    GLFW_TABLET_BUTTON_BARREL3 = 32,
+} GLFWTabletButton;
+
+typedef struct GLFWTabletEvent {
+    GLFWTabletEventType type;
+    GLFWTabletTool tool;
+    int keyboard_modifiers;
+    unsigned buttons, axes;
+    // In window content coordinates, the same as the cursor position
+    double x, y;
+    double pressure, distance;            // 0 to 1
+    double tilt_x, tilt_y, twist, wheel;  // degrees, tilt positive to the right and bottom
+    double tangent;                       // -1 to 1, the airbrush wheel
+    double z;                             // device units
+    int wheel_clicks;
+    // device identifies the tool while it is in proximity. The rest are zero
+    // when the system does not report them
+    uint64_t device, serial, hardware_id;
+    unsigned vendor_id, product_id;
+} GLFWTabletEvent;
+
 /*! @defgroup joysticks Joysticks
  *  @brief Joystick IDs.
  *
@@ -1850,6 +1912,17 @@ typedef void (*GLFWscrollfun)(GLFWwindow *, const GLFWScrollEvent *);
  *  @ingroup input
  */
 typedef void (*GLFWtouchfun)(GLFWwindow *, const GLFWTouchEvent *);
+
+/*! @brief The function pointer type for tablet callbacks.
+ *
+ *  Returns true when the application consumed the event and does not want
+ *  the pointer events the same input would otherwise produce.
+ *
+ *  @sa @ref glfwSetTabletCallback
+ *
+ *  @ingroup input
+ */
+typedef bool (*GLFWtabletfun)(GLFWwindow *, const GLFWTabletEvent *);
 
 /*! @brief The function pointer type for key callbacks.
  *
@@ -5101,6 +5174,8 @@ GLFWAPI GLFWscrollfun glfwSetScrollCallback(GLFWwindow *window, GLFWscrollfun ca
  *  @ingroup input
  */
 GLFWAPI GLFWtouchfun glfwSetTouchCallback(GLFWwindow *window, GLFWtouchfun callback);
+
+GLFWAPI GLFWtabletfun glfwSetTabletCallback(GLFWwindow *window, GLFWtabletfun callback);
 
 GLFWAPI GLFWliveresizefun glfwSetLiveResizeCallback(GLFWwindow *window, GLFWliveresizefun callback);
 

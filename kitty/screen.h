@@ -23,6 +23,16 @@ typedef struct DnDCommand {
     uint32_t operation;
 } DnDCommand;
 
+typedef enum PointerPhase { POINTER_HOVER, POINTER_DOWN, POINTER_MOVE, POINTER_UP, POINTER_CANCEL, POINTER_OUT } PointerPhase;
+typedef enum PointerKind { POINTER_PEN = 1, POINTER_TOUCH = 2 } PointerKind;
+
+// A tablet pointer protocol event, see docs/tablet-protocol.rst
+typedef struct PointerReport {
+    int kind, phase, contact, x, y, mods, tool, p, tx, ty, twist, tangent, z, dist, wheel, wclicks;
+    unsigned buttons, valid, vid, pid;
+    uint64_t device, serial, hwid;
+} PointerReport;
+
 typedef struct {
     bool mLNM, mIRM, mDECTCEM, mDECSCNM, mDECOM, mDECAWM, mDECCOLM, mDECARM, mDECCKM, mCOLOR_PREFERENCE_NOTIFICATION, mBRACKETED_PASTE, mFOCUS_TRACKING,
         mDECSACE, mHANDLE_TERMIOS_SIGNALS, mINBAND_RESIZE_NOTIFICATION, mPASTE_EVENTS, mVISIBILITY_REPORTS;
@@ -226,6 +236,11 @@ typedef struct {
         bool active;
         DnDCommand metadata;
     } dnd_chunking;
+    struct {
+        unsigned version;  // of the tablet pointer protocol the child asked for, 0 when off
+        unsigned num_contacts;
+        PointerReport contacts[8];
+    } pointer;
 } Screen;
 
 #define pixel_scroll_enabled(screen) (OPT(pixel_scroll) && !screen->paused_rendering.expires_at && screen->linebuf == screen->main_linebuf)
@@ -291,6 +306,9 @@ void screen_handle_kitty_dcs(Screen *, const char *callback_name, PyObject *cmd)
 void set_title(Screen *self, PyObject *);
 void osc_context(Screen *self, PyObject *ctx);
 void desktop_notify(Screen *self, unsigned int, PyObject *);
+void screen_tablet_pointer(Screen *self, const char *data, size_t sz);
+void screen_pointer_cancel(Screen *self, int kind);
+bool screen_pointer_report(Screen *self, PointerReport *r);
 void set_icon(Screen *self, PyObject *);
 void set_dynamic_color(Screen *self, unsigned int code, PyObject *);
 void color_control(Screen *self, unsigned int code, PyObject *);

@@ -12,9 +12,10 @@ from kitty.fast_data_types import (
     create_mock_window,
     mock_mouse_selection,
     send_mock_mouse_event_to_window,
+    send_pointer_report,
 )
 
-from .base import BaseTest
+from .base import BaseTest, parse_bytes
 
 
 def send_mouse_event(
@@ -455,3 +456,39 @@ class TestMouse(BaseTest):
 
         # A fragment too small to be a detent does not scroll.
         self.ae(0, sum(run(8)))
+
+    def test_tablet_protocol(self):
+        s = self.create_screen()
+        c = s.callbacks
+
+        def send(body):
+            c.clear()
+            parse_bytes(s, f'\x1b]777;tablet-pointer;{body}\x1b\\'.encode())
+
+        def report(phase, **kw):
+            c.clear()
+            return send_pointer_report(s, 1, phase, 7, 0, 256, 512, **kw)
+
+        send('v=2:op=query:id=42')
+        self.ae(c.wtcbuf, b'\x1b]777;tablet-pointer;v=2:op=cap:id=42:caps=3:w=50:h=100:cw=10:ch=20\x1b\\')
+        self.assertFalse(report(1))
+        send('v=2:op=mode:mode=1')
+        self.assertTrue(report(1, buttons=1, tool=2, valid=3, p=100, tx=-10, ty=20, serial=99))
+        self.ae(
+            c.wtcbuf,
+            b'\x1b]777;tablet-pointer;v=2:op=event:kind=1:phase=1:device=7:contact=0:x=256:y=512:buttons=1:mods=0:tool=2:valid=3:p=100:tx=-10:ty=20:serial=99\x1b\\',
+        )
+        # Turning the mode off cancels the stroke, whose remaining reports are then dropped
+        send('v=2:op=mode:mode=0')
+        self.ae(
+            c.wtcbuf,
+            b'\x1b]777;tablet-pointer;v=2:op=event:kind=1:phase=4:device=7:contact=0:x=256:y=512:buttons=0:mods=0:tool=2:valid=3:p=0:tx=-10:ty=20:serial=99\x1b\\',
+        )
+        send('v=2:op=mode:mode=1')
+        self.assertFalse(report(3))
+        # A version 1 client gets only what version 1 defines
+        send('v=1:op=mode:mode=1')
+        report(0, tool=5, valid=33, p=5, dist=9, serial=99)
+        self.ae(c.wtcbuf, b'\x1b]777;tablet-pointer;v=1:op=event:kind=1:phase=0:device=7:contact=0:x=256:y=512:buttons=0:mods=0:tool=1:valid=1:p=5\x1b\\')
+        report(5)
+        self.ae(c.wtcbuf, b'')

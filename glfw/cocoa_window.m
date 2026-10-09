@@ -490,6 +490,90 @@ translateFlags(NSUInteger flags) {
     return mods;
 }
 
+// Tablet {{{
+// The capability mask bits in the proximity events of Wacom's driver
+#define TABLET_CAP_TILT 0x0180
+#define TABLET_CAP_Z 0x0200
+#define TABLET_CAP_PRESSURE 0x0400
+#define TABLET_CAP_TANGENT 0x0800
+#define TABLET_CAP_ROTATION 0x2000
+
+static _GLFWTabletToolNS *
+tabletTool(unsigned long device_id, bool create) {
+    _GLFWTabletToolNS *free_slot = NULL;
+    for (size_t i = 0; i < arraysz(_glfw.ns.tablet_tools); i++) {
+        _GLFWTabletToolNS *t = _glfw.ns.tablet_tools + i;
+        if (t->in_proximity && t->device_id == device_id) return t;
+        if (!t->in_proximity) free_slot = t;
+    }
+    if (!create || !free_slot) return NULL;
+    *free_slot = (_GLFWTabletToolNS){.in_proximity = true, .device_id = device_id};
+    return free_slot;
+}
+
+// Reports the tablet data carried by mouse events that come from a tablet and
+// by pure tablet events, returning true when the application consumed it
+static bool
+handleTabletEvent(_GLFWwindow *window, NSEvent *event) {
+    const NSEventType type = [event type];
+    const bool proximity = type == NSEventTypeTabletProximity || (type != NSEventTypeTabletPoint && [event subtype] == NSEventSubtypeTabletProximity);
+    if (proximity) {
+        const bool entering = [event isEnteringProximity];
+        _GLFWTabletToolNS *t = tabletTool((unsigned long)[event deviceID], entering);
+        if (!t) return false;
+        if (entering) {
+            t->capabilities = (unsigned)[event capabilityMask];
+            t->serial = [event pointingDeviceSerialNumber];
+            t->hardware_id = [event uniqueID];
+            t->vendor_id = (unsigned)[event vendorID];
+            t->product_id = (unsigned)[event tabletID];
+            switch ([event pointingDeviceType]) {
+                case NSPointingDeviceTypePen: t->tool = GLFW_TABLET_TOOL_PEN; break;
+                case NSPointingDeviceTypeEraser: t->tool = GLFW_TABLET_TOOL_ERASER; break;
+                case NSPointingDeviceTypeCursor: t->tool = GLFW_TABLET_TOOL_MOUSE; break;
+                default: t->tool = GLFW_TABLET_TOOL_UNKNOWN; break;
+            }
+        } else {
+            t->in_proximity = false;
+            GLFWTabletEvent ev = {.type = GLFW_TABLET_OUT, .tool = t->tool, .keyboard_modifiers = translateFlags([event modifierFlags]), .device = t->device_id};
+            _glfwInputTablet(window, &ev);
+        }
+        return false;
+    }
+    if (type != NSEventTypeTabletPoint && [event subtype] != NSEventSubtypeTabletPoint) return false;
+    const _GLFWTabletToolNS *t = tabletTool((unsigned long)[event deviceID], false);
+    const unsigned caps = t ? t->capabilities : 0;
+    const NSEventButtonMask held = [event buttonMask];
+    const NSPoint tilt = [event tilt];
+    const NSPoint pos = [event locationInWindow];
+    GLFWTabletEvent ev = {
+        .type = GLFW_TABLET_POINT,
+        .tool = t ? t->tool : GLFW_TABLET_TOOL_PEN,
+        .keyboard_modifiers = translateFlags([event modifierFlags]),
+        .buttons = (held & NSEventButtonMaskPenTip ? GLFW_TABLET_BUTTON_TIP : 0) | (held & NSEventButtonMaskPenLowerSide ? GLFW_TABLET_BUTTON_BARREL : 0) |
+                   (held & NSEventButtonMaskPenUpperSide ? GLFW_TABLET_BUTTON_BARREL2 : 0),
+        .axes = !caps ? (GLFW_TABLET_PRESSURE | GLFW_TABLET_TILT)
+                      : ((caps & TABLET_CAP_PRESSURE ? GLFW_TABLET_PRESSURE : 0) | (caps & TABLET_CAP_TILT ? GLFW_TABLET_TILT : 0) |
+                         (caps & TABLET_CAP_ROTATION ? GLFW_TABLET_TWIST : 0) | (caps & TABLET_CAP_TANGENT ? GLFW_TABLET_TANGENT : 0) | (caps & TABLET_CAP_Z ? GLFW_TABLET_Z : 0)),
+        .x = pos.x,
+        .y = [window->ns.view frame].size.height - pos.y,
+        .pressure = [event pressure],
+        // A fraction of the largest tilt the tablet reports, 60 degrees on Wacom tablets
+        .tilt_x = tilt.x * 60,
+        .tilt_y = -tilt.y * 60,
+        .twist = [event rotation],
+        .tangent = [event tangentialPressure],
+        .z = [event absoluteZ],
+        .device = (uint64_t)[event deviceID],
+        .serial = t ? t->serial : 0,
+        .hardware_id = t ? t->hardware_id : 0,
+        .vendor_id = t ? t->vendor_id : 0,
+        .product_id = t ? t->product_id : 0,
+    };
+    return _glfwInputTablet(window, &ev);
+}
+// }}}
+
 // Apply remap_modifier to Cocoa modifier flags. This has to happen BEFORE the
 // flags are used to produce text - UCKeyTranslate() below, and Cocoa's own
 // interpretKeyEvents: - for the same reason as on Linux: Option produces text
@@ -1037,6 +1121,7 @@ static void _glfwUpdateNotchCover(_GLFWwindow *);
 
 - (void)mouseDown:(NSEvent *)event {
     if (!window) return;
+    if (handleTabletEvent(window, event)) return;
     _glfwInputMouseClick(window, GLFW_MOUSE_BUTTON_LEFT, GLFW_PRESS, translateFlags([event modifierFlags]));
 }
 
@@ -1046,11 +1131,13 @@ static void _glfwUpdateNotchCover(_GLFWwindow *);
 
 - (void)mouseUp:(NSEvent *)event {
     if (!window) return;
+    if (handleTabletEvent(window, event)) return;
     _glfwInputMouseClick(window, GLFW_MOUSE_BUTTON_LEFT, GLFW_RELEASE, translateFlags([event modifierFlags]));
 }
 
 - (void)mouseMoved:(NSEvent *)event {
     if (!window) return;
+    if (handleTabletEvent(window, event)) return;
     if (window->cursorMode == GLFW_CURSOR_DISABLED) {
         const double dx = [event deltaX] - window->ns.cursorWarpDeltaX;
         const double dy = [event deltaY] - window->ns.cursorWarpDeltaY;
@@ -1075,6 +1162,7 @@ static void _glfwUpdateNotchCover(_GLFWwindow *);
 
 - (void)rightMouseDown:(NSEvent *)event {
     if (!window) return;
+    if (handleTabletEvent(window, event)) return;
     _glfwInputMouseClick(window, GLFW_MOUSE_BUTTON_RIGHT, GLFW_PRESS, translateFlags([event modifierFlags]));
 }
 
@@ -1084,11 +1172,13 @@ static void _glfwUpdateNotchCover(_GLFWwindow *);
 
 - (void)rightMouseUp:(NSEvent *)event {
     if (!window) return;
+    if (handleTabletEvent(window, event)) return;
     _glfwInputMouseClick(window, GLFW_MOUSE_BUTTON_RIGHT, GLFW_RELEASE, translateFlags([event modifierFlags]));
 }
 
 - (void)otherMouseDown:(NSEvent *)event {
     if (!window) return;
+    if (handleTabletEvent(window, event)) return;
     _glfwInputMouseClick(window, (int)[event buttonNumber], GLFW_PRESS, translateFlags([event modifierFlags]));
 }
 
@@ -1098,7 +1188,16 @@ static void _glfwUpdateNotchCover(_GLFWwindow *);
 
 - (void)otherMouseUp:(NSEvent *)event {
     if (!window) return;
+    if (handleTabletEvent(window, event)) return;
     _glfwInputMouseClick(window, (int)[event buttonNumber], GLFW_RELEASE, translateFlags([event modifierFlags]));
+}
+
+- (void)tabletPoint:(NSEvent *)event {
+    if (window) handleTabletEvent(window, event);
+}
+
+- (void)tabletProximity:(NSEvent *)event {
+    if (window) handleTabletEvent(window, event);
 }
 
 - (void)mouseExited:(NSEvent *)event {
