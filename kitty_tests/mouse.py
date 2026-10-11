@@ -432,9 +432,13 @@ class TestMouse(BaseTest):
             return send_scroll_report(s, x_offset, y_offset, **kw)
 
         send('v=1:op=query:id=7')
-        self.ae(c.wtcbuf, b'\x1b]777;scroll;v=1:op=cap:id=7:caps=1\x1b\\')
+        self.ae(c.wtcbuf, b'\x1b]777;scroll;v=1:op=cap:id=7:caps=1:mode=0\x1b\\')
         self.assertFalse(report(0, 3))
         send('v=1:op=mode:mode=1')
+        send('v=1:op=mode')
+        self.ae(c.wtcbuf, b'\x1b]777;scroll;v=1:op=mode:mode=1\x1b\\')
+        send('v=1:op=query:id=8')
+        self.ae(c.wtcbuf, b'\x1b]777;scroll;v=1:op=cap:id=8:caps=1:mode=1\x1b\\')
         # a trackpad: precise pixels, a finger gesture in progress, shift held
         self.assertTrue(report(0, -2.5, offset_type=2, phase=3, mods=1, x=33.4, y=12))
         self.ae(c.wtcbuf, b'\x1b]777;scroll;v=1:op=event:dx=0:dy=250:x=33:y=12:mods=1:src=1:phase=2\x1b\\')

@@ -39,10 +39,11 @@ A program asks the terminal whether it supports the protocol::
 ``id`` is a non-negative 31 bit integer of the program's choosing, echoed in
 the reply. A supporting terminal answers::
 
-    <OSC> 777 ; scroll ; v=1 : op=cap : id=7 : caps=1 <ST>
+    <OSC> 777 ; scroll ; v=1 : op=cap : id=7 : caps=1 : mode=0 <ST>
 
 ``caps`` is a bit set, of which only ``1`` is defined: the terminal reports
-pixel distances. A terminal that does not support the protocol ignores the
+pixel distances. ``mode`` is the current state of the mode described below.
+A terminal that does not support the protocol ignores the
 query, so a program must time out and fall back to mouse reporting. A query
 does not change the mode.
 
@@ -61,6 +62,14 @@ scroll. The mode is local to the window and reset by ``RIS``. Programs must
 turn it off when they exit, suspend or fail, and turn it back on when
 resumed. Multiplexers keep it with the rest of the terminal state. There is
 no user setting that overrides the program's choice.
+
+A ``mode`` request without a ``mode`` field reads the state instead of
+changing it, and is answered with::
+
+    <OSC> 777 ; scroll ; v=1 : op=mode : mode=1 <ST>
+
+A program resuming after a reconnection reads the mode to learn whether it
+survived, rather than assuming it did.
 
 Reports
 -----------

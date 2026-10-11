@@ -1594,9 +1594,15 @@ screen_scroll_protocol(Screen *screen, const char *data, size_t sz) {
     }
     if (v != 1) return;
     if (!strcmp(op, "query") && id >= 0) {
-        snprintf(reply, sizeof(reply), "777;scroll;v=1:op=cap:id=%d:caps=1", id);
+        snprintf(reply, sizeof(reply), "777;scroll;v=1:op=cap:id=%d:caps=1:mode=%d", id, screen->scroll_reports != 0);
         write_escape_code_to_child(screen, ESC_OSC, reply);
-    } else if (!strcmp(op, "mode") && mode >= 0) screen->scroll_reports = mode ? v : 0;
+    } else if (!strcmp(op, "mode")) {
+        if (mode >= 0) screen->scroll_reports = mode ? v : 0;
+        else {  // a read
+            snprintf(reply, sizeof(reply), "777;scroll;v=1:op=mode:mode=%d", screen->scroll_reports != 0);
+            write_escape_code_to_child(screen, ESC_OSC, reply);
+        }
+    }
 }
 
 static int
