@@ -105,18 +105,27 @@ color_vec4(GLint location, color_type color, GLfloat alpha) {
 // Write a color into a std140 float4 whose fourth component is unused. Uses
 // the same table as the shaders so the result is identical to converting the
 // color in the shader.
-float
-effective_hdr_headroom(const OSWindow *w) {
-    if (!OPT(hdr)) return 1.f;
-    return MAX(1.f, MIN(w->hdr_headroom, OPT(hdr_max_headroom)));
-}
-
 static void
 linear_color_vec4(GLfloat *dest, color_type color) {
     dest[0] = srgb_lut[(color >> 16) & 0xFF];
     dest[1] = srgb_lut[(color >> 8) & 0xFF];
     dest[2] = srgb_lut[color & 0xFF];
     dest[3] = 0.f;
+}
+
+bool
+backbuffer_is_float(void) {
+    // An HDR window has a linear float framebuffer rather than an sRGB one
+    GLint fb = 0, component_type = 0;
+    glGetIntegerv(GL_DRAW_FRAMEBUFFER_BINDING, &fb);
+    if (!fb) glGetFramebufferAttachmentParameteriv(GL_FRAMEBUFFER, GL_BACK_LEFT, GL_FRAMEBUFFER_ATTACHMENT_COMPONENT_TYPE, &component_type);
+    return component_type == GL_FLOAT;
+}
+
+float
+effective_hdr_headroom(const OSWindow *w) {
+    if (!OPT(hdr)) return 1.f;
+    return MAX(1.f, MIN(w->hdr_headroom, OPT(hdr_max_headroom)));
 }
 
 
@@ -1188,7 +1197,7 @@ load_alpha_mask_texture(size_t width, size_t height, uint8_t *canvas) {
 }
 
 static void
-setup_texture_as_render_target(unsigned width, unsigned height, GLuint *texture_id, GLuint *framebuffer_id) {
+setup_texture_as_render_target(unsigned width, unsigned height, GLuint *texture_id, GLuint *framebuffer_id, bool is_float) {
     glGenTextures(1, texture_id);
     glGenFramebuffers(1, framebuffer_id);
     glBindTexture(GL_TEXTURE_2D, *texture_id);
@@ -1202,10 +1211,11 @@ setup_texture_as_render_target(unsigned width, unsigned height, GLuint *texture_
         bool ok;
         int fmt;
     } status = {false, GL_RGBA16};
-    glTexImage2D(GL_TEXTURE_2D, 0, status.fmt, width, height, 0, GL_RGBA, GL_UNSIGNED_BYTE, NULL);
+    // An HDR window renders in linear light above 1.0, so its layers must be float
+    glTexImage2D(GL_TEXTURE_2D, 0, is_float ? GL_RGBA16F : status.fmt, width, height, 0, GL_RGBA, is_float ? GL_FLOAT : GL_UNSIGNED_BYTE, NULL);
     bind_framebuffer_for_output(*framebuffer_id);
     glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, *texture_id, 0);
-    if (!status.ok) {
+    if (!status.ok && !is_float) {
         if (check_framebuffer_status() == NULL) {
             status.ok = true;
         } else {
@@ -1217,7 +1227,7 @@ setup_texture_as_render_target(unsigned width, unsigned height, GLuint *texture_
                 status.fmt = GL_RGBA;
                 free_framebuffer(framebuffer_id);
                 free_texture(texture_id);
-                setup_texture_as_render_target(width, height, texture_id, framebuffer_id);
+                setup_texture_as_render_target(width, height, texture_id, framebuffer_id, is_float);
                 log_error("WARNING: Your GPU driver does not support 16bit textures as framebuffer targets, some colors may be slightly inaccurate.");
             } else {
                 fatal("Your GPU driver does not support indirect rendering to a GL_RGBA texture via a framebuffer");
@@ -2481,7 +2491,7 @@ blank_os_window(OSWindow *osw) {
             if (s) { color = colorprofile_to_color(s->color_profile, s->color_profile->overridden.default_bg, s->color_profile->configured.default_bg).rgb; }
         }
     }
-    blank_canvas(effective_os_window_alpha(osw), color, true);
+    blank_canvas(effective_os_window_alpha(osw), color, !osw->linear_output);
 }
 
 static void
@@ -2490,7 +2500,7 @@ start_os_window_rendering(OSWindow *os_window, Tab *tab) {
     if (os_window->live_resize.in_progress) blank_os_window(os_window);
     if (os_window->needs_layers) {
         // Ensure the global shared texture is large enough for this window
-        if (global_state.layers_render_texture.width < os_window->viewport_width || global_state.layers_render_texture.height < os_window->viewport_height) {
+        if (global_state.layers_render_texture.width < os_window->viewport_width || global_state.layers_render_texture.height < os_window->viewport_height || global_state.layers_render_texture.is_float != os_window->linear_output) {
             if (global_state.layers_render_texture.texture_id) free_texture(&global_state.layers_render_texture.texture_id);
             if (global_state.layers_render_texture.framebuffer_id) free_framebuffer(&global_state.layers_render_texture.framebuffer_id);
             if (global_state.layers_render_texture.extra_texture_id) free_texture(&global_state.layers_render_texture.extra_texture_id);
@@ -2501,7 +2511,8 @@ start_os_window_rendering(OSWindow *os_window, Tab *tab) {
             if (global_state.layers_render_texture.texture_b_fbo_id) free_framebuffer(&global_state.layers_render_texture.texture_b_fbo_id);
             unsigned new_w = (unsigned)MAX(global_state.layers_render_texture.width, os_window->viewport_width);
             unsigned new_h = (unsigned)MAX(global_state.layers_render_texture.height, os_window->viewport_height);
-            setup_texture_as_render_target(new_w, new_h, &global_state.layers_render_texture.texture_id, &global_state.layers_render_texture.framebuffer_id);
+            setup_texture_as_render_target(new_w, new_h, &global_state.layers_render_texture.texture_id, &global_state.layers_render_texture.framebuffer_id, os_window->linear_output);
+            global_state.layers_render_texture.is_float = os_window->linear_output;
             global_state.layers_render_texture.width = (int)new_w;
             global_state.layers_render_texture.height = (int)new_h;
             global_state.layers_render_texture.texture_generation++;
@@ -2520,7 +2531,7 @@ start_os_window_rendering(OSWindow *os_window, Tab *tab) {
                     (unsigned)global_state.layers_render_texture.width,
                     (unsigned)global_state.layers_render_texture.height,
                     &global_state.layers_render_texture.extra_texture_id,
-                    &global_state.layers_render_texture.extra_texture_setup_fbo_id);
+                    &global_state.layers_render_texture.extra_texture_setup_fbo_id, os_window->linear_output);
             }
             // Create/re-attach per-window extra FBO when generation changes
             if (os_window->indirect_output.extra_fbo_generation != global_state.layers_render_texture.texture_generation) {
@@ -2538,7 +2549,7 @@ start_os_window_rendering(OSWindow *os_window, Tab *tab) {
                     (unsigned)global_state.layers_render_texture.width,
                     (unsigned)global_state.layers_render_texture.height,
                     &global_state.layers_render_texture.texture_a_id,
-                    &global_state.layers_render_texture.texture_a_fbo_id);
+                    &global_state.layers_render_texture.texture_a_fbo_id, os_window->linear_output);
             }
             if (os_window->indirect_output.fbo_a_generation != global_state.layers_render_texture.texture_generation) {
                 if (os_window->indirect_output.fbo_a_id) free_framebuffer(&os_window->indirect_output.fbo_a_id);
@@ -2557,7 +2568,7 @@ start_os_window_rendering(OSWindow *os_window, Tab *tab) {
                     (unsigned)global_state.layers_render_texture.width,
                     (unsigned)global_state.layers_render_texture.height,
                     &global_state.layers_render_texture.texture_b_id,
-                    &global_state.layers_render_texture.texture_b_fbo_id);
+                    &global_state.layers_render_texture.texture_b_fbo_id, os_window->linear_output);
             }
             if (os_window->indirect_output.fbo_b_generation != global_state.layers_render_texture.texture_generation) {
                 if (os_window->indirect_output.fbo_b_id) free_framebuffer(&os_window->indirect_output.fbo_b_id);
@@ -2578,7 +2589,7 @@ start_os_window_rendering(OSWindow *os_window, Tab *tab) {
                     (unsigned)global_state.layers_render_texture.width,
                     (unsigned)global_state.layers_render_texture.height,
                     &os_window->persist_texture_id,
-                    &os_window->persist_fbo_id);
+                    &os_window->persist_fbo_id, os_window->linear_output);
                 os_window->persist_texture_generation = global_state.layers_render_texture.texture_generation;
             }
         } else {
@@ -2970,7 +2981,7 @@ run_custom_end_shader(OSWindow *os_window, float sx, float sy, monotonic_t now) 
         glUniform1i(group_loc, (GLint)g);
         glUniform4f(viewport_loc, vp_x, vp_y, vp_w, vp_h);
         glUniform1f(anim_progress_loc, anim_progress);
-        glUniform1i(convert_to_srgb_loc, is_last ? 1 : 0);
+        glUniform1i(convert_to_srgb_loc, is_last && !os_window->linear_output ? 1 : 0);
         // debug_rendering("Custom shader draw group %u: anim_progress=%.4f viewport=(%.2f,%.2f,%.2f,%.2f)\n", g, anim_progress, vp_x, vp_y, vp_w, vp_h);
         draw_quad(false, 0);
     }
@@ -2998,6 +3009,7 @@ stop_os_window_rendering(OSWindow *os_window, Tab *tab, Window *active_window, m
             glBindTexture(GL_TEXTURE_2D, global_state.layers_render_texture.texture_id);
             glUniform4f(program_uniform_location(BLIT_PROGRAM, "src_rect"), 0, sy, sx, 0);
             glUniform4f(program_uniform_location(BLIT_PROGRAM, "dest_rect"), -1, 1, 1, -1);
+            glUniform1f(program_uniform_location(BLIT_PROGRAM, "encode_srgb"), os_window->linear_output ? 0.f : 1.f);
             restore_viewport();
             if (os_window->live_resize.in_progress)
                 save_viewport_using_top_left_origin(0, 0, os_window->viewport_width, os_window->viewport_height, os_window->live_resize.height);
@@ -3038,11 +3050,7 @@ take_screenshot_of_rectangular_region(OSWindow *os_window, Region region, unsign
     // Calculate the source region dimensions
     unsigned src_height = region.bottom - region.top;
     unsigned src_width = region.right - region.left;
-    // An HDR window has a linear float framebuffer rather than an sRGB one
-    GLint fb = 0, component_type = 0;
-    glGetIntegerv(GL_DRAW_FRAMEBUFFER_BINDING, &fb);
-    if (!fb) glGetFramebufferAttachmentParameteriv(GL_FRAMEBUFFER, GL_BACK_LEFT, GL_FRAMEBUFFER_ATTACHMENT_COMPONENT_TYPE, &component_type);
-    const bool is_float = component_type == GL_FLOAT;
+    const bool is_float = backbuffer_is_float();
 
     if (no_scaling) {
         *thumb_w = src_width;
@@ -3085,7 +3093,7 @@ take_screenshot_of_rectangular_region(OSWindow *os_window, Region region, unsign
 
     // Create a temporary framebuffer for GPU-based scaling
     GLuint temp_texture = 0, temp_framebuffer = 0;
-    setup_texture_as_render_target(*thumb_w, *thumb_h, &temp_texture, &temp_framebuffer);
+    setup_texture_as_render_target(*thumb_w, *thumb_h, &temp_texture, &temp_framebuffer, false);
 
     // Save current state
     GLint current_framebuffer;

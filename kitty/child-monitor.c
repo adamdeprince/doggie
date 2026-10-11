@@ -1101,6 +1101,7 @@ render_os_window(OSWindow *w, monotonic_t now, bool scan_for_animated_images) {
     }
     w->render_calls++;
     make_os_window_context_current(w);
+    if (!w->linear_output_checked) { w->linear_output = backbuffer_is_float(); w->linear_output_checked = true; }
     w->hdr_headroom = glfwGetWindowHDRHeadroom(w->handle);
     w->hdr_content = OPT(cursor_brightness) > 1;
     bool needs_render = w->redraw_count > 0 || w->live_resize.in_progress || global_state.thumbnail_callback.os_window == w->id;

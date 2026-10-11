@@ -24,8 +24,9 @@ uniform Sampler2D image;
 
 [shader("fragment")]
 float4
-fragment_main(float2 texcoord: TEXCOORD)
+fragment_main(float2 texcoord: TEXCOORD, uniform float encode_srgb)
     : SV_Target {
     float4 color_premul = image.Sample(texcoord);
+    if (encode_srgb == 0.0f) return color_premul;  // linear float backbuffer of an HDR window
     return vec4_premul(linear2srgb(color_premul.rgb / color_premul.a), color_premul.a);
 }
