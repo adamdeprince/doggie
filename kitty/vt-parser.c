@@ -581,9 +581,14 @@ dispatch_osc(PS *self, uint8_t *buf, size_t limit, bool is_extended_osc) {
             process_cwd_notification(self->screen, code, (char *)buf + i, limit - i);
             break;
         case 8: dispatch_hyperlink(self, (char *)buf + i); break;
+        case 777:
+            if (limit - i > 8 && memcmp(buf + i, "latency;", 8) == 0) {
+                screen_latency(self->screen, (const char *)buf + i + 8, limit - i - 8);
+                break;
+            }
+            /* fallthrough */
         case 9:
         case 99:
-        case 777:
         case 1337:
             START_DISPATCH
             DISPATCH_OSC_WITH_CODE(desktop_notify)
@@ -1591,7 +1596,7 @@ run_worker(void *p, ParseData *pd, bool flush) {
         pd->has_pending_input = self->read.pos < self->read.sz;
         if (pd->has_pending_input) {
             pd->time_since_new_input = pd->now - self->new_input_at;
-            if (flush || pending_input_is_small(self) || pd->time_since_new_input >= OPT(input_delay) || self->read.sz + 16 * 1024 > BUF_SZ) {
+            if (flush || screen->low_latency || pending_input_is_small(self) || pd->time_since_new_input >= OPT(input_delay) || self->read.sz + 16 * 1024 > BUF_SZ) {
                 pd->input_read = true;
                 self->dump_callback = pd->dump_callback;
                 self->now = pd->now;

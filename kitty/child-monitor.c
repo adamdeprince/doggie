@@ -1828,8 +1828,8 @@ io_loop(void *data) {
     // The I/O thread loop
     size_t i;
     int ret;
-    bool has_more, data_received, pending_input_is_small, has_pending_wakeups = false, last_wakeup_was_early = false;
-    monotonic_t last_main_loop_wakeup_at = -1, now = -1;
+    bool has_more, data_received, pending_input_is_small, low_latency, has_pending_wakeups = false, last_wakeup_was_early = false;
+    monotonic_t last_main_loop_wakeup_at = -1, now = -1, input_delay;
     Screen *screen;
     ChildMonitor *self = (ChildMonitor *)data;
     set_thread_name("KittyChildMon");
@@ -1841,9 +1841,11 @@ io_loop(void *data) {
         children_mutex(unlock);
         data_received = false;
         pending_input_is_small = false;
+        low_latency = false;
         for (i = 0; i < self->count + EXTRA_FDS; i++) children_fds[i].revents = 0;
         for (i = 0; i < self->count; i++) {
             screen = children[i].screen;
+            if (screen->low_latency) low_latency = true;
             /* printf("i:%lu id:%lu fd: %d read_buf_sz: %lu write_buf_used: %lu\n", i, children[i].id, children[i].fd, screen->read_buf_sz,
              * screen->write_buf_used); */
             children_fds[EXTRA_FDS + i].events = vt_parser_has_space_for_input(screen->vt_parser) ? POLLIN : 0;
@@ -1851,9 +1853,12 @@ io_loop(void *data) {
             children_fds[EXTRA_FDS + i].events |= (screen->write_buf_used ? POLLOUT : 0);
             screen_mutex(unlock, write);
         }
+        // A window in low latency mode (see docs/latency-protocol.rst) wants
+        // its output parsed as soon as it arrives, so wake without the delay
+        input_delay = low_latency ? 0 : OPT(input_delay);
         if (has_pending_wakeups) {
             now = monotonic();
-            monotonic_t time_delta = OPT(input_delay) - (now - last_main_loop_wakeup_at);
+            monotonic_t time_delta = input_delay - (now - last_main_loop_wakeup_at);
             if (time_delta >= 0) ret = poll(children_fds, self->count + EXTRA_FDS, monotonic_t_to_ms_ceil(time_delta));
             else ret = 0;
         } else {
@@ -1926,13 +1931,13 @@ io_loop(void *data) {
         // characters, wakes immediately, but at most once per input_delay so that continuous
         // streams of small writes are still coalesced.
         if (data_received) {
-            if ((now = monotonic()) - last_main_loop_wakeup_at > OPT(input_delay)) WAKEUP
+            if ((now = monotonic()) - last_main_loop_wakeup_at >= input_delay) WAKEUP
             else if (pending_input_is_small && !last_wakeup_was_early) {
                 WAKEUP;
                 last_wakeup_was_early = true;
             } else has_pending_wakeups = true;
         } else {
-            if (has_pending_wakeups && (now = monotonic()) - last_main_loop_wakeup_at > OPT(input_delay)) WAKEUP
+            if (has_pending_wakeups && (now = monotonic()) - last_main_loop_wakeup_at >= input_delay) WAKEUP
         }
     }
 #undef WAKEUP
