@@ -395,9 +395,11 @@ extend_selection(Window *w, bool ended, bool extend_nearest) {
 
 static void
 set_mouse_cursor_for_screen(Screen *screen) {
-    MouseShape s = screen_pointer_shape(screen);
+    PointerImage image;
+    MouseShape s = screen_pointer_shape(screen, &image);
     if (s != INVALID_POINTER) {
         mouse_cursor_shape = s;
+        if (s == IMAGE_POINTER) set_mouse_cursor_image(screen, &image);
     } else {
         if (screen->modes.mouse_tracking_mode == NO_TRACKING) {
             mouse_cursor_shape = OPT(default_pointer_shape);

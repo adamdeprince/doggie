@@ -136,7 +136,12 @@ typedef enum MouseShapes {
     GRAB_POINTER,
     GRABBING_POINTER,
     /* end mouse shapes */
+    IMAGE_POINTER, // a graphics protocol image, see PointerImage
 } MouseShape;
+typedef struct {
+    uint32_t image_id;
+    uint16_t xhot, yhot;
+} PointerImage;
 typedef enum { NONE, MENUBAR, WINDOW, ALL } WindowTitleIn;
 typedef enum {
     SCROLLBAR_NEVER,

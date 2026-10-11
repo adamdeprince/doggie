@@ -335,6 +335,9 @@ load_glfw(const char* path) {
     *(void **) (&glfwCreateCursor_impl) = dlsym(handle, "glfwCreateCursor");
     if (glfwCreateCursor_impl == NULL) fail("Failed to load glfw function glfwCreateCursor with error: %s", dlerror());
 
+    *(void **) (&glfwCreateCursorForWindow_impl) = dlsym(handle, "glfwCreateCursorForWindow");
+    if (glfwCreateCursorForWindow_impl == NULL) fail("Failed to load glfw function glfwCreateCursorForWindow with error: %s", dlerror());
+
     *(void **) (&glfwCreateStandardCursor_impl) = dlsym(handle, "glfwCreateStandardCursor");
     if (glfwCreateStandardCursor_impl == NULL) fail("Failed to load glfw function glfwCreateStandardCursor with error: %s", dlerror());
 

@@ -941,8 +941,8 @@ glfwSetCursorPos(GLFWwindow *handle, double xpos, double ypos) {
     }
 }
 
-GLFWAPI GLFWcursor *
-glfwCreateCursor(const GLFWimage *image, int xhot, int yhot, int count) {
+static GLFWcursor *
+create_cursor(const GLFWimage *image, int xhot, int yhot, int count, float scale) {
     _GLFWcursor *cursor;
 
     assert(image != NULL);
@@ -954,12 +954,29 @@ glfwCreateCursor(const GLFWimage *image, int xhot, int yhot, int count) {
     cursor->next = _glfw.cursorListHead;
     _glfw.cursorListHead = cursor;
 
-    if (!_glfwPlatformCreateCursor(cursor, image, xhot, yhot, count)) {
+    if (!_glfwPlatformCreateCursor(cursor, image, xhot, yhot, count, scale)) {
         glfwDestroyCursor((GLFWcursor *)cursor);
         return NULL;
     }
 
     return (GLFWcursor *)cursor;
+}
+
+GLFWAPI GLFWcursor *
+glfwCreateCursor(const GLFWimage *image, int xhot, int yhot, int count) {
+    return create_cursor(image, xhot, yhot, count, 1.f);
+}
+
+GLFWAPI GLFWcursor *
+glfwCreateCursorForWindow(GLFWwindow *handle, const GLFWimage *image, int xhot, int yhot) {
+    _GLFWwindow *window = (_GLFWwindow *)handle;
+    float xscale = 1.f, yscale = 1.f;
+
+    assert(window != NULL);
+
+    _GLFW_REQUIRE_INIT_OR_RETURN(NULL);
+    _glfwPlatformGetWindowContentScale(window, &xscale, &yscale);
+    return create_cursor(image, xhot, yhot, 1, xscale > 0 ? xscale : 1.f);
 }
 
 GLFWAPI GLFWcursor *

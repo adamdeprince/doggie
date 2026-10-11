@@ -4834,6 +4834,28 @@ GLFWAPI void glfwSetCursorPos(GLFWwindow *window, double xpos, double ypos);
  */
 GLFWAPI GLFWcursor *glfwCreateCursor(const GLFWimage *image, int xhot, int yhot, int count);
 
+/*! @brief Creates a custom cursor sized in device pixels.
+ *
+ *  Like @ref glfwCreateCursor with a single image, except that the image is
+ *  shown with one image pixel per device pixel of the display the window is
+ *  currently on, instead of one image pixel per screen coordinate. The hotspot
+ *  is in image pixels.
+ *
+ *  @param[in] window The window whose content scale the image is for.
+ *  @param[in] image The desired cursor image.
+ *  @param[in] xhot The desired x-coordinate, in image pixels, of the cursor hotspot.
+ *  @param[in] yhot The desired y-coordinate, in image pixels, of the cursor hotspot.
+ *  @return The handle of the created cursor, or `NULL` if an
+ *  [error](@ref error_handling) occurred.
+ *
+ *  @thread_safety This function must only be called from the main thread.
+ *
+ *  @sa @ref glfwCreateCursor
+ *
+ *  @ingroup input
+ */
+GLFWAPI GLFWcursor *glfwCreateCursorForWindow(GLFWwindow *window, const GLFWimage *image, int xhot, int yhot);
+
 /*! @brief Creates a cursor with a standard shape.
  *
  *  Returns a cursor with a [standard shape](@ref shapes), that can be set for

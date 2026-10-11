@@ -2358,6 +2358,10 @@ typedef GLFWcursor* (*glfwCreateCursor_func)(const GLFWimage*, int, int, int);
 GFW_EXTERN glfwCreateCursor_func glfwCreateCursor_impl;
 #define glfwCreateCursor glfwCreateCursor_impl
 
+typedef GLFWcursor* (*glfwCreateCursorForWindow_func)(GLFWwindow*, const GLFWimage*, int, int);
+GFW_EXTERN glfwCreateCursorForWindow_func glfwCreateCursorForWindow_impl;
+#define glfwCreateCursorForWindow glfwCreateCursorForWindow_impl
+
 typedef GLFWcursor* (*glfwCreateStandardCursor_func)(GLFWCursorShape);
 GFW_EXTERN glfwCreateStandardCursor_func glfwCreateStandardCursor_impl;
 #define glfwCreateStandardCursor glfwCreateStandardCursor_impl

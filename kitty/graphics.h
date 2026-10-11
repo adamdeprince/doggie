@@ -263,4 +263,6 @@ void grman_pause_rendering(GraphicsManager *self, GraphicsManager *dest);
 void grman_mark_layers_dirty(GraphicsManager *self);
 void grman_set_window_id(GraphicsManager *self, id_type id);
 bool grman_has_images(GraphicsManager *self);
+bool grman_image_version(GraphicsManager *self, uint32_t client_id, id_type *image, uint32_t *frame);
+uint8_t *grman_image_rgba(GraphicsManager *self, uint32_t client_id, uint32_t *width, uint32_t *height);
 GraphicsRenderData grman_render_data(GraphicsManager *self);
