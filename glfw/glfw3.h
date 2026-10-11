@@ -2124,6 +2124,36 @@ typedef struct GLFWimage {
     const unsigned char *pixels;
 } GLFWimage;
 
+/*! @brief Properties of the display a window is on.
+ *
+ *  Members the platform cannot determine are left at the unknown enum member
+ *  or 0.
+ *
+ *  @sa @ref glfwGetWindowDisplayInfo
+ *
+ *  @ingroup window
+ */
+typedef enum { GLFW_DISPLAY_KIND_UNKNOWN, GLFW_DISPLAY_KIND_LCD, GLFW_DISPLAY_KIND_OLED, GLFW_DISPLAY_KIND_EINK } GLFWdisplaykind;
+typedef enum { GLFW_DISPLAY_COLOR_RGB, GLFW_DISPLAY_COLOR_GRAY, GLFW_DISPLAY_COLOR_MONO } GLFWdisplaycolor;
+typedef enum { GLFW_DISPLAY_GAMUT_UNKNOWN, GLFW_DISPLAY_GAMUT_SRGB, GLFW_DISPLAY_GAMUT_P3, GLFW_DISPLAY_GAMUT_REC2020 } GLFWdisplaygamut;
+typedef struct GLFWdisplayinfo {
+    GLFWdisplaykind kind;
+    GLFWdisplaycolor color;
+    GLFWdisplaygamut gamut;
+    /*! Bits per color channel.
+     */
+    int bits;
+    /*! Device pixels per logical pixel.
+     */
+    float scale;
+    /*! Refresh period in microseconds.
+     */
+    unsigned period_us;
+    /*! Physical pixels per inch.
+     */
+    float ppi;
+} GLFWdisplayinfo;
+
 /*! @brief Gamepad input state
  *
  *  This describes the input state of a gamepad.
@@ -3596,6 +3626,17 @@ GLFWAPI void glfwGetWindowFrameSize(GLFWwindow *window, int *left, int *top, int
  *  @ingroup window
  */
 GLFWAPI void glfwGetWindowContentScale(GLFWwindow *window, float *xscale, float *yscale);
+
+/*! @brief Retrieves the properties of the display the window is on.
+ *
+ *  @param[in] window The window to query.
+ *  @param[out] info Where to store the properties.
+ *
+ *  @thread_safety This function must only be called from the main thread.
+ *
+ *  @ingroup window
+ */
+GLFWAPI void glfwGetWindowDisplayInfo(GLFWwindow *window, GLFWdisplayinfo *info);
 
 /*! @brief Returns the double click time interval.
  *

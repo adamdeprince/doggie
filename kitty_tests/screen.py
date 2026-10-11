@@ -889,6 +889,26 @@ class TestScreen(BaseTest):
         c = s.line(1).cursor_from(1)
         self.ae(c.fg, (1 << 24) | (2 << 16) | (3 << 8) | 2)
 
+    def test_display_protocol(self):
+        s = self.create_screen()
+        c = s.callbacks
+        parse_bytes(s, b'\x1b]777;display;v=1:op=query:id=7\x1b\\')
+        self.ae(c.wtcbuf, b'\x1b]777;display;v=1:op=info:id=7:kind=unknown:color=rgb:bits=0:gamut=unknown:headroom=1:scale=0:period=0:ppi=0\x1b\\')
+        c.clear()
+        parse_bytes(s, b'\x1b]777;display;v=1:op=mode:mode=1\x1b\\')
+        self.ae(c.wtcbuf, b'\x1b]777;display;v=1:op=event:kind=unknown:color=rgb:bits=0:gamut=unknown:headroom=1:scale=0:period=0:ppi=0\x1b\\')
+        c.clear()
+        parse_bytes(s, b'\x1b]777;display;v=2:op=query:id=7\x1b\\')
+        parse_bytes(s, b'\x1b]777;display;v=1:op=query\x1b\\')
+        parse_bytes(s, b'\x1b]777;display;v=1:op=mode:mode=0\x1b\\')
+        parse_bytes(s, b'\x1b]777;display;garbage\x1b\\')
+        self.ae(c.wtcbuf, b'')
+        self.ae(str(s.line(0)), '')
+        s = self.create_screen(options={'display_info': 'kind=eink color=gray bits=4 ppi=226 bogus=1 nonsense'})
+        c = s.callbacks
+        parse_bytes(s, b'\x1b]777;display;v=1:op=query:id=0\x1b\\')
+        self.ae(c.wtcbuf, b'\x1b]777;display;v=1:op=info:id=0:kind=eink:color=gray:bits=4:gamut=unknown:headroom=1:scale=0:period=0:ppi=226\x1b\\')
+
     def test_cursor_hidden(self):
         s = self.create_screen()
         s.toggle_alt_screen()

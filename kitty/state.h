@@ -102,6 +102,7 @@ typedef struct Options {
     bool text_old_gamma;
 
     char *default_window_logo;
+    char *display_info;
     struct {
         char **paths;
         size_t count;
@@ -605,6 +606,8 @@ typedef struct OSWindow {
         monotonic_t started_at;
     } shader_group_anim[MAX_CUSTOM_SHADER_GROUPS];
     ShaderAnimState shader_anim;
+    DisplayInfo display_info;
+    monotonic_t display_info_at;
 } OSWindow;
 
 static inline float
@@ -730,6 +733,7 @@ void focus_os_window(OSWindow *w, bool also_raise, const char *activation_token)
 void run_with_activation_token_in_os_window(OSWindow *w, PyObject *callback);
 void set_os_window_title(OSWindow *w, const char *title);
 OSWindow *os_window_for_kitty_window(id_type);
+void os_window_display_info(OSWindow *w, DisplayInfo *d);
 OSWindow *os_window_for_id(id_type);
 OSWindow *add_os_window(void);
 OSWindow *current_os_window(void);

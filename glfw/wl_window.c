@@ -1798,6 +1798,19 @@ _glfwPlatformGetWindowContentScale(_GLFWwindow *window, float *xscale, float *ys
     if (yscale) *yscale = fscale;
 }
 
+void
+_glfwPlatformGetWindowDisplayInfo(_GLFWwindow *window, GLFWdisplayinfo *info) {
+    // The first output the window is on, the first output there is before the compositor has told us
+    _GLFWmonitor *monitor = window->wl.monitorsCount ? window->wl.monitors[0] : _glfw.monitorCount ? _glfw.monitors[0] : NULL;
+    info->color = GLFW_DISPLAY_COLOR_RGB;
+    info->bits = 8;
+    info->scale = (float)_glfwWaylandWindowScale(window);
+    if (!monitor || monitor->wl.currentMode < 0 || monitor->wl.currentMode >= monitor->modeCount) return;
+    const GLFWvidmode *mode = monitor->modes + monitor->wl.currentMode;
+    if (mode->refreshRate > 0) info->period_us = 1000000u / (unsigned)mode->refreshRate;
+    if (monitor->widthMM > 0) info->ppi = mode->width * 25.4f / monitor->widthMM;
+}
+
 monotonic_t
 _glfwPlatformGetDoubleClickInterval(_GLFWwindow *window UNUSED) {
     return ms_to_monotonic_t(500ll);

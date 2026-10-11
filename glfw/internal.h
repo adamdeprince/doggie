@@ -732,6 +732,7 @@ void _glfwPlatformGetFramebufferSize(_GLFWwindow *window, int *width, int *heigh
 void _glfwInputLiveResize(_GLFWwindow *window, bool started);
 void _glfwPlatformGetWindowFrameSize(_GLFWwindow *window, int *left, int *top, int *right, int *bottom);
 void _glfwPlatformGetWindowContentScale(_GLFWwindow *window, float *xscale, float *yscale);
+void _glfwPlatformGetWindowDisplayInfo(_GLFWwindow *window, GLFWdisplayinfo *info);
 monotonic_t _glfwPlatformGetDoubleClickInterval(_GLFWwindow *window);
 void _glfwPlatformGetKeyboardRepeatDelay(monotonic_t *delay, monotonic_t *interval);
 void _glfwPlatformIconifyWindow(_GLFWwindow *window);

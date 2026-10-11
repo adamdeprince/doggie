@@ -1864,6 +1864,36 @@ typedef struct GLFWimage {
     const unsigned char *pixels;
 } GLFWimage;
 
+/*! @brief Properties of the display a window is on.
+ *
+ *  Members the platform cannot determine are left at the unknown enum member
+ *  or 0.
+ *
+ *  @sa @ref glfwGetWindowDisplayInfo
+ *
+ *  @ingroup window
+ */
+typedef enum { GLFW_DISPLAY_KIND_UNKNOWN, GLFW_DISPLAY_KIND_LCD, GLFW_DISPLAY_KIND_OLED, GLFW_DISPLAY_KIND_EINK } GLFWdisplaykind;
+typedef enum { GLFW_DISPLAY_COLOR_RGB, GLFW_DISPLAY_COLOR_GRAY, GLFW_DISPLAY_COLOR_MONO } GLFWdisplaycolor;
+typedef enum { GLFW_DISPLAY_GAMUT_UNKNOWN, GLFW_DISPLAY_GAMUT_SRGB, GLFW_DISPLAY_GAMUT_P3, GLFW_DISPLAY_GAMUT_REC2020 } GLFWdisplaygamut;
+typedef struct GLFWdisplayinfo {
+    GLFWdisplaykind kind;
+    GLFWdisplaycolor color;
+    GLFWdisplaygamut gamut;
+    /*! Bits per color channel.
+     */
+    int bits;
+    /*! Device pixels per logical pixel.
+     */
+    float scale;
+    /*! Refresh period in microseconds.
+     */
+    unsigned period_us;
+    /*! Physical pixels per inch.
+     */
+    float ppi;
+} GLFWdisplayinfo;
+
 /*! @brief Gamepad input state
  *
  *  This describes the input state of a gamepad.
@@ -2165,6 +2195,10 @@ GFW_EXTERN glfwGetWindowFrameSize_func glfwGetWindowFrameSize_impl;
 typedef void (*glfwGetWindowContentScale_func)(GLFWwindow*, float*, float*);
 GFW_EXTERN glfwGetWindowContentScale_func glfwGetWindowContentScale_impl;
 #define glfwGetWindowContentScale glfwGetWindowContentScale_impl
+
+typedef void (*glfwGetWindowDisplayInfo_func)(GLFWwindow*, GLFWdisplayinfo*);
+GFW_EXTERN glfwGetWindowDisplayInfo_func glfwGetWindowDisplayInfo_impl;
+#define glfwGetWindowDisplayInfo glfwGetWindowDisplayInfo_impl
 
 typedef monotonic_t (*glfwGetDoubleClickInterval_func)(GLFWwindow*);
 GFW_EXTERN glfwGetDoubleClickInterval_func glfwGetDoubleClickInterval_impl;
