@@ -385,6 +385,7 @@ void leave_event(int modifiers);
 void mouse_event(const int, int, int);
 void focus_in_event(void);
 void scroll_event(const GLFWScrollEvent *ev);
+bool gesture_event(const GLFWGestureEvent *ev);
 void on_key_input(const GLFWkeyevent *ev);
 void request_window_attention(id_type, bool);
 void free_drag_source(void);

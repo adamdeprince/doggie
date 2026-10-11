@@ -867,6 +867,19 @@ touch_gesture_released(GLFWwindow *w, OSWindow *osw, int mods, monotonic_t times
 }
 
 static void
+gesture_callback(GLFWwindow *w, const GLFWGestureEvent *ev) {
+    if (!set_callback_window(w)) return;
+    OSWindow *osw = global_state.callback_os_window;
+    osw->last_mouse_activity_at = monotonic();
+    osw->mouse_x = ev->x * osw->viewport_x_ratio;
+    osw->mouse_y = ev->y * osw->viewport_y_ratio;
+    const bool reported = is_window_ready_for_callbacks() && gesture_event(ev);
+    debug_input("\x1b[33mGesture\x1b[m kind: %d phase: %d x: %.1f y: %.1f delta: %.3f dx: %d dy: %d reported: %d\n", ev->kind, ev->phase, ev->x, ev->y, ev->delta, ev->dx, ev->dy, reported);
+    if (reported) request_tick_callback();
+    global_state.callback_os_window = NULL;
+}
+
+static void
 touch_callback(GLFWwindow *w, const GLFWTouchEvent *ev) {
     if (!set_callback_window(w)) return;
     OSWindow *osw = global_state.callback_os_window;
@@ -2504,6 +2517,7 @@ create_os_window(PyObject UNUSED *self, PyObject *args, PyObject *kw) {
     glfwSetCursorEnterCallback(glfw_window, cursor_enter_callback);
     glfwSetScrollCallback(glfw_window, scroll_callback);
     glfwSetTouchCallback(glfw_window, touch_callback);
+    glfwSetGestureCallback(glfw_window, gesture_callback);
     glfwSetKeyboardCallback(glfw_window, key_callback);
 
     glfwSetDragSourceCallback(glfw_window, drag_source_callback);

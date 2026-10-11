@@ -11,10 +11,11 @@ from kitty.fast_data_types import (
     MOUSE_SELECTION_WORD_AND_LINE_FROM_POINT,
     create_mock_window,
     mock_mouse_selection,
+    send_gesture_report,
     send_mock_mouse_event_to_window,
 )
 
-from .base import BaseTest
+from .base import BaseTest, parse_bytes
 
 
 def send_mouse_event(
@@ -415,6 +416,52 @@ class TestMouse(BaseTest):
         self.ae(sel(), '')
         multi_click(x=2.4)
         self.ae(sel(), '')
+
+    def test_gesture_protocol(self):
+        from kitty.constants import is_macos
+
+        s = self.create_screen()
+        c = s.callbacks
+
+        def send(body):
+            c.clear()
+            parse_bytes(s, f'\x1b]777;gesture;{body}\x1b\\'.encode())
+
+        def report(kind, phase, **kw):
+            c.clear()
+            return send_gesture_report(s, kind, phase, 256, 512, **kw)
+
+        def ev(fields):
+            return f'\x1b]777;gesture;v=1:op=event:{fields}:x=256:y=512:'.encode()
+
+        send('v=1:op=query:id=42')
+        self.ae(c.wtcbuf, f'\x1b]777;gesture;v=1:op=cap:id=42:caps={15 if is_macos else 0}\x1b\\'.encode())
+        self.assertFalse(report(1, 1))
+        send('v=1:op=mode:mode=1')
+        self.assertTrue(report(1, 1, mods=3))
+        self.ae(c.wtcbuf, ev('kind=1:phase=1') + b'mods=3:scale=0:total=1000\x1b\\')
+        report(1, 2, delta=0.5)
+        self.ae(c.wtcbuf, ev('kind=1:phase=2') + b'mods=0:scale=500:total=1500\x1b\\')
+        report(1, 2, delta=-0.5)
+        self.ae(c.wtcbuf, ev('kind=1:phase=2') + b'mods=0:scale=-500:total=750\x1b\\')
+        report(2, 1)
+        report(2, 2, delta=-12.5)
+        self.ae(c.wtcbuf, ev('kind=2:phase=2') + b'mods=0:angle=-1250:total=-1250\x1b\\')
+        # Turning the mode off cancels the gestures in progress, whose remaining reports are then dropped
+        send('v=1:op=mode:mode=0')
+        self.ae(c.wtcbuf, ev('kind=1:phase=4') + b'mods=0:scale=0:total=750\x1b\\' + ev('kind=2:phase=4') + b'mods=0:angle=0:total=-1250\x1b\\')
+        send('v=1:op=mode:mode=1')
+        self.assertFalse(report(1, 3))
+        report(3, 1, dx=1)
+        self.ae(c.wtcbuf, ev('kind=3:phase=1') + b'mods=0:dx=1:dy=0\x1b\\')
+        report(3, 3, dx=1)
+        self.ae(c.wtcbuf, ev('kind=3:phase=3') + b'mods=0:dx=1:dy=0\x1b\\')
+        report(4, 1)
+        self.ae(c.wtcbuf, ev('kind=4:phase=1') + b'mods=0\x1b\\')
+        c.clear()
+        s.reset()
+        self.ae(c.wtcbuf, ev('kind=4:phase=4') + b'mods=0\x1b\\')
+        self.assertFalse(report(4, 3))
 
     def test_v120_scroll_direction_reversal(self):
         # A high resolution wheel delivers one physical detent as several
