@@ -2463,6 +2463,7 @@ create_os_window(PyObject UNUSED *self, PyObject *args, PyObject *kw) {
     bind_shader_globals_to_current_context();
     OSWindow *w = add_os_window();
     w->handle = glfw_window;
+    w->hdr_headroom = glfwGetWindowHDRHeadroom(glfw_window);
     w->disallow_title_changes = disallow_override_title;
     if (lsc != NULL) {
         w->is_layer_shell = true;
