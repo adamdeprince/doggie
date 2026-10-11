@@ -13,7 +13,7 @@
 
 typedef struct {
     unsigned char action, transmission_type, compressed, delete_action;
-    uint32_t format, more, id, image_number, data_sz, data_offset, placement_id, quiet, parent_id, parent_placement_id, usage_hints;
+    uint32_t format, more, id, image_number, data_sz, data_offset, placement_id, quiet, parent_id, parent_placement_id, usage_hints, tone_map;
     uint32_t width, height, x_offset, y_offset;
     union {
         uint32_t cursor_movement, compose_mode;
@@ -53,6 +53,8 @@ typedef struct {
     uint32_t texture_id, group_count;
     int z_index;
     id_type image_id, ref_id;
+    float peak; // of HDR images, see docs/hdr-protocol.rst
+    bool tone_map;
 } ImageRenderData;
 
 typedef struct {
@@ -124,6 +126,8 @@ typedef struct {
     uint32_t max_loops, current_loop;
     monotonic_t current_frame_shown_at;
     ref_map refs_by_internal_id;
+    float peak; // of HDR images, see docs/hdr-protocol.rst
+    bool tone_map;
 } Image;
 
 typedef struct {

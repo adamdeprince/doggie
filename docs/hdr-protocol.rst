@@ -78,10 +78,23 @@ cannot be added to other images), the terminal responds with ``EINVAL``
 otherwise. Frames are blended in linear light, and the background color of a
 frame (the ``Y`` key) is taken as linear values, ``255`` being SDR white.
 
-Pixel values larger than the headroom are shown at the headroom. To check
-whether a terminal supports ``f=64``, use the query action described in the
-graphics protocol with ``f=64`` and a single pixel of data, a terminal that
-does not know the format responds with ``EINVAL``.
+Pixel values larger than the headroom are shown at the headroom, which
+clips the bright parts of an image on a display with little headroom. An
+image can ask instead for its bright parts to be compressed into the headroom
+with ``T=1`` on the command that transmits it. Then, with *H* the headroom,
+*P* the largest color component in the image (at least ``1.0``, and including
+the animation frames loaded so far) and *k* = 0.75 *H* the knee, a pixel
+whose largest component *m* is above the knee is scaled by *f(m)/m* where::
+
+    f(m) = k + (m - k) / (1 + s (m - k))      s = 1 / (H - k) - 1 / (P - k)
+
+so that everything up to the knee is unchanged, *P* lands exactly at *H*, the
+curve is continuous at the knee and the hue of a pixel is preserved. When *P*
+is within the headroom nothing is changed. ``T=0``, the default, clips.
+
+To check whether a terminal supports ``f=64``, use the query action described
+in the graphics protocol with ``f=64`` and a single pixel of data, a terminal
+that does not know the format responds with ``EINVAL``.
 
 Cursor
 ---------

@@ -699,6 +699,52 @@ pixel_size(const bool is_opaque, const bool is_float) {
     return is_opaque ? 3 : is_float ? 8 : 4;
 }
 
+static inline float
+half_to_float(const uint16_t h) {
+    const unsigned exp = (h >> 10) & 0x1f, mant = h & 0x3ff;
+    float ans;
+    if (exp == 0) ans = ldexpf((float)mant, -24);
+    else if (exp == 31) ans = mant ? NAN : INFINITY;
+    else ans = ldexpf((float)(0x400 | mant), (int)exp - 25);
+    return h & 0x8000 ? -ans : ans;
+}
+
+static inline uint16_t
+float_to_half(const float f) {
+    // round to nearest even, as the hardware conversions do
+    uint32_t bits, mant;
+    memcpy(&bits, &f, sizeof(bits));
+    const uint16_t sign = (bits >> 16) & 0x8000;
+    const int exp = (int)((bits >> 23) & 0xff) - 112;
+    mant = bits & 0x7fffff;
+    if (exp == 143) return sign | 0x7c00 | (mant ? 0x200 : 0); // inf or nan
+    if (exp >= 31) return sign | 0x7c00;
+    unsigned shift = 13;
+    if (exp <= 0) { // subnormal half
+        shift = 14 - exp;
+        if (shift > 24) return sign;
+        mant |= 0x800000;
+    }
+    uint32_t h = (exp > 0 ? exp << 10 : 0) | (mant >> shift);
+    const uint32_t rem = mant & ((1u << shift) - 1), half = 1u << (shift - 1);
+    if (rem > half || (rem == half && (h & 1))) h++;
+    return sign | h;
+}
+
+static float
+peak_of_half_data(const uint8_t *data, const size_t sz) {
+    // the largest color component, at least SDR white
+    float ans = 1.f;
+    const uint16_t *p = (const uint16_t *)data;
+    for (size_t i = 0; i + 3 < sz / sizeof(uint16_t); i += 4) {
+        for (unsigned c = 0; c < 3; c++) {
+            const float v = half_to_float(p[i + c]);
+            if (v > ans && v < INFINITY) ans = v;
+        }
+    }
+    return ans;
+}
+
 static bool
 is_file_transmission(const unsigned char transmission_type) {
     return transmission_type == 'f' || transmission_type == 't' || transmission_type == 's';
@@ -1022,6 +1068,8 @@ handle_add_command(GraphicsManager *self, const GraphicsCommand *g, const uint8_
             .height = img->height,
             .transient = (g->usage_hints & GRAPHICS_USAGE_HINT_TRANSIENT) != 0,
         };
+        img->tone_map = g->tone_map == 1;
+        img->peak = img->root_frame.is_float ? peak_of_half_data(self->currently_loading.data, required_sz) : 0;
         if (!is_query) {
             // Upload before caching, the cache takes ownership of the data
             upload_to_gpu(self, img, img->root_frame.is_opaque, img->root_frame.is_float, img->root_frame.is_4byte_aligned, self->currently_loading.data);
@@ -1585,6 +1633,8 @@ grman_update_layers(
             rd->image_id = img->internal_id;
             rd->ref_id = ref->internal_id;
             rd->texture_id = texture_id_for_img(img);
+            rd->peak = img->peak;
+            rd->tone_map = img->tone_map;
             img->is_drawn = true;
             refitr = vt_next(refitr);
         }
@@ -1668,38 +1718,6 @@ typedef struct {
     uint32_t over_width, over_height, under_width, under_height, over_offset_x, over_offset_y, under_offset_x, under_offset_y;
     uint32_t stride;
 } ComposeData;
-
-static inline float
-half_to_float(const uint16_t h) {
-    const unsigned exp = (h >> 10) & 0x1f, mant = h & 0x3ff;
-    float ans;
-    if (exp == 0) ans = ldexpf((float)mant, -24);
-    else if (exp == 31) ans = mant ? NAN : INFINITY;
-    else ans = ldexpf((float)(0x400 | mant), (int)exp - 25);
-    return h & 0x8000 ? -ans : ans;
-}
-
-static inline uint16_t
-float_to_half(const float f) {
-    // round to nearest even, as the hardware conversions do
-    uint32_t bits, mant;
-    memcpy(&bits, &f, sizeof(bits));
-    const uint16_t sign = (bits >> 16) & 0x8000;
-    const int exp = (int)((bits >> 23) & 0xff) - 112;
-    mant = bits & 0x7fffff;
-    if (exp == 143) return sign | 0x7c00 | (mant ? 0x200 : 0); // inf or nan
-    if (exp >= 31) return sign | 0x7c00;
-    unsigned shift = 13;
-    if (exp <= 0) { // subnormal half
-        shift = 14 - exp;
-        if (shift > 24) return sign;
-        mant |= 0x800000;
-    }
-    uint32_t h = (exp > 0 ? exp << 10 : 0) | (mant >> shift);
-    const uint32_t rem = mant & ((1u << shift) - 1), half = 1u << (shift - 1);
-    if (rem > half || (rem == half && (h & 1))) h++;
-    return sign | h;
-}
 
 static void
 blend_over_half(uint8_t *under_row, const uint8_t *over_row, const unsigned num_px) {
@@ -1949,6 +1967,7 @@ handle_animation_frame_load_command(GraphicsManager *self, GraphicsCommand *g, I
     if (load_data->data_sz < bytes_per_pixel * load_data->width * load_data->height)
         ABRT("ENODATA", "Insufficient image data %zu < %zu", load_data->data_sz, bytes_per_pixel * g->data_width * g->data_height);
     if (load_data->width > img->width) ABRT("EINVAL", "Frame width %u larger than image width: %u", load_data->width, img->width);
+    if (load_data->is_float) img->peak = MAX(img->peak, peak_of_half_data(load_data->data, load_data->data_sz));
     if (load_data->height > img->height) ABRT("EINVAL", "Frame height %u larger than image height: %u", load_data->height, img->height);
     if (is_new_frame && cache_size(self) + load_data->data_sz > self->storage_limit * 5) {
         remove_images(self, trim_predicate, img->internal_id);
@@ -2850,7 +2869,7 @@ image_as_dict(GraphicsManager *self, Image *img) {
         "{sI sI sI sI sI sI sI "
         "sO sI sO "
         "sI sI sI "
-        "sI sy# sN}",
+        "sI sy# sN sO sf}",
         "texture_id",
         texture_id_for_img(img),
         U(client_id),
@@ -2876,7 +2895,10 @@ image_as_dict(GraphicsManager *self, Image *img) {
         cfd.buf,
         (Py_ssize_t)(pixel_size(cfd.is_opaque, cfd.is_float) * img->width * img->height),
         "extra_frames",
-        frames);
+        frames,
+        B(tone_map),
+        "peak",
+        (double)img->peak);
     free(cfd.buf);
     return ans;
 #undef B

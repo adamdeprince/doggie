@@ -1158,7 +1158,7 @@ class TestParser(BaseTest):
             for f in (
                 'format more id data_sz data_offset width height x_offset y_offset data_height data_width cursor_movement'
                 ' num_cells num_lines cell_x_offset cell_y_offset z_index placement_id image_number quiet unicode_placement'
-                ' parent_id parent_placement_id usage_hints offset_from_parent_x offset_from_parent_y'
+                ' parent_id parent_placement_id usage_hints offset_from_parent_x offset_from_parent_y tone_map'
             ).split():
                 k.setdefault(f, 0)
             p = k.pop('payload', '')

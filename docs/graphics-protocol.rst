@@ -1097,6 +1097,8 @@ Key      Value                 Default    Description
 ``m``    zero or one           ``0``      Whether there is more chunked data available.
 ``N``    bitmask               ``0``      Usage hints from the client to the terminal about the intended use of
                                           the image.
+``T``    ``0, 1``              ``0``      Whether to compress the bright parts of an HDR image into the range the
+                                          display can show, see the :doc:`hdr-protocol`.
 **Keys for image display**
 -----------------------------------------------------------
 ``x``    Positive integer      ``0``      The left edge (in pixels) of the image area to display

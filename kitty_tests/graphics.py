@@ -1771,6 +1771,14 @@ class TestGraphics(BaseTest):
         self.assertEqual(li(payload=px(1.0, 1.0, 1.0, 1.0), s=1, v=1, f=64, Y=0xff00007f).code, 'OK')
         img = g.image_for_client_id(1)
         self.assertEqual(pixels(img['extra_frames'][2]['data']), ((1.0, 1.0, 1.0, 1.0),) + ((1.0, 0.0, 0.0, unpack('<e', pack('<e', 127 / 255))[0]),) * 3)
+        # the peak used for tone mapping covers all frames
+        self.assertEqual((img['tone_map'], img['peak']), (False, 2.0))
+        self.assertEqual(li(payload=px(3.0, 0.25, 0.25, 1.0), s=1, v=1, f=64, i=3, a='t', T=1).code, 'OK')
+        img = g.image_for_client_id(3)
+        self.assertEqual((img['tone_map'], img['peak']), (True, 3.0))
+        self.assertEqual(li(payload=b'abcd', s=1, v=1, f=32, i=3, a='t', T=1).code, 'OK')
+        img = g.image_for_client_id(3)
+        self.assertEqual((img['tone_map'], img['peak']), (True, 0.0))
 
     def test_graphics_compose_canvas_bounds(self):
         from kitty.fast_data_types import create_canvas

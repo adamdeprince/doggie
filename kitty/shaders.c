@@ -1157,6 +1157,9 @@ draw_graphics(int program, ImageRenderData *data, GLuint start, GLuint count, fl
     for (GLuint i = 0; i < count;) {
         ImageRenderData *group = data + start + i;
         glBindTexture(GL_TEXTURE_2D, group->texture_id);
+        if (program != GRAPHICS_ALPHA_MASK_PROGRAM) {
+            glUniform1f(program_uniform_location(program, "tone_peak"), group->tone_map ? group->peak : 0.f);
+        }
         if (group->group_count == 0) {
             i++;
             continue;
