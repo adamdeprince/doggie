@@ -889,6 +889,19 @@ class TestScreen(BaseTest):
         c = s.line(1).cursor_from(1)
         self.ae(c.fg, (1 << 24) | (2 << 16) | (3 << 8) | 2)
 
+    def test_caps_query(self):
+        s = self.create_screen()
+        c = s.callbacks
+        parse_bytes(s, b'\x1b]777;caps;v=1:op=query:id=7\x1b\\')
+        self.ae(c.wtcbuf, b'\x1b]777;caps;v=1:op=cap:id=7:caps=1:ext=caps.1\x1b\\')
+        c.clear()
+        parse_bytes(s, b'\x1b]777;caps;v=2:op=query:id=7\x1b\\')
+        parse_bytes(s, b'\x1b]777;caps;v=1:op=query\x1b\\')
+        parse_bytes(s, b'\x1b]777;caps;v=1:op=mode:mode=1\x1b\\')
+        parse_bytes(s, b'\x1b]777;caps;garbage\x1b\\')
+        self.ae(c.wtcbuf, b'')
+        self.ae(str(s.line(0)), '')
+
     def test_cursor_hidden(self):
         s = self.create_screen()
         s.toggle_alt_screen()
