@@ -110,6 +110,10 @@ typedef struct {
     uint32_t client_id, client_number, width, height;
     TextureRef *texture;
     id_type internal_id;
+    // A GPU surface shared by a local client, see t=g in the graphics protocol
+    void *surface;
+    uint32_t surface_texture;
+    bool surface_is_bgra;
 
     bool root_frame_data_loaded;
     id_type ref_id_counter;

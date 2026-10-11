@@ -451,6 +451,12 @@ class TestGraphics(BaseTest):
             img = sl(p, s=1, v=1, f=f)
             self.ae(bool(img['is_4byte_aligned']), f == 32)
 
+        # Test GPU surfaces, a real one needs a GPU so only the error paths
+        self.assertTrue(pl('dmabuf:1', t='g', i=5).startswith('EINVAL:'))
+        self.assertTrue(pl('iosurface:0', a='q', t='g', i=5).startswith('EINVAL:'))
+        self.ae(pl('', a='r', i=77), 'ENOENT:Refresh command refers to non-existent image with id: 77 and number: 0')
+        self.ae(pl('', a='r', i=1), 'EINVAL:Refresh command refers to image with id: 1 that is not backed by a GPU surface')
+
         # Test chunked load
         self.assertIsNone(pl('abcd', s=2, v=2, m=1))
         self.assertIsNone(pl('efgh', m=1))

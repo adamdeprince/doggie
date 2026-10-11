@@ -351,6 +351,9 @@ Value of `t`          Meaning
                       The terminal emulator must read the data from the memory
                       object and then unlink and close it on POSIX and just
                       close it on Windows.
+``g``                 A *GPU surface* shared by a local client, see
+                      :ref:`gpu_surfaces` below. The pixel data never leaves
+                      the GPU.
 ==================    ============
 
 When opening files, the terminal emulator must follow symlinks. In case of
@@ -425,6 +428,50 @@ codes. Note that the cursor position used to display the image **must** be the
 position when the final chunk is received. Finally, terminals must not display
 anything, until the entire sequence is received and validated.
 
+
+.. _gpu_surfaces:
+
+GPU surfaces (zero-copy)
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+A local client that renders on the GPU, a video player or a drawing canvas, can
+share its output with the terminal without a single CPU copy by transmitting a
+*GPU surface*, ``t=g``. The payload is the name of the surface. On macOS it is
+``iosurface:<id>`` where ``<id>`` is the integer returned by
+``IOSurfaceGetID()``. The surface must be created with ``kIOSurfaceIsGlobal``
+set, otherwise ``IOSurfaceLookup()`` in the terminal cannot find it. Other
+kinds of surface, such as ``dmabuf:``, are reserved
+and refused with ``EINVAL``, as is ``t=g`` on platforms without an
+implementation. The surface must be 32-bit ``BGRA`` or ``RGBA`` with straight
+(not pre-multiplied) alpha, as for ``f=32``. The ``f``, ``s`` and ``v`` keys
+are ignored, the dimensions and pixel format come from the surface itself.
+Chunking (``m``) and compression (``o``) are not allowed with ``t=g``.
+
+The terminal looks the surface up, keeps a reference to it for as long as the
+image exists, and samples it directly on the GPU. The image is *live*: it
+shows whatever the surface contains at the time the terminal draws, but the
+terminal only redraws when told to. After updating the surface, the client
+sends the refresh action::
+
+    <ESC>_Ga=r,i=31<ESC>\
+
+which marks the image as changed so that the next frame shows the new
+content. The terminal responds ``OK`` unless responses are suppressed with
+``q``. Sending ``a=t`` or ``a=T`` again with ``t=g`` and the same surface
+for an existing image id is equivalent to a refresh followed by the usual
+placement. Deleting the image releases the surface. Animation frames
+(``a=f``) and composition (``a=c``) are not supported for surface backed
+images, the terminal responds with ``EINVAL``. ``a=q`` with ``t=g`` can be
+used to check for support, a terminal that does not know the medium
+responds with an error.
+
+Relays such as multiplexers or Goblin Skiff that forward a terminal session
+to another machine cannot pass the surface along, but they can read it. On
+macOS any process of the same user can call ``IOSurfaceLookup()`` with the
+id, then ``IOSurfaceLock()`` and ``IOSurfaceGetBaseAddress()`` to read the
+pixels. A relay can poll the surface, for instance on every refresh action,
+and forward the pixels to the far side with an ordinary ``t=d``
+transmission.
 
 Querying support and available transmission mediums
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -1069,9 +1116,10 @@ Key      Value                 Default    Description
 =======  ====================  =========  =================
 ``a``    Single character.     ``t``      The overall action this graphics command is performing.
          ``(a, c, d, f,                   ``t`` - transmit data, ``T`` - transmit data and display image,
-         p, q, t, T)``                    ``q`` - query terminal, ``p`` - put (display) previous transmitted image,
+         p, q, r, t, T)``                 ``q`` - query terminal, ``p`` - put (display) previous transmitted image,
                                           ``d`` - delete image, ``f`` - transmit data for animation frames,
-                                          ``a`` - control animation, ``c`` - compose animation frames
+                                          ``a`` - control animation, ``c`` - compose animation frames,
+                                          ``r`` - refresh an image backed by a GPU surface
 
 ``q``    ``0, 1, 2``           ``0``      Suppress responses from the terminal to this graphics command.
 
@@ -1080,7 +1128,7 @@ Key      Value                 Default    Description
 ``f``    Positive integer.     ``32``     The format in which the image data is sent.
          ``(24, 32, 100)``.
 ``t``    Single character.     ``d``      The transmission medium used.
-         ``(d, f, t, s)``.
+         ``(d, f, t, s, g)``.
 ``s``    Positive integer.     ``0``      The width of the image being sent.
 ``v``    Positive integer.     ``0``      The height of the image being sent.
 ``S``    Positive integer.     ``0``      The size of data to read from a file.
