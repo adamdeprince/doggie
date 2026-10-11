@@ -566,11 +566,12 @@ typedef struct GLFWScrollEvent {
     int keyboard_modifiers;
 } GLFWScrollEvent;
 
-// Touch events are reported only for direct touch devices, i.e. touchscreens,
-// where a touch has a position in the window. Indirect devices such as
-// touchpads are reported as pointer and scroll events instead. While touch
-// events are delivered for a window, the system does not also deliver
-// pointer events emulated from the same touches.
+// Touch events are reported for direct touch devices, i.e. touchscreens, where
+// a touch has a position in the window, and on macOS also for the touchpad, as
+// indirect events whose positions are on the device. Indirect devices are
+// reported as pointer and scroll events as well. While direct touch events are
+// delivered for a window, the system does not also deliver pointer events
+// emulated from the same touches.
 typedef enum GLFWTouchEventType {
     // The first finger of a sequence touched the window
     GLFW_TOUCH_BEGIN = 1,
@@ -600,8 +601,13 @@ typedef struct GLFWTouchPoint {
     // reuse it after the point is released
     int32_t id;
     GLFWTouchPointState state;
-    // In window content coordinates, the same as the cursor position
+    // In window content coordinates, the same as the cursor position, for a
+    // direct touch; for an indirect touch the position on the device, 0 to 1 on
+    // each axis with the origin at the top left
     double x, y;
+    // The axes of the ellipse of the contact in window content coordinates and
+    // its orientation in degrees clockwise from the vertical, zero when unknown
+    double major, minor, angle;
 } GLFWTouchPoint;
 
 typedef struct GLFWTouchEvent {
@@ -616,6 +622,10 @@ typedef struct GLFWTouchEvent {
     // are ignored. The array is valid only during the callback
     size_t num_points;
     const GLFWTouchPoint *points;
+    // The points are on a touchpad rather than on the window
+    bool indirect;
+    // The size of an indirect device in millimeters, zero when unknown
+    double device_width, device_height;
 } GLFWTouchEvent;
 
 /*! @defgroup joysticks Joysticks

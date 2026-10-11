@@ -33,6 +33,7 @@ please do so by opening issues in the `GitHub bug tracker
    file-transfer-protocol
    desktop-notifications
    pointer-shapes
+   touch-protocol
    unscroll
    color-stack
    deccara

@@ -581,9 +581,14 @@ dispatch_osc(PS *self, uint8_t *buf, size_t limit, bool is_extended_osc) {
             process_cwd_notification(self->screen, code, (char *)buf + i, limit - i);
             break;
         case 8: dispatch_hyperlink(self, (char *)buf + i); break;
+        case 777:
+            if (limit - i > 6 && memcmp(buf + i, "touch;", 6) == 0) {
+                screen_touch_osc(self->screen, (const char *)buf + i + 6, limit - i - 6);
+                break;
+            }
+            /* fallthrough */
         case 9:
         case 99:
-        case 777:
         case 1337:
             START_DISPATCH
             DISPATCH_OSC_WITH_CODE(desktop_notify)

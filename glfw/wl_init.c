@@ -388,7 +388,7 @@ touch_send_to_window(GLFWid window_id, GLFWTouchEventType type, TouchReportMode 
                 state = GLFW_TOUCH_POINT_RELEASED;
                 break;
         }
-        points[n++] = (GLFWTouchPoint){.id = p->id, .state = state, .x = p->x, .y = p->y};
+        points[n++] = (GLFWTouchPoint){.id = p->id, .state = state, .x = p->x, .y = p->y, .major = p->major, .minor = p->minor, .angle = p->orientation};
     }
     if (!n) return;
     GLFWTouchEvent ev = {.type = type, .keyboard_modifiers = _glfw.wl.xkb.states.modifiers, .timestamp = timestamp, .num_points = n, .points = points};
@@ -502,11 +502,22 @@ touchHandleCancel(void *data UNUSED, struct wl_touch *wl_touch UNUSED) {
     touch.count = 0;
 }
 
+// The shape and orientation of a point arrive before the motion or down event
+// they belong to, and are reported with it
 static void
-touchHandleShape(void *data UNUSED, struct wl_touch *wl_touch UNUSED, int32_t id UNUSED, wl_fixed_t major UNUSED, wl_fixed_t minor UNUSED) {}
+touchHandleShape(void *data UNUSED, struct wl_touch *wl_touch UNUSED, int32_t id, wl_fixed_t major, wl_fixed_t minor) {
+    const ssize_t i = touch_point_index(id);
+    if (i < 0) return;
+    touch.points[i].major = wl_fixed_to_double(major);
+    touch.points[i].minor = wl_fixed_to_double(minor);
+}
 
 static void
-touchHandleOrientation(void *data UNUSED, struct wl_touch *wl_touch UNUSED, int32_t id UNUSED, wl_fixed_t orientation UNUSED) {}
+touchHandleOrientation(void *data UNUSED, struct wl_touch *wl_touch UNUSED, int32_t id, wl_fixed_t orientation) {
+    const ssize_t i = touch_point_index(id);
+    if (i < 0) return;
+    touch.points[i].orientation = wl_fixed_to_double(orientation);
+}
 
 #undef touch
 

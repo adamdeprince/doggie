@@ -12,9 +12,10 @@ from kitty.fast_data_types import (
     create_mock_window,
     mock_mouse_selection,
     send_mock_mouse_event_to_window,
+    send_touch_report,
 )
 
-from .base import BaseTest
+from .base import BaseTest, parse_bytes
 
 
 def send_mouse_event(
@@ -415,6 +416,47 @@ class TestMouse(BaseTest):
         self.ae(sel(), '')
         multi_click(x=2.4)
         self.ae(sel(), '')
+
+    def test_touch_protocol(self):
+        from kitty.constants import is_macos
+
+        s = self.create_screen()
+        c = s.callbacks
+
+        def send(body):
+            c.clear()
+            parse_bytes(s, f'\x1b]777;touch;{body}\x1b\\'.encode())
+
+        def report(type, id, x, y, **kw):
+            c.clear()
+            return send_touch_report(s, type, id, x, y, **kw)
+
+        def ev(fields):
+            return f'\x1b]777;touch;v=1:op=event:{fields}\x1b\\'.encode()
+
+        send('v=1:op=query:id=42')
+        self.ae(c.wtcbuf, f'\x1b]777;touch;v=1:op=cap:id=42:caps={2 if is_macos else 0}\x1b\\'.encode())
+        self.assertFalse(report(1, 3, 256, 512))
+        send('v=1:op=mode:mode=1')
+        self.assertTrue(report(1, 3, 256, 512, t=1000, mods=3))
+        self.ae(c.wtcbuf, ev('type=down:t=1000:id=3:x=256:y=512:mods=3:src=screen'))
+        report(2, 3, 300, 512, t=1016, major=1280, minor=768, angle=4500)
+        self.ae(c.wtcbuf, ev('type=move:t=1016:id=3:x=300:y=512:mods=0:src=screen:major=1280:minor=768:angle=4500'))
+        report(5, 0, 0, 0, t=1016)
+        self.ae(c.wtcbuf, ev('type=frame:t=1016'))
+        report(3, 3, 300, 512, t=1032)
+        self.ae(c.wtcbuf, ev('type=up:t=1032:id=3:x=300:y=512:mods=0:src=screen'))
+        report(1, 0, 32767, 65535, t=2000, pad=True, w=40960, h=25600)
+        self.ae(c.wtcbuf, ev('type=down:t=2000:id=0:x=32767:y=65535:mods=0:src=pad:w=40960:h=25600'))
+        report(4, 0, 32767, 65535, t=2001, pad=True)
+        self.ae(c.wtcbuf, ev('type=cancel:t=2001:id=0:x=32767:y=65535:mods=0:src=pad'))
+        self.assertFalse(report(6, 0, 0, 0))
+        send('v=1:op=mode:mode=0')
+        self.assertFalse(report(1, 3, 256, 512))
+        send('v=1:op=mode:mode=1')
+        self.assertTrue(report(1, 3, 256, 512))
+        s.reset()
+        self.assertFalse(report(1, 3, 256, 512))
 
     def test_v120_scroll_direction_reversal(self):
         # A high resolution wheel delivers one physical detent as several

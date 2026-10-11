@@ -933,6 +933,7 @@ static void _glfwUpdateNotchCover(_GLFWwindow *);
         input_source_at_last_key_event = nil;
         in_key_handler = 0;
         self.identifier = @"kitty-content-view";
+        [self setAllowedTouchTypes:NSTouchTypeMaskIndirect];
 
         [self updateTrackingAreas];
         char tab_mime[64], window_mime[64];
@@ -1439,6 +1440,89 @@ is_modifier_pressed(NSUInteger flags, NSUInteger target_mask, NSUInteger other_m
 
     _glfwInputScroll(window, &ev);
 }
+
+// Touches {{{
+// The fingers on the trackpad, reported as indirect touches with positions on
+// the device. The system identifies a finger by an object, which is mapped to a
+// small integer for as long as the finger is down.
+static id touch_identities[16];
+
+static int
+touchId(NSTouch *touch, bool allocate) {
+    int free_slot = -1;
+    for (int i = 0; i < (int)arraysz(touch_identities); i++) {
+        if (touch_identities[i]) {
+            if ([touch_identities[i] isEqual:touch.identity]) return i;
+        } else if (free_slot < 0) free_slot = i;
+    }
+    if (!allocate || free_slot < 0) return -1;
+    touch_identities[free_slot] = [touch.identity retain];
+    return free_slot;
+}
+
+static void
+handleTouches(_GLFWwindow *window, NSView *view, NSEvent *event, GLFWTouchEventType type) {
+    GLFWTouchPoint points[arraysz(touch_identities)];
+    size_t n = 0, down_before = 0, down_after = 0;
+    NSSize device = NSZeroSize;
+    for (NSTouch *touch in [event touchesMatchingPhase:NSTouchPhaseAny inView:view]) {
+        GLFWTouchPointState state;
+        switch (touch.phase) {
+            case NSTouchPhaseBegan: state = GLFW_TOUCH_POINT_PRESSED; break;
+            case NSTouchPhaseMoved: state = GLFW_TOUCH_POINT_MOVED; break;
+            case NSTouchPhaseStationary: state = GLFW_TOUCH_POINT_STATIONARY; break;
+            case NSTouchPhaseEnded:
+            case NSTouchPhaseCancelled: state = GLFW_TOUCH_POINT_RELEASED; break;
+            default: continue;
+        }
+        const int id = touchId(touch, state == GLFW_TOUCH_POINT_PRESSED);
+        if (id < 0) continue;
+        if (state != GLFW_TOUCH_POINT_PRESSED) down_before++;
+        if (state != GLFW_TOUCH_POINT_RELEASED) down_after++;
+        device = touch.deviceSize;
+        // The normalized position has its origin at the bottom left
+        points[n++] = (GLFWTouchPoint){.id = id, .state = state, .x = touch.normalizedPosition.x, .y = 1 - touch.normalizedPosition.y};
+        if (n >= arraysz(points)) break;
+    }
+    if (!n) return;
+    if (type != GLFW_TOUCH_CANCEL) type = !down_before ? GLFW_TOUCH_BEGIN : (down_after ? GLFW_TOUCH_UPDATE : GLFW_TOUCH_END);
+    // Event timestamps and systemUptime are on the same clock
+    const double age = [[NSProcessInfo processInfo] systemUptime] - [event timestamp];
+    GLFWTouchEvent ev = {
+        .type = type,
+        .keyboard_modifiers = translateFlags([event modifierFlags]),
+        .timestamp = monotonic() - s_double_to_monotonic_t(MAX(0, age)),
+        .num_points = n,
+        .points = points,
+        .indirect = true,
+        // The device size is in points, 72 to the inch
+        .device_width = device.width * 25.4 / 72,
+        .device_height = device.height * 25.4 / 72,
+    };
+    _glfwInputTouch(window, &ev);
+    for (size_t i = 0; i < n; i++) {
+        if (points[i].state != GLFW_TOUCH_POINT_RELEASED) continue;
+        [touch_identities[points[i].id] release];
+        touch_identities[points[i].id] = nil;
+    }
+}
+
+- (void)touchesBeganWithEvent:(NSEvent *)event {
+    handleTouches(window, self, event, GLFW_TOUCH_BEGIN);
+}
+
+- (void)touchesMovedWithEvent:(NSEvent *)event {
+    handleTouches(window, self, event, GLFW_TOUCH_UPDATE);
+}
+
+- (void)touchesEndedWithEvent:(NSEvent *)event {
+    handleTouches(window, self, event, GLFW_TOUCH_END);
+}
+
+- (void)touchesCancelledWithEvent:(NSEvent *)event {
+    handleTouches(window, self, event, GLFW_TOUCH_CANCEL);
+}
+// }}}
 
 // Drop implementation for drag and drop {{{
 // Return YES to receive periodic dragging updates even when the mouse hasn't moved.

@@ -1687,6 +1687,130 @@ scroll_event(const GLFWScrollEvent *ev) {
     }
 }
 
+// Touch {{{
+// The touch protocol, see docs/touch-protocol.rst
+
+static id_type touch_window_id;  // the window that captured the contacts in progress
+
+bool
+screen_touch_report(Screen *screen, int type, int id, int x, int y, unsigned long long t, int mods, bool pad, int major, int minor, int angle, int w, int h) {
+    if (!screen->touch.version || type < TOUCH_DOWN || type > TOUCH_FRAME) return false;
+    static const char *names[] = {"", "down", "move", "up", "cancel", "frame"};
+    char buf[256];
+    int n = snprintf(buf, sizeof(buf), "777;touch;v=1:op=event:type=%s:t=%llu", names[type], t);
+    if (type != TOUCH_FRAME) {
+        n += snprintf(buf + n, sizeof(buf) - n, ":id=%d:x=%d:y=%d:mods=%d:src=%s", id, x, y, mods, pad ? "pad" : "screen");
+        if (pad) {
+            if (w > 0 && h > 0) snprintf(buf + n, sizeof(buf) - n, ":w=%d:h=%d", w, h);
+        } else if (major > 0) snprintf(buf + n, sizeof(buf) - n, ":major=%d:minor=%d:angle=%d", major, minor, angle);
+    }
+    write_escape_code_to_child(screen, ESC_OSC, buf);
+    return true;
+}
+
+static unsigned
+touch_caps(void) {
+#ifdef __APPLE__
+    return 2;
+#else
+    return global_state.is_wayland ? 5 : 0;
+#endif
+}
+
+void
+screen_touch_osc(Screen *screen, const char *data, size_t sz) {
+    char buf[128], reply[128], *saveptr = NULL;
+    const char *op = "";
+    int v = 0, mode = -1, id = -1;
+    if (sz >= sizeof(buf)) return;
+    memcpy(buf, data, sz);
+    buf[sz] = 0;
+    for (char *tok = strtok_r(buf, ":", &saveptr); tok; tok = strtok_r(NULL, ":", &saveptr)) {
+        char *val = strchr(tok, '=');
+        if (!val) return;
+        *val++ = 0;
+        if (!strcmp(tok, "v")) v = atoi(val);
+        else if (!strcmp(tok, "op")) op = val;
+        else if (!strcmp(tok, "mode")) mode = atoi(val);
+        else if (!strcmp(tok, "id")) id = atoi(val);
+    }
+    if (v != 1) return;
+    if (!strcmp(op, "query") && id >= 0) {
+        snprintf(reply, sizeof(reply), "777;touch;v=1:op=cap:id=%d:caps=%u", id, touch_caps());
+        write_escape_code_to_child(screen, ESC_OSC, reply);
+    } else if (!strcmp(op, "mode") && mode >= 0) screen->touch.version = mode ? v : 0;
+}
+
+// Reports the contacts of a touch event to the window that captured them, the
+// window under the first finger, or under the pointer for a touchpad. Returns
+// true when a window captured the event, so that it is not also turned into
+// mouse events
+bool
+touch_event(const GLFWTouchEvent *ev) {
+    OSWindow *osw = global_state.callback_os_window;
+    Window *w = NULL;
+    if (ev->type == GLFW_TOUCH_BEGIN) {
+        if (ev->indirect) w = mouse_region(false, false).window;
+        else if (ev->num_points) {
+            // Locate the window under the finger without moving the mouse
+            const double mouse_x = osw->mouse_x, mouse_y = osw->mouse_y;
+            osw->mouse_x = ev->points[0].x * osw->viewport_x_ratio;
+            osw->mouse_y = ev->points[0].y * osw->viewport_y_ratio;
+            w = mouse_region(false, false).window;
+            osw->mouse_x = mouse_x;
+            osw->mouse_y = mouse_y;
+        }
+        if (w && !w->render_data.screen->touch.version) w = NULL;
+        touch_window_id = w ? w->id : 0;
+    } else if (touch_window_id) w = window_for_window_id(touch_window_id);
+    if (ev->type == GLFW_TOUCH_END || ev->type == GLFW_TOUCH_CANCEL) touch_window_id = 0;
+    if (!w) return false;
+    Screen *screen = w->render_data.screen;
+    const WindowGeometry *g = &w->render_data.geometry;
+    const unsigned long long t = monotonic_t_to_ms(ev->timestamp);
+    const int mods = (ev->keyboard_modifiers & GLFW_MOD_SHIFT ? 1 : 0) | (ev->keyboard_modifiers & GLFW_MOD_ALT ? 2 : 0) |
+                     (ev->keyboard_modifiers & GLFW_MOD_CONTROL ? 4 : 0) | (ev->keyboard_modifiers & GLFW_MOD_SUPER ? 8 : 0);
+#define coord(v) (int)round(MIN(MAX((v), -1073741823.), 1073741823.))
+    const int dw = coord(ev->device_width * 256), dh = coord(ev->device_height * 256);
+    bool reported = false;
+    for (size_t i = 0; i < ev->num_points; i++) {
+        const GLFWTouchPoint *p = ev->points + i;
+        int type, x, y, major = 0, minor = 0, angle = 0;
+        switch (p->state) {
+            case GLFW_TOUCH_POINT_PRESSED: type = TOUCH_DOWN; break;
+            case GLFW_TOUCH_POINT_MOVED: type = TOUCH_MOVE; break;
+            case GLFW_TOUCH_POINT_RELEASED: type = ev->type == GLFW_TOUCH_CANCEL ? TOUCH_CANCEL : TOUCH_UP; break;
+            default: continue;
+        }
+        if (ev->indirect) {
+            x = coord(p->x * 65535);
+            y = coord(p->y * 65535);
+        } else {
+            x = coord((p->x * osw->viewport_x_ratio - g->left) * 256);
+            y = coord((p->y * osw->viewport_y_ratio - g->top) * 256);
+            major = coord(p->major * osw->viewport_x_ratio * 256);
+            minor = coord(p->minor * osw->viewport_y_ratio * 256);
+            angle = coord(p->angle * 100);
+        }
+        reported |= screen_touch_report(screen, type, p->id, x, y, t, mods, ev->indirect, major, minor, angle, dw, dh);
+    }
+#undef coord
+    if (reported) screen_touch_report(screen, TOUCH_FRAME, 0, 0, 0, t, 0, false, 0, 0, 0, 0, 0);
+    return true;
+}
+
+static PyObject *
+send_touch_report(PyObject *self UNUSED, PyObject *args, PyObject *kw) {
+    Screen *screen;
+    int type, id, x, y, mods = 0, pad = 0, major = 0, minor = 0, angle = 0, w = 0, h = 0;
+    unsigned long long t = 0;
+    static const char *kwlist[] = {"screen", "type", "id", "x", "y", "t", "mods", "pad", "major", "minor", "angle", "w", "h", NULL};
+    if (!PyArg_ParseTupleAndKeywords(args, kw, "O!iiii|Kipiiiii", (char **)kwlist, &Screen_Type, &screen, &type, &id, &x, &y, &t, &mods, &pad, &major, &minor, &angle, &w, &h)) return NULL;
+    if (screen_touch_report(screen, type, id, x, y, t, mods, pad, major, minor, angle, w, h)) Py_RETURN_TRUE;
+    Py_RETURN_FALSE;
+}
+// }}}
+
 static PyObject *
 send_mouse_event(PyObject *self UNUSED, PyObject *args, PyObject *kw) {
     Screen *screen;
@@ -1822,6 +1946,7 @@ test_scale_scroll(PyObject *self UNUSED, PyObject *args) {
 
 static PyMethodDef module_methods[] = {
     {"send_mouse_event", (PyCFunction)(void (*)(void))(send_mouse_event), METH_VARARGS | METH_KEYWORDS, NULL},
+    {"send_touch_report", (PyCFunction)(void (*)(void))(send_touch_report), METH_VARARGS | METH_KEYWORDS, NULL},
     METHODB(test_encode_mouse, METH_VARARGS),
     METHODB(test_scale_scroll, METH_VARARGS),
     METHODB(send_mock_mouse_event_to_window, METH_VARARGS),

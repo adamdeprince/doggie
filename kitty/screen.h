@@ -154,6 +154,9 @@ typedef struct {
     pthread_mutex_t write_buf_lock;
 
     CursorRenderInfo cursor_render_info;
+    struct {
+        unsigned version;  // of the touch protocol the child asked for, 0 when off, see docs/touch-protocol.rst
+    } touch;
 
     DisableLigature disable_ligatures;
     PyObject *marker;
@@ -310,6 +313,9 @@ bool screen_has_selection(Screen *);
 bool screen_is_cell_selected(Screen *, index_type x, index_type y);
 bool screen_invert_colors(Screen *self);
 void screen_update_cell_data(Screen *self, void *address, FONTS_DATA_HANDLE, bool cursor_has_moved);
+typedef enum TouchReportType { TOUCH_DOWN = 1, TOUCH_MOVE, TOUCH_UP, TOUCH_CANCEL, TOUCH_FRAME } TouchReportType;
+void screen_touch_osc(Screen *self, const char *data, size_t sz);
+bool screen_touch_report(Screen *self, int type, int id, int x, int y, unsigned long long t, int mods, bool pad, int major, int minor, int angle, int w, int h);
 bool screen_is_cursor_visible(const Screen *self);
 unsigned screen_multi_cursor_count(const Screen *self);
 bool screen_selection_range_for_line(Screen *self, index_type y, index_type *start, index_type *end);

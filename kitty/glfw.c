@@ -882,6 +882,12 @@ touch_callback(GLFWwindow *w, const GLFWTouchEvent *ev) {
         }
         timed_debug_print("\x1b[33mTouch\x1b[m %s modifiers: %s%s\n", touch_event_type_name(ev->type), format_mods(ev->keyboard_modifiers), points);
     }
+    // A window that asked for the touch protocol gets the fingers themselves
+    if (is_window_ready_for_callbacks() && touch_event(ev)) {
+        request_tick_callback();
+        global_state.callback_os_window = NULL;
+        return;
+    }
     const int mods = ev->keyboard_modifiers;
     // The OS window of a gesture can close before its fingers lift, and then it
     // gets no more events
