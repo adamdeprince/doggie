@@ -14,7 +14,7 @@ from kitty.fast_data_types import (
     send_mock_mouse_event_to_window,
 )
 
-from .base import BaseTest
+from .base import BaseTest, parse_bytes
 
 
 def send_mouse_event(
@@ -415,6 +415,37 @@ class TestMouse(BaseTest):
         self.ae(sel(), '')
         multi_click(x=2.4)
         self.ae(sel(), '')
+
+    def test_scroll_protocol(self):
+        from kitty.fast_data_types import send_scroll_report
+
+        self.set_options()  # scroll_delta reads the scroll multipliers
+        s = self.create_screen()
+        c = s.callbacks
+
+        def send(body):
+            c.clear()
+            parse_bytes(s, f'\x1b]777;scroll;{body}\x1b\\'.encode())
+
+        def report(x_offset, y_offset, **kw):
+            c.clear()
+            return send_scroll_report(s, x_offset, y_offset, **kw)
+
+        send('v=1:op=query:id=7')
+        self.ae(c.wtcbuf, b'\x1b]777;scroll;v=1:op=cap:id=7:caps=1\x1b\\')
+        self.assertFalse(report(0, 3))
+        send('v=1:op=mode:mode=1')
+        # a trackpad: precise pixels, a finger gesture in progress, shift held
+        self.assertTrue(report(0, -2.5, offset_type=2, phase=3, mods=1, x=33.4, y=12))
+        self.ae(c.wtcbuf, b'\x1b]777;scroll;v=1:op=event:dx=0:dy=250:x=33:y=12:mods=1:src=1:phase=2\x1b\\')
+        # a wheel: one notch left converted to pixels, momentum ended
+        report(120, 0, offset_type=1, momentum=4)
+        self.ae(c.wtcbuf, b'\x1b]777;scroll;v=1:op=event:dx=-5000:dy=0:x=0:y=0:mods=0:src=0:phase=6\x1b\\')
+        send('v=1:op=mode:mode=0')
+        self.assertFalse(report(0, 1))
+        send('v=1:op=mode:mode=1')
+        s.reset()
+        self.assertFalse(report(0, 1))
 
     def test_v120_scroll_direction_reversal(self):
         # A high resolution wheel delivers one physical detent as several

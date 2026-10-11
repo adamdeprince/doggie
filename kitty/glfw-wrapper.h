@@ -302,6 +302,7 @@ typedef struct GLFWScrollEvent {
         double x, y;
     } unscaled; // unscaled offsets, aka logical pixels
     GLFWMomentumType momentum_type;
+    GLFWMomentumType scroll_phase; // phase of the finger gesture producing the scroll, macOS only
     GLFWOffsetType offset_type;
     int keyboard_modifiers;
 } GLFWScrollEvent;

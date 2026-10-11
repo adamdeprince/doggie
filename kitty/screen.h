@@ -144,6 +144,7 @@ typedef struct {
     unsigned int history_line_added_count;
     bool *tabstops, *main_tabstops, *alt_tabstops;
     ScreenModes modes, saved_modes;
+    unsigned scroll_reports;  // version of the scroll protocol the child asked for, 0 when off
     ColorProfile *color_profile;
     monotonic_t start_visual_bell_at;
     monotonic_t start_drag_overlay_at; // 0 = inactive
@@ -265,6 +266,7 @@ void screen_backtab(Screen *self, unsigned int);
 void screen_clear_tab_stop(Screen *self, unsigned int how);
 void screen_reset_tab_stops(Screen *self);
 void screen_set_mode(Screen *self, unsigned int mode);
+void screen_scroll_protocol(Screen *self, const char *data, size_t sz);
 void screen_reset_mode(Screen *self, unsigned int mode);
 void screen_decsace(Screen *self, unsigned int);
 void screen_xtversion(Screen *self, unsigned int);
