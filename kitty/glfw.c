@@ -3186,6 +3186,30 @@ should_os_window_be_rendered(OSWindow *w) {
     return is_os_window_potentially_visible(w) && glfwAreSwapsAllowed(w->handle);
 }
 
+unsigned
+os_window_refresh_period_us(OSWindow *w) {
+    // The monitor the window overlaps most, the primary one when positions are unknown
+    int count = 0, wx = 0, wy = 0, ww = 0, wh = 0, best_overlap = -1;
+    const GLFWvidmode *best = NULL;
+    GLFWmonitor **monitors = glfwGetMonitors(&count);
+    if (!global_state.is_wayland) {
+        glfwGetWindowPos(w->handle, &wx, &wy);
+        glfwGetWindowSize(w->handle, &ww, &wh);
+    }
+    for (int i = 0; i < count; i++) {
+        const GLFWvidmode *vm = glfwGetVideoMode(monitors[i]);
+        if (!vm) continue;
+        int mx, my;
+        glfwGetMonitorPos(monitors[i], &mx, &my);
+        int overlap = MAX(0, MIN(wx + ww, mx + vm->width) - MAX(wx, mx)) * MAX(0, MIN(wy + wh, my + vm->height) - MAX(wy, my));
+        if (overlap > best_overlap) {
+            best = vm;
+            best_overlap = overlap;
+        }
+    }
+    return best && best->refreshRate > 0 ? 1000000u / (unsigned)best->refreshRate : 0;
+}
+
 static PyObject *
 primary_monitor_size(PYNOARG) {
     GLFWmonitor *monitor = glfwGetPrimaryMonitor();

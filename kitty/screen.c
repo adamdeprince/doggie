@@ -214,6 +214,7 @@ do_screen_reset(Screen *self, bool is_hard_reset) {
     self->extra_cursors.dirty = true;
     self->main_pointer_shape_stack.count = 0;
     self->alternate_pointer_shape_stack.count = 0;
+    self->frame_feedback.on = false;
     if (is_hard_reset && self->linebuf == self->alt_linebuf) screen_toggle_screen_buffer(self, true, true);
     if (screen_is_overlay_active(self)) {
         deactivate_overlay_line(self);
@@ -1787,6 +1788,44 @@ write_escape_code_to_child(Screen *self, unsigned char which, const char *data) 
 static void
 send_visibility_report(Screen *self) {
     write_escape_code_to_child(self, ESC_CSI, self->visibility_state != 2 ? "?999;1n" : "?999;2n");
+}
+
+void
+screen_frame_feedback(Screen *self, const char *data, size_t sz) {
+    char buf[128], reply[128], *saveptr = NULL;
+    const char *op = "";
+    int v = 0, mode = -1, id = -1;
+    if (sz >= sizeof(buf)) return;
+    memcpy(buf, data, sz);
+    buf[sz] = 0;
+    for (char *tok = strtok_r(buf, ":", &saveptr); tok; tok = strtok_r(NULL, ":", &saveptr)) {
+        char *val = strchr(tok, '=');
+        if (!val) return;
+        *val++ = 0;
+        if (!strcmp(tok, "v")) v = atoi(val);
+        else if (!strcmp(tok, "op")) op = val;
+        else if (!strcmp(tok, "mode")) mode = atoi(val);
+        else if (!strcmp(tok, "id")) id = atoi(val);
+    }
+    if (v != 1) return;
+    if (!strcmp(op, "query") && id >= 0) {
+        OSWindow *os_window = os_window_for_kitty_window(self->window_id);
+        snprintf(reply, sizeof(reply), "777;frame;v=1:op=cap:id=%d:caps=1:period=%u", id, os_window ? os_window_refresh_period_us(os_window) : 0);
+        write_escape_code_to_child(self, ESC_OSC, reply);
+    } else if (!strcmp(op, "mode") && mode >= 0) {
+        self->frame_feedback.on = mode != 0;
+        self->frame_feedback.pending = false;
+        self->frame_feedback.seq = 0;
+    }
+}
+
+void
+screen_frame_presented(Screen *self, unsigned period_us, monotonic_t now) {
+    char buf[96];
+    if (!self->frame_feedback.on || !self->frame_feedback.pending) return;
+    self->frame_feedback.pending = false;
+    snprintf(buf, sizeof(buf), "777;frame;v=1:op=event:seq=%u:t=%llu:period=%u", ++self->frame_feedback.seq, (unsigned long long)monotonic_t_to_ms(now), period_us);
+    write_escape_code_to_child(self, ESC_OSC, buf);
 }
 
 void

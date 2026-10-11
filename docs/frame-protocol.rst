@@ -1,0 +1,104 @@
+Frame presentation protocol
+==============================
+
+.. versionadded:: 0.50.0
+
+Synchronized updates (private mode 2026) let a program hand the terminal a
+whole frame at once, so that it is shown without tearing. What the program
+cannot learn is when that frame reached the screen, so programs that animate,
+draw strokes as they are made, or play video pace themselves with timers and
+either waste work on frames the display never shows or lag behind it. The
+frame presentation protocol is the other half: a report after each frame the
+terminal presents that contains output from the program. It is an open
+terminal extension in the manner of the :doc:`tablet-protocol`: small,
+unobtrusive, easy to implement, and no change to what the TTY is.
+
+Framing
+-------------
+
+Frames are ``OSC 777`` with the ``frame`` selector::
+
+    <OSC> 777 ; frame ; <fields> <ST>
+
+``<OSC>`` is ``<ESC> ]`` and ``<ST>`` is ``<ESC> \``; ``BEL`` is also
+accepted as a terminator. Fields are ASCII ``key=value`` pairs separated by
+colons, in any order, with decimal integers that carry no leading ``+``. A
+frame with a missing required field or an unknown version is ignored as a
+whole and never reaches a program as keystrokes. Spaces in the examples below
+are for clarity only.
+
+Every frame has ``v``, the protocol version, which is ``1``, and ``op``, one
+of ``query``, ``cap``, ``mode`` and ``event``.
+
+Discovery
+-------------
+
+A program asks the terminal whether it supports the protocol::
+
+    <OSC> 777 ; frame ; v=1 : op=query : id=42 <ST>
+
+``id`` is a non-negative 31 bit integer of the program's choosing, echoed in
+the reply so replies can be matched to queries. A supporting terminal answers::
+
+    <OSC> 777 ; frame ; v=1 : op=cap : id=42 : caps=1 : period=8333 <ST>
+
+``caps`` is a bit set of what the terminal can report, currently always
+``1`` for presentation events. ``period`` is the refresh period of the display
+the window is on, in microseconds, or ``0`` when the terminal does not know
+it. It changes when the window moves to another display, so a program that
+cares queries again from time to time, or simply uses the value carried by
+every event. A terminal that does not support the protocol ignores the query,
+so a program must time out and fall back to timers.
+
+Mode
+--------
+
+Reports are off by default and turned on per terminal window with::
+
+    <OSC> 777 ; frame ; v=1 : op=mode : mode=1 <ST>
+
+and off with ``mode=0``. Turning the mode on resets the sequence counter. The
+mode is local to the window and is reset by ``RIS``. Programs must turn it
+off when they exit, suspend or fail, and turn it back on when resumed.
+Multiplexers keep it with the rest of the terminal state and turn it off when
+detaching. There is no user setting that overrides the program's choice.
+
+Reports
+-----------
+
+While the mode is on, the terminal sends one report each time it presents a
+frame to the display that contains output the program wrote since the previous
+report::
+
+    <OSC> 777 ; frame ; v=1 : op=event : seq=17 : t=408211 : period=8333 <ST>
+
+``seq`` counts reports since the mode was turned on. ``t`` is the time the
+frame was handed to the display system, in milliseconds on a monotonic clock
+of the terminal's choosing, useful only for differences between reports.
+``period`` is the refresh period in microseconds as in the ``cap`` reply.
+
+A frame is reported once, however much output it contains, and a program that
+writes nothing receives nothing, so an idle program is never woken. The
+command that turns the mode on is itself output, so the first report follows
+the next presented frame and tells the program the period without a query. Output
+that does not change what is on screen may still be followed by a report,
+since the terminal counts output, not visible change. When the window is
+hidden or on an inactive tab no frames are presented and no reports are sent,
+so a program must never block indefinitely waiting for one: wait with a
+timeout, a few refresh periods long, and carry on.
+
+Pacing with synchronized updates
+-------------------------------------
+
+The intended use is a render loop that submits a frame inside ``CSI ? 2026 h``
+and ``CSI ? 2026 l``, then waits for the report before starting the next one.
+With reports arriving once per presented frame, the program draws exactly as
+fast as the display shows and no faster, and the difference between the ``t``
+of consecutive reports tells it the frame rate it is actually achieving. A
+program that renders faster than the display should drop or merge frames
+rather than queue them, since the terminal shows only the most recent output
+at each presentation.
+
+Reports are written to the program's input like keystrokes. A program must
+read its input while waiting for a report, since other input, such as key
+presses, arrives in the same stream.

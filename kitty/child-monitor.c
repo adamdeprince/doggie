@@ -1059,6 +1059,13 @@ render_prepared_os_window(
         global_state.thumbnail_callback.os_window = 0;
     }
     swap_window_buffers(os_window);
+    for (unsigned int i = 0, period_us = 0; i < tab->num_windows; i++) {
+        Window *w = tab->windows + i;
+        if (w->visible && WD.screen && WD.screen->frame_feedback.pending) {
+            if (!period_us) period_us = os_window_refresh_period_us(os_window);
+            screen_frame_presented(WD.screen, period_us, now);
+        }
+    }
     os_window->last_active_tab = os_window->active_tab;
     os_window->last_num_tabs = os_window->num_tabs;
     os_window->last_active_window_id = active_window_id;

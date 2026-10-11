@@ -581,9 +581,14 @@ dispatch_osc(PS *self, uint8_t *buf, size_t limit, bool is_extended_osc) {
             process_cwd_notification(self->screen, code, (char *)buf + i, limit - i);
             break;
         case 8: dispatch_hyperlink(self, (char *)buf + i); break;
+        case 777:
+            if (limit - i > 6 && memcmp(buf + i, "frame;", 6) == 0) {
+                screen_frame_feedback(self->screen, (const char *)buf + i + 6, limit - i - 6);
+                break;
+            }
+            /* fallthrough */
         case 9:
         case 99:
-        case 777:
         case 1337:
             START_DISPATCH
             DISPATCH_OSC_WITH_CODE(desktop_notify)
@@ -1608,6 +1613,7 @@ run_worker(void *p, ParseData *pd, bool flush) {
                     self->write.pending = 0;
                 } while (self->read.pos < self->read.sz);
                 self->new_input_at = 0;
+                screen->frame_feedback.pending = screen->frame_feedback.on;
                 if (self->read.consumed) {
                     pd->write_space_created = self->read.sz >= BUF_SZ;
                     self->read.pos -= MIN(self->read.pos, self->read.consumed);
