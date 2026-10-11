@@ -43,11 +43,12 @@ A program asks the terminal whether it supports the protocol::
 the reply so replies can be matched to queries. A supporting terminal
 answers::
 
-    <OSC> 777 ; gesture ; v=1 : op=cap : id=42 : caps=15 <ST>
+    <OSC> 777 ; gesture ; v=1 : op=cap : id=42 : caps=15 : mode=0 <ST>
 
 ``caps`` is a bit set of the gestures the terminal can report: pinch ``1``,
 rotate ``2``, swipe ``4``, smart zoom ``8``. It describes what the terminal
 can pass on from the system it runs on, not whether a trackpad is attached.
+``mode`` is the current state of the mode described below.
 A terminal that does not support the protocol ignores the query, so a
 program must time out. A query does not change the mode.
 
@@ -69,6 +70,14 @@ cancels every gesture in progress. Programs must turn it off when they exit,
 suspend or fail, and turn it back on when resumed. Multiplexers keep it with
 the rest of the terminal state, restore it on reconnect, and turn it off when
 detaching. There is no user setting that overrides the program's choice.
+
+A ``mode`` request without a ``mode`` field reads the state instead of
+changing it, and is answered with::
+
+    <OSC> 777 ; gesture ; v=1 : op=mode : mode=1 <ST>
+
+A program resuming after a reconnection reads the mode to learn whether it
+survived, rather than assuming it did.
 
 Reports
 -----------

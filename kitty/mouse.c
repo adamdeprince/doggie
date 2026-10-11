@@ -1761,9 +1761,14 @@ screen_gesture_osc(Screen *screen, const char *data, size_t sz) {
     }
     if (v != 1) return;
     if (!strcmp(op, "query") && id >= 0) {
-        snprintf(reply, sizeof(reply), "777;gesture;v=1:op=cap:id=%d:caps=%u", id, gesture_caps());
+        snprintf(reply, sizeof(reply), "777;gesture;v=1:op=cap:id=%d:caps=%u:mode=%d", id, gesture_caps(), screen->gesture.version != 0);
         write_escape_code_to_child(screen, ESC_OSC, reply);
-    } else if (!strcmp(op, "mode") && mode >= 0) {
+    } else if (!strcmp(op, "mode")) {
+        if (mode < 0) {  // a read
+            snprintf(reply, sizeof(reply), "777;gesture;v=1:op=mode:mode=%d", screen->gesture.version != 0);
+            write_escape_code_to_child(screen, ESC_OSC, reply);
+            return;
+        }
         screen_gesture_cancel(screen);
         screen->gesture.version = mode ? v : 0;
     }
