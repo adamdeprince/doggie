@@ -4,6 +4,7 @@
 #include "to-c.h"
 
 
+
 static void
 convert_from_python_font_size(PyObject *val, Options *opts) {
     opts->font_size = PyFloat_AsDouble(val);
@@ -820,6 +821,19 @@ convert_from_opts_enable_audio_bell(PyObject *py_opts, Options *opts) {
     PyObject *ret = PyObject_GetAttrString(py_opts, "enable_audio_bell");
     if (ret == NULL) return;
     convert_from_python_enable_audio_bell(ret, opts);
+    Py_DECREF(ret);
+}
+
+static void
+convert_from_python_haptic_feedback(PyObject *val, Options *opts) {
+    opts->haptic_feedback = PyObject_IsTrue(val);
+}
+
+static void
+convert_from_opts_haptic_feedback(PyObject *py_opts, Options *opts) {
+    PyObject *ret = PyObject_GetAttrString(py_opts, "haptic_feedback");
+    if (ret == NULL) return;
+    convert_from_python_haptic_feedback(ret, opts);
     Py_DECREF(ret);
 }
 
@@ -1704,6 +1718,8 @@ convert_opts_from_python_opts(PyObject *py_opts, Options *opts) {
     convert_from_opts_sync_to_monitor(py_opts, opts);
     if (PyErr_Occurred()) return false;
     convert_from_opts_enable_audio_bell(py_opts, opts);
+    if (PyErr_Occurred()) return false;
+    convert_from_opts_haptic_feedback(py_opts, opts);
     if (PyErr_Occurred()) return false;
     convert_from_opts_visual_bell_duration(py_opts, opts);
     if (PyErr_Occurred()) return false;

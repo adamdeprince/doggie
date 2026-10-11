@@ -1049,6 +1049,9 @@ class Parser:
     def forward_stdio(self, val: str, ans: dict[str, typing.Any]) -> None:
         ans['forward_stdio'] = to_bool(val)
 
+    def haptic_feedback(self, val: str, ans: dict[str, typing.Any]) -> None:
+        ans['haptic_feedback'] = to_bool(val)
+
     def hide_window_decorations(self, val: str, ans: dict[str, typing.Any]) -> None:
         ans['hide_window_decorations'] = hide_window_decorations(val)
 

@@ -374,6 +374,7 @@ option_names = (
     'force_ltr',
     'foreground',
     'forward_stdio',
+    'haptic_feedback',
     'hide_window_decorations',
     'inactive_border_color',
     'inactive_tab_background',
@@ -598,6 +599,7 @@ class Options:
     force_ltr: bool = False
     foreground: Color = Color(221, 221, 221)
     forward_stdio: bool = False
+    haptic_feedback: bool = True
     hide_window_decorations: int = 0
     inactive_border_color: Color = Color(204, 204, 204)
     inactive_tab_background: Color = Color(153, 153, 153)

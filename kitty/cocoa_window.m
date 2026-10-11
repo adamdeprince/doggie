@@ -1307,6 +1307,22 @@ bundle_image_as_png(PyObject *self UNUSED, PyObject *args, PyObject *kw) {
 }
 
 static PyObject *
+cocoa_haptic_feedback(PyObject *self UNUSED, PyObject *which) {
+    if (!PyLong_Check(which)) {
+        PyErr_SetString(PyExc_TypeError, "haptic pattern must be an integer");
+        return NULL;
+    }
+    NSHapticFeedbackPattern pattern;
+    switch (PyLong_AsLong(which)) {
+        case 1: pattern = NSHapticFeedbackPatternAlignment; break;
+        case 2: pattern = NSHapticFeedbackPatternLevelChange; break;
+        default: pattern = NSHapticFeedbackPatternGeneric; break;
+    }
+    [[NSHapticFeedbackManager defaultPerformer] performFeedbackPattern:pattern performanceTime:NSHapticFeedbackPerformanceTimeNow];
+    Py_RETURN_NONE;
+}
+
+static PyObject *
 play_system_sound_by_id_async(PyObject *self UNUSED, PyObject *which) {
     if (!PyLong_Check(which)) {
         PyErr_SetString(PyExc_TypeError, "system sound id must be an integer");
@@ -1496,6 +1512,7 @@ cocoa_get_machine_id(PyObject *self UNUSED, PyObject *args UNUSED) {
 
 static PyMethodDef module_methods[] = {
     {"cocoa_play_system_sound_by_id_async", play_system_sound_by_id_async, METH_O, ""},
+    {"cocoa_haptic_feedback", cocoa_haptic_feedback, METH_O, ""},
     {"cocoa_get_lang", (PyCFunction)cocoa_get_lang, METH_NOARGS, ""},
     {"cocoa_get_machine_id", (PyCFunction)cocoa_get_machine_id, METH_NOARGS, ""},
     {"cocoa_is_secure_input_enabled", (PyCFunction)cocoa_is_secure_input_enabled, METH_NOARGS, ""},

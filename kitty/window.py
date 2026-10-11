@@ -14,7 +14,7 @@ from functools import lru_cache, partial
 from gettext import gettext as _
 from itertools import chain
 from re import Pattern
-from time import time_ns
+from time import monotonic, time_ns
 from typing import (
     TYPE_CHECKING,
     Any,
@@ -718,6 +718,9 @@ class GlobalWatchers:
 global_watchers = GlobalWatchers()
 
 
+last_haptic_at: dict[int, float] = {}
+
+
 class Window:
     window_custom_type: str = ''
     overlay_type = OverlayType.transient
@@ -1374,11 +1377,32 @@ class Window:
                 ukey, has_equal, uval = val.partition('=')
                 self.set_user_var(ukey, (base64_decode(uval) if uval else b'') if has_equal == '=' else None)
 
+    def handle_haptic(self, raw: str) -> None:
+        fields = dict(x.split('=', 1) for x in raw.split(':') if '=' in x)
+        if not fields.get('v', '').isdigit():
+            return
+        caps = 1 if is_macos and get_options().haptic_feedback else 0
+        op = fields.get('op')
+        if op == 'query':
+            if (ident := fields.get('id', '')).isdigit():
+                self.screen.send_escape_code_to_child(ESC_OSC, f'777;haptic;v=1:op=cap:id={ident}:caps={caps}')
+        elif op == 'play' and caps and self.os_window_id == current_focused_os_window_id():
+            pattern = {'generic': 0, 'alignment': 1, 'level': 2}.get(fields.get('pattern', ''))
+            now = monotonic()
+            if pattern is not None and now - last_haptic_at.get(self.os_window_id, 0.0) >= 0.05:
+                last_haptic_at[self.os_window_id] = now
+                from .fast_data_types import cocoa_haptic_feedback
+
+                cocoa_haptic_feedback(pattern)
+
     def desktop_notify(self, osc_code: int, raw_datab: memoryview) -> None:
         raw_data = str(raw_datab, 'utf-8', 'replace')
         if osc_code == 1337:
             self.osc_1337(raw_data)
         if osc_code == 777:
+            if raw_data.startswith('haptic;'):
+                self.handle_haptic(raw_data[len('haptic;') :])
+                return
             if not raw_data.startswith('notify;'):
                 log_error(f'Ignoring unknown OSC 777: {raw_data}')
                 return  # unknown OSC 777
