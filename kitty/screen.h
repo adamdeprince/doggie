@@ -133,7 +133,7 @@ typedef struct {
         color_type cursor_bg;
         CursorRenderInfo cursor;
     } last_rendered;
-    bool is_dirty, scroll_changed, reload_all_gpu_data, sgr_blink_was_used;
+    bool is_dirty, scroll_changed, reload_all_gpu_data, sgr_blink_was_used, has_translucent_cells;
     Cursor *cursor;
     Savepoint main_savepoint, alt_savepoint;
     PyObject *callbacks, *test_child;

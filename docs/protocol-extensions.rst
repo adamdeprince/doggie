@@ -28,6 +28,7 @@ please do so by opening issues in the `GitHub bug tracker
    graphics-protocol
    keyboard-protocol
    text-sizing-protocol
+   cell-alpha-protocol
    dnd-protocol
    multiple-cursors-protocol
    file-transfer-protocol

@@ -201,6 +201,15 @@ vertex_main(
         float cell_has_non_default_bg = 1.f - bo.cell_has_default_bg;
         uint draw_bg_mask = uint(2.f * cell_has_non_default_bg + bo.cell_has_default_bg); // 1 if has default bg else 2
         float draw_bg = step(0.5, float(draw_bg_bitfield & draw_bg_mask));
+        // A translucent cell has nothing beneath it unless something is drawn there: in the
+        // default bg pass it is drawn as the default bg, in the non-default pass with its
+        // alpha over whatever that pass covered, and in a single pass blended over the default bg.
+        float translucent = 1.f - step(1.f, bo.cell_alpha);
+        float4 default_premul = vec4_premul(crd.default_bg_lin.rgb, calc_background_opacity(crd.bg_colors0));
+        float4 translucent_premul = lerp(bgpremul, default_premul, float(one_if_equal_zero_otherwise(draw_bg_bitfield, 1u)));
+        translucent_premul = lerp(translucent_premul, bgpremul + default_premul * (1.f - bgpremul.a), float(one_if_equal_zero_otherwise(draw_bg_bitfield, 3u)));
+        bgpremul = lerp(bgpremul, translucent_premul, translucent);
+        draw_bg = max(draw_bg, translucent);
         bgpremul *= draw_bg;
         vo.effective_background_premul = bgpremul;
     }

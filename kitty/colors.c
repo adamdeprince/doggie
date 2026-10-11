@@ -646,7 +646,7 @@ as_color(ColorProfile *self, PyObject *val) {
         return NULL;
     }
     unsigned long entry = PyLong_AsUnsignedLong(val);
-    unsigned int t = entry & 0xFF;
+    unsigned int t = entry & COLOR_TYPE_MASK;
     uint8_t r;
     uint32_t col = 0;
     switch (t) {

@@ -158,6 +158,13 @@ typedef struct ImageAnchorPosition {
 #define BLANK_CHAR 0
 #define COL_MASK 0xFFFFFFFF
 #define DECORATION_FG_CODE 58
+#define BG_ALPHA_CODE 70
+// The type of a color is in the low two bits of its lowest byte, the alpha of
+// a cell background is in the high six bits of its bg color, 0 being opaque
+#define COLOR_TYPE_MASK 3u
+#define BG_ALPHA_SHIFT 2
+#define BG_ALPHA_MASK 63u
+#define BG_ALPHA_BITS (BG_ALPHA_MASK << BG_ALPHA_SHIFT)
 
 // PUA character used as an image placeholder.
 #define IMAGE_PLACEHOLDER_CHAR 0x10EEEE

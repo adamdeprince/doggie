@@ -59,6 +59,13 @@ cursor_reset_display_attrs(Cursor *self) {
 }
 
 
+static uint8_t
+bg_alpha_code(int percent) {
+    // 2% steps, zero being opaque, see BG_ALPHA_BITS
+    if (percent >= 100) return 0;
+    return MAX(1, MIN((100 - MAX(0, percent) + 1) / 2, 50));
+}
+
 static void
 parse_color(int *params, unsigned int *i, unsigned int count, uint32_t *result) {
     unsigned int attr;
@@ -127,11 +134,23 @@ cursor_from_sgr(Cursor *self, int *params, unsigned int count, bool is_group) {
             case 30 ... 37: self->sgr.fg = ((attr - 30) << 8) | 1; break;
             case 38: SET_COLOR(sgr.fg);
             case 39: self->sgr.fg = 0; break;
-            case 40 ... 47: self->sgr.bg = ((attr - 40) << 8) | 1; break;
-            case 48: SET_COLOR(sgr.bg);
-            case 49: self->sgr.bg = 0; break;
+            case 40 ... 47: self->sgr.bg = (self->sgr.bg & BG_ALPHA_BITS) | ((attr - 40) << 8) | 1; break;
+            case 48: {
+                const color_type alpha = self->sgr.bg & BG_ALPHA_BITS;
+                parse_color(params, &i, count, &self->sgr.bg);
+                self->sgr.bg |= alpha;
+            } break;
+            case 49: self->sgr.bg &= BG_ALPHA_BITS; break;
             case 90 ... 97: self->sgr.fg = ((attr - 90 + 8) << 8) | 1; break;
-            case 100 ... 107: self->sgr.bg = ((attr - 100 + 8) << 8) | 1; break;
+            case 100 ... 107: self->sgr.bg = (self->sgr.bg & BG_ALPHA_BITS) | ((attr - 100 + 8) << 8) | 1; break;
+            case BG_ALPHA_CODE: {
+                uint8_t val = 0;
+                if (is_group && i < count) {
+                    val = bg_alpha_code(params[i]);
+                    i++;
+                }
+                self->sgr.bg = (self->sgr.bg & ~BG_ALPHA_BITS) | (val << BG_ALPHA_SHIFT);
+            } break;
             case DECORATION_FG_CODE: SET_COLOR(sgr.decoration_fg);
             case DECORATION_FG_CODE + 1: self->sgr.decoration_fg = 0; break;
         }
@@ -158,6 +177,9 @@ apply_sgr_to_cells(GPUCell *first_cell, unsigned int cell_count, int *params, un
     break;
 #define S(which, val)                    \
     RANGE { cell->attrs.which = (val); } \
+    break;
+#define SET_BG(val)                                          \
+    RANGE { cell->bg = (cell->bg & BG_ALPHA_BITS) | (val); } \
     break;
 
     unsigned int i = 0, attr;
@@ -209,11 +231,23 @@ apply_sgr_to_cells(GPUCell *first_cell, unsigned int cell_count, int *params, un
             case 30 ... 37: SIMPLE(fg, ((attr - 30) << 8) | 1);
             case 38: SET_COLOR(fg);
             case 39: SIMPLE(fg, 0);
-            case 40 ... 47: SIMPLE(bg, ((attr - 40) << 8) | 1);
-            case 48: SET_COLOR(bg);
-            case 49: SIMPLE(bg, 0);
+            case 40 ... 47: SET_BG(((attr - 40) << 8) | 1);
+            case 48: {
+                color_type color = 0;
+                parse_color(params, &i, count, &color);
+                if (color) { SET_BG(color); }
+            } break;
+            case 49: SET_BG(0);
             case 90 ... 97: SIMPLE(fg, ((attr - 90 + 8) << 8) | 1);
-            case 100 ... 107: SIMPLE(bg, ((attr - 100 + 8) << 8) | 1); END_ALLOW_CASE_RANGE
+            case 100 ... 107: SET_BG(((attr - 100 + 8) << 8) | 1); END_ALLOW_CASE_RANGE
+            case BG_ALPHA_CODE: {
+                uint8_t val = 0;
+                if (is_group && i < count) {
+                    val = bg_alpha_code(params[i]);
+                    i++;
+                }
+                RANGE { cell->bg = (cell->bg & ~BG_ALPHA_BITS) | (val << BG_ALPHA_SHIFT); }
+            } break;
             case DECORATION_FG_CODE: SET_COLOR(decoration_fg);
             case DECORATION_FG_CODE + 1: SIMPLE(decoration_fg, 0);
         }
@@ -223,6 +257,7 @@ apply_sgr_to_cells(GPUCell *first_cell, unsigned int cell_count, int *params, un
 #undef RANGE
 #undef SIMPLE
 #undef S
+#undef SET_BG
 }
 
 const char *
@@ -345,6 +380,25 @@ SGR_UINT_GETSET(fg)
 SGR_UINT_GETSET(bg)
 SGR_UINT_GETSET(decoration_fg)
 
+static PyObject *
+bg_alpha_get(Cursor *self, void UNUSED *closure) {
+    return PyLong_FromLong(100 - 2 * (long)((self->sgr.bg & BG_ALPHA_BITS) >> BG_ALPHA_SHIFT));
+}
+
+static int
+bg_alpha_set(Cursor *self, PyObject *value, void UNUSED *closure) {
+    if (value == NULL) {
+        PyErr_SetString(PyExc_TypeError, "Cannot delete attribute");
+        return -1;
+    }
+    if (!PyLong_Check(value)) {
+        PyErr_SetString(PyExc_TypeError, "value must be an int");
+        return -1;
+    }
+    self->sgr.bg = (self->sgr.bg & ~BG_ALPHA_BITS) | (bg_alpha_code(PyLong_AsLong(value)) << BG_ALPHA_SHIFT);
+    return 0;
+}
+
 static PyMemberDef members[] = {
     {"x", T_UINT, offsetof(Cursor, x), 0, "x"},
     {"y", T_UINT, offsetof(Cursor, y), 0, "y"},
@@ -354,7 +408,7 @@ static PyMemberDef members[] = {
 
 static PyGetSetDef getseters[] = {
     GETSET(bold) GETSET(italic) GETSET(reverse) GETSET(strikethrough) GETSET(dim) GETSET(blink) GETSET(text_blink) GETSET(decoration) GETSET(fg) GETSET(bg)
-        GETSET(decoration_fg){NULL} /* Sentinel */
+        GETSET(decoration_fg) GETSET(bg_alpha){NULL} /* Sentinel */
 };
 
 static PyMethodDef methods[] = {

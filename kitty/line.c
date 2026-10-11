@@ -862,7 +862,7 @@ apply_cursor(Line *self, PyObject *args) {
 
 static color_type
 resolve_color(const ColorProfile *cp, color_type val, color_type defval) {
-    switch (val & 0xff) {
+    switch (val & COLOR_TYPE_MASK) {
         case 1: return cp->color_table[(val >> 8) & 0xff];
         case 2: return val >> 8;
         default: return defval;
@@ -952,7 +952,7 @@ set_attribute(Line *self, PyObject *args) {
 
 static int
 color_as_sgr(char *buf, size_t sz, unsigned long val, unsigned simple_code, unsigned aix_code, unsigned complex_code) {
-    switch (val & 0xff) {
+    switch (val & COLOR_TYPE_MASK) {
         case 1:
             val >>= 8;
             if (val < 16 && simple_code) { return snprintf(buf, sz, "%lu;", (val < 8) ? simple_code + val : aix_code + (val - 8)); }
@@ -1006,7 +1006,8 @@ cell_as_sgr(const GPUCell *cell, const GPUCell *prev) {
     if (CA.strike != PA.strike) P(CA.strike ? "9;" : "29;");
     if (CA.blink != PA.blink) P(CA.blink ? "5;" : "25;");
     if (cell->fg != prev->fg) p += color_as_sgr(p, SZ, cell->fg, 30, 90, 38);
-    if (cell->bg != prev->bg) p += color_as_sgr(p, SZ, cell->bg, 40, 100, 48);
+    if ((cell->bg & ~BG_ALPHA_BITS) != (prev->bg & ~BG_ALPHA_BITS)) p += color_as_sgr(p, SZ, cell->bg, 40, 100, 48);
+    if ((cell->bg & BG_ALPHA_BITS) != (prev->bg & BG_ALPHA_BITS)) p += snprintf(p, SZ, "%u:%u;", BG_ALPHA_CODE, 100 - 2 * ((cell->bg & BG_ALPHA_BITS) >> BG_ALPHA_SHIFT));
     if (cell->decoration_fg != prev->decoration_fg) p += color_as_sgr(p, SZ, cell->decoration_fg, 0, 0, DECORATION_FG_CODE);
     if (CA.decoration != PA.decoration) P(decoration_as_sgr(CA.decoration));
 #undef PA

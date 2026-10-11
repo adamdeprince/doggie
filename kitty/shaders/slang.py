@@ -26,6 +26,8 @@ from kitty.constants import read_kitty_resource, shaders_dir, slangc
 from kitty.fast_data_types import (
     ANIMATION_SAMPLE_WAIT,
     BGIMAGE_PROGRAM,
+    BG_ALPHA_MASK,
+    BG_ALPHA_SHIFT,
     BLINK,
     BLIT_PROGRAM,
     BORDERS_PROGRAM,
@@ -36,6 +38,7 @@ from kitty.fast_data_types import (
     COLOR_IS_RGB,
     COLOR_IS_SPECIAL,
     COLOR_NOT_SET,
+    COLOR_TYPE_MASK,
     CUSTOM_END_PROGRAM,
     DECORATION,
     DECORATION_MASK,
@@ -384,6 +387,9 @@ class SlangFile(NamedTuple):
                 ans['DECORATION_SHIFT'] = str(DECORATION)
                 ans['MARK_SHIFT'] = str(MARK)
                 ans['DECORATION_MASK'] = str(DECORATION_MASK)
+                ans['COLOR_TYPE_MASK'] = str(COLOR_TYPE_MASK)
+                ans['BG_ALPHA_SHIFT'] = str(BG_ALPHA_SHIFT)
+                ans['BG_ALPHA_MASK'] = str(BG_ALPHA_MASK)
                 ans['COLOR_NOT_SET'] = str(COLOR_NOT_SET)
                 ans['COLOR_IS_SPECIAL'] = str(COLOR_IS_SPECIAL)
                 ans['COLOR_IS_INDEX'] = str(COLOR_IS_INDEX)
