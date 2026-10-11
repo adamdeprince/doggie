@@ -1788,10 +1788,15 @@ screen_tablet_pointer(Screen *screen, const char *data, size_t sz) {
     if (!strcmp(op, "query") && id >= 0) {
         const unsigned cw = MIN(4096u, MAX(1u, screen->cell_size.width)), ch = MIN(4096u, MAX(1u, screen->cell_size.height));
         snprintf(
-            reply, sizeof(reply), "777;tablet-pointer;v=%d:op=cap:id=%d:caps=3:w=%u:h=%u:cw=%u:ch=%u", v, id,
+            reply, sizeof(reply), "777;tablet-pointer;v=%d:op=cap:id=%d:caps=3:mode=%d:w=%u:h=%u:cw=%u:ch=%u", v, id, screen->pointer.version != 0,
             MIN(65535u, screen->columns * cw), MIN(65535u, screen->lines * ch), cw, ch);
         write_escape_code_to_child(screen, ESC_OSC, reply);
-    } else if (!strcmp(op, "mode") && mode >= 0) {
+    } else if (!strcmp(op, "mode")) {
+        if (mode < 0) {  // a read
+            snprintf(reply, sizeof(reply), "777;tablet-pointer;v=%d:op=mode:mode=%d", v, screen->pointer.version != 0);
+            write_escape_code_to_child(screen, ESC_OSC, reply);
+            return;
+        }
         screen_pointer_cancel(screen, 0);
         screen->pointer.version = mode ? v : 0;
     }

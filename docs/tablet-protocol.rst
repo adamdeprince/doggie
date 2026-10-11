@@ -43,15 +43,16 @@ the reply so replies can be matched to queries. A supporting terminal
 answers with a ``cap`` frame, at the requested version or the highest lower
 one it supports::
 
-    <OSC> 777 ; tablet-pointer ; v=2 : op=cap : id=42 : caps=3 : w=1200 : h=800 : cw=12 : ch=24 <ST>
+    <OSC> 777 ; tablet-pointer ; v=2 : op=cap : id=42 : caps=3 : mode=0 : w=1200 : h=800 : cw=12 : ch=24 <ST>
 
 ``caps`` is a bit set of the report kinds the terminal can produce: pen
 ``1``, touch ``2``, two finger gesture ``4``. It describes the terminal, not
-the hardware attached right now. ``w,h`` are the size of the cell area in
-pixels (1 to 65535) and ``cw,ch`` the cell size (1 to 4096). A program
-queries again after a resize. A terminal that does not support the protocol
-ignores the query, so a program must time out and fall back to mouse
-reporting. A query does not change the mode.
+the hardware attached right now. ``mode`` is the current state of the mode
+described below. ``w,h`` are the size of the cell area in pixels (1 to 65535)
+and ``cw,ch`` the cell size (1 to 4096). A program queries again after a
+resize. A terminal that does not support the protocol ignores the query, so a
+program must time out and fall back to mouse reporting. A query does not
+change the mode.
 
 Mode
 --------
@@ -72,6 +73,14 @@ every active contact. Programs must turn it off when they exit, suspend or
 fail, and turn it back on when resumed. Multiplexers keep it with the rest of
 the terminal state, restore it on reconnect, and turn it off when detaching.
 There is no user setting that overrides the program's choice.
+
+A ``mode`` request without a ``mode`` field reads the state instead of
+changing it, and is answered with::
+
+    <OSC> 777 ; tablet-pointer ; v=2 : op=mode : mode=1 <ST>
+
+A program resuming after a reconnection reads the mode to learn whether it
+survived, rather than assuming it did.
 
 Reports
 -----------

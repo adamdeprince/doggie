@@ -470,9 +470,13 @@ class TestMouse(BaseTest):
             return send_pointer_report(s, 1, phase, 7, 0, 256, 512, **kw)
 
         send('v=2:op=query:id=42')
-        self.ae(c.wtcbuf, b'\x1b]777;tablet-pointer;v=2:op=cap:id=42:caps=3:w=50:h=100:cw=10:ch=20\x1b\\')
+        self.ae(c.wtcbuf, b'\x1b]777;tablet-pointer;v=2:op=cap:id=42:caps=3:mode=0:w=50:h=100:cw=10:ch=20\x1b\\')
         self.assertFalse(report(1))
         send('v=2:op=mode:mode=1')
+        send('v=2:op=mode')
+        self.ae(c.wtcbuf, b'\x1b]777;tablet-pointer;v=2:op=mode:mode=1\x1b\\')
+        send('v=2:op=query:id=43')
+        self.ae(c.wtcbuf, b'\x1b]777;tablet-pointer;v=2:op=cap:id=43:caps=3:mode=1:w=50:h=100:cw=10:ch=20\x1b\\')
         self.assertTrue(report(1, buttons=1, tool=2, valid=3, p=100, tx=-10, ty=20, serial=99))
         self.ae(
             c.wtcbuf,
