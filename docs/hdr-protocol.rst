@@ -73,8 +73,10 @@ SDR white and values above it are brighter. Alpha is straight (not
 pre-multiplied), as for ``f=32``. The other keys work as for ``f=32``: the
 width and height must be given with ``s`` and ``v``, the data may be
 compressed with ``o=z``, and it may be sent by any transmission medium.
-Animation frames and frame composition are not supported for these images,
-the terminal responds with ``EINVAL`` to such commands.
+Animation frames of such an image must also be ``f=64`` (and ``f=64`` frames
+cannot be added to other images), the terminal responds with ``EINVAL``
+otherwise. Frames are blended in linear light, and the background color of a
+frame (the ``Y`` key) is taken as linear values, ``255`` being SDR white.
 
 Pixel values larger than the headroom are shown at the headroom. To check
 whether a terminal supports ``f=64``, use the query action described in the
