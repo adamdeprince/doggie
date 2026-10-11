@@ -40,6 +40,9 @@ from kitty.fast_data_types import (
     DECORATION,
     DECORATION_MASK,
     DIM,
+    GAMUT_BG,
+    GAMUT_FG,
+    GAMUT_MASK,
     GLSL_VERSION,
     GRAPHICS_ALPHA_MASK_PROGRAM,
     GRAPHICS_PREMULT_PROGRAM,
@@ -384,6 +387,9 @@ class SlangFile(NamedTuple):
                 ans['DECORATION_SHIFT'] = str(DECORATION)
                 ans['MARK_SHIFT'] = str(MARK)
                 ans['DECORATION_MASK'] = str(DECORATION_MASK)
+                ans['GAMUT_FG_SHIFT'] = str(GAMUT_FG)
+                ans['GAMUT_BG_SHIFT'] = str(GAMUT_BG)
+                ans['GAMUT_MASK'] = str(GAMUT_MASK)
                 ans['COLOR_NOT_SET'] = str(COLOR_NOT_SET)
                 ans['COLOR_IS_SPECIAL'] = str(COLOR_IS_SPECIAL)
                 ans['COLOR_IS_INDEX'] = str(COLOR_IS_INDEX)

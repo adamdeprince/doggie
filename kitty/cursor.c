@@ -60,24 +60,32 @@ cursor_reset_display_attrs(Cursor *self) {
 
 
 static void
-parse_color(int *params, unsigned int *i, unsigned int count, uint32_t *result) {
+parse_color(int *params, unsigned int *i, unsigned int count, bool is_group, uint32_t *result, uint8_t *gamut) {
     unsigned int attr;
-    uint8_t r, g, b;
+    uint8_t r, g, b, cs = 0;
     if (*i < count) {
         attr = params[(*i)++];
         switch (attr) {
             case 5:
-                if (*i < count) *result = (params[(*i)++] & 0xFF) << 8 | 1;
+                if (*i < count) {
+                    *result = (params[(*i)++] & 0xFF) << 8 | 1;
+                    if (gamut) *gamut = 0;
+                }
                 break;
             case 2:
                 if (*i + 2 < count) {
-                    /* Ignore the first parameter in a four parameter RGB */
-                    /* sequence (unused color space id), see https://github.com/kovidgoyal/kitty/issues/227 */
-                    if (*i + 3 < count) (*i)++;
+                    /* The first parameter in a four parameter RGB sequence is the color space id, */
+                    /* see https://github.com/kovidgoyal/kitty/issues/227. It selects the gamut in */
+                    /* the colon form, see docs/wide-gamut-protocol.rst, and is ignored otherwise. */
+                    if (*i + 3 < count) {
+                        int id = params[(*i)++];
+                        if (is_group && (id == GAMUT_DISPLAY_P3 || id == GAMUT_REC2020)) cs = id;
+                    }
                     r = params[(*i)++] & 0xFF;
                     g = params[(*i)++] & 0xFF;
                     b = params[(*i)++] & 0xFF;
                     *result = r << 24 | g << 16 | b << 8 | 2;
+                    if (gamut) *gamut = cs;
                 }
                 break;
         }
@@ -87,8 +95,12 @@ parse_color(int *params, unsigned int *i, unsigned int count, uint32_t *result) 
 
 void
 cursor_from_sgr(Cursor *self, int *params, unsigned int count, bool is_group) {
-#define SET_COLOR(which)                              \
-    { parse_color(params, &i, count, &self->which); } \
+#define SET_COLOR(which, gamut)                                          \
+    { parse_color(params, &i, count, is_group, &self->sgr.which, gamut); } \
+    break;
+#define PALETTE(which, val)      \
+    self->sgr.which = (val);     \
+    self->sgr.gamut_##which = 0; \
     break;
     START_ALLOW_CASE_RANGE
     unsigned int i = 0, attr;
@@ -124,37 +136,48 @@ cursor_from_sgr(Cursor *self, int *params, unsigned int count, bool is_group) {
             case 25: self->sgr.blink = false; break;
             case 27: self->sgr.reverse = false; break;
             case 29: self->sgr.strikethrough = false; break;
-            case 30 ... 37: self->sgr.fg = ((attr - 30) << 8) | 1; break;
-            case 38: SET_COLOR(sgr.fg);
-            case 39: self->sgr.fg = 0; break;
-            case 40 ... 47: self->sgr.bg = ((attr - 40) << 8) | 1; break;
-            case 48: SET_COLOR(sgr.bg);
-            case 49: self->sgr.bg = 0; break;
-            case 90 ... 97: self->sgr.fg = ((attr - 90 + 8) << 8) | 1; break;
-            case 100 ... 107: self->sgr.bg = ((attr - 100 + 8) << 8) | 1; break;
-            case DECORATION_FG_CODE: SET_COLOR(sgr.decoration_fg);
+            case 30 ... 37: PALETTE(fg, ((attr - 30) << 8) | 1);
+            case 38: SET_COLOR(fg, &self->sgr.gamut_fg);
+            case 39: PALETTE(fg, 0);
+            case 40 ... 47: PALETTE(bg, ((attr - 40) << 8) | 1);
+            case 48: SET_COLOR(bg, &self->sgr.gamut_bg);
+            case 49: PALETTE(bg, 0);
+            case 90 ... 97: PALETTE(fg, ((attr - 90 + 8) << 8) | 1);
+            case 100 ... 107: PALETTE(bg, ((attr - 100 + 8) << 8) | 1);
+            case DECORATION_FG_CODE: SET_COLOR(decoration_fg, NULL);
             case DECORATION_FG_CODE + 1: self->sgr.decoration_fg = 0; break;
         }
         if (is_group) break;
     }
 #undef SET_COLOR
+#undef PALETTE
     END_ALLOW_CASE_RANGE
 }
 
 void
 apply_sgr_to_cells(GPUCell *first_cell, unsigned int cell_count, int *params, unsigned int count, bool is_group) {
 #define RANGE for (unsigned c = 0; c < cell_count; c++, cell++)
-#define SET_COLOR(which)                        \
-    {                                           \
-        color_type color = 0;                   \
-        parse_color(params, &i, count, &color); \
-        if (color) {                            \
-            RANGE { cell->which = color; }      \
-        }                                       \
-    }                                           \
+#define SET_COLOR(which, set_gamut)                               \
+    {                                                             \
+        color_type color = 0;                                     \
+        uint8_t gamut = 0;                                        \
+        parse_color(params, &i, count, is_group, &color, &gamut); \
+        if (color) {                                              \
+            RANGE {                                               \
+                cell->which = color;                              \
+                set_gamut;                                        \
+            }                                                     \
+        }                                                         \
+    }                                                             \
     break;
 #define SIMPLE(which, val)         \
     RANGE { cell->which = (val); } \
+    break;
+#define PALETTE(which, val)            \
+    RANGE {                            \
+        cell->which = (val);           \
+        cell->attrs.gamut_##which = 0; \
+    }                                  \
     break;
 #define S(which, val)                    \
     RANGE { cell->attrs.which = (val); } \
@@ -206,15 +229,15 @@ apply_sgr_to_cells(GPUCell *first_cell, unsigned int cell_count, int *params, un
             case 25: S(blink, false);
             case 27: S(reverse, false);
             case 29: S(strike, false); START_ALLOW_CASE_RANGE
-            case 30 ... 37: SIMPLE(fg, ((attr - 30) << 8) | 1);
-            case 38: SET_COLOR(fg);
-            case 39: SIMPLE(fg, 0);
-            case 40 ... 47: SIMPLE(bg, ((attr - 40) << 8) | 1);
-            case 48: SET_COLOR(bg);
-            case 49: SIMPLE(bg, 0);
-            case 90 ... 97: SIMPLE(fg, ((attr - 90 + 8) << 8) | 1);
-            case 100 ... 107: SIMPLE(bg, ((attr - 100 + 8) << 8) | 1); END_ALLOW_CASE_RANGE
-            case DECORATION_FG_CODE: SET_COLOR(decoration_fg);
+            case 30 ... 37: PALETTE(fg, ((attr - 30) << 8) | 1);
+            case 38: SET_COLOR(fg, cell->attrs.gamut_fg = gamut);
+            case 39: PALETTE(fg, 0);
+            case 40 ... 47: PALETTE(bg, ((attr - 40) << 8) | 1);
+            case 48: SET_COLOR(bg, cell->attrs.gamut_bg = gamut);
+            case 49: PALETTE(bg, 0);
+            case 90 ... 97: PALETTE(fg, ((attr - 90 + 8) << 8) | 1);
+            case 100 ... 107: PALETTE(bg, ((attr - 100 + 8) << 8) | 1); END_ALLOW_CASE_RANGE
+            case DECORATION_FG_CODE: SET_COLOR(decoration_fg, (void)gamut);
             case DECORATION_FG_CODE + 1: SIMPLE(decoration_fg, 0);
         }
         if (is_group) break;
@@ -222,6 +245,7 @@ apply_sgr_to_cells(GPUCell *first_cell, unsigned int cell_count, int *params, un
 #undef SET_COLOR
 #undef RANGE
 #undef SIMPLE
+#undef PALETTE
 #undef S
 }
 
@@ -344,6 +368,8 @@ SGR_UINT_GETSET(decoration)
 SGR_UINT_GETSET(fg)
 SGR_UINT_GETSET(bg)
 SGR_UINT_GETSET(decoration_fg)
+SGR_UINT_GETSET(gamut_fg)
+SGR_UINT_GETSET(gamut_bg)
 
 static PyMemberDef members[] = {
     {"x", T_UINT, offsetof(Cursor, x), 0, "x"},
@@ -354,7 +380,7 @@ static PyMemberDef members[] = {
 
 static PyGetSetDef getseters[] = {
     GETSET(bold) GETSET(italic) GETSET(reverse) GETSET(strikethrough) GETSET(dim) GETSET(blink) GETSET(text_blink) GETSET(decoration) GETSET(fg) GETSET(bg)
-        GETSET(decoration_fg){NULL} /* Sentinel */
+        GETSET(decoration_fg) GETSET(gamut_fg) GETSET(gamut_bg){NULL} /* Sentinel */
 };
 
 static PyMethodDef methods[] = {

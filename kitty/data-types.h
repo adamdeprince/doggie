@@ -158,6 +158,9 @@ typedef struct ImageAnchorPosition {
 #define BLANK_CHAR 0
 #define COL_MASK 0xFFFFFFFF
 #define DECORATION_FG_CODE 58
+// color space ids in 38:2:<id>:r:g:b, see docs/wide-gamut-protocol.rst
+#define GAMUT_DISPLAY_P3 1
+#define GAMUT_REC2020 2
 
 // PUA character used as an image placeholder.
 #define IMAGE_PLACEHOLDER_CHAR 0x10EEEE
@@ -264,7 +267,7 @@ typedef struct {
 
     struct {
         bool bold, italic, reverse, strikethrough, dim, blink;
-        uint8_t decoration;
+        uint8_t decoration, gamut_fg, gamut_bg;
         color_type fg, bg, decoration_fg;
     } sgr;
 } Cursor;

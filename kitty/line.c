@@ -951,13 +951,15 @@ set_attribute(Line *self, PyObject *args) {
 }
 
 static int
-color_as_sgr(char *buf, size_t sz, unsigned long val, unsigned simple_code, unsigned aix_code, unsigned complex_code) {
+color_as_sgr(char *buf, size_t sz, unsigned long val, unsigned gamut, unsigned simple_code, unsigned aix_code, unsigned complex_code) {
     switch (val & 0xff) {
         case 1:
             val >>= 8;
             if (val < 16 && simple_code) { return snprintf(buf, sz, "%lu;", (val < 8) ? simple_code + val : aix_code + (val - 8)); }
             return snprintf(buf, sz, "%u:5:%lu;", complex_code, val);
-        case 2: return snprintf(buf, sz, "%u:2:%lu:%lu:%lu;", complex_code, (val >> 24) & 0xff, (val >> 16) & 0xff, (val >> 8) & 0xff);
+        case 2:
+            if (gamut) return snprintf(buf, sz, "%u:2:%u:%lu:%lu:%lu;", complex_code, gamut, (val >> 24) & 0xff, (val >> 16) & 0xff, (val >> 8) & 0xff);
+            return snprintf(buf, sz, "%u:2:%lu:%lu:%lu;", complex_code, (val >> 24) & 0xff, (val >> 16) & 0xff, (val >> 8) & 0xff);
         default: return snprintf(buf, sz, "%u;", complex_code + 1); // reset
     }
 }
@@ -1005,9 +1007,9 @@ cell_as_sgr(const GPUCell *cell, const GPUCell *prev) {
     if (CA.reverse != PA.reverse) P(CA.reverse ? "7;" : "27;");
     if (CA.strike != PA.strike) P(CA.strike ? "9;" : "29;");
     if (CA.blink != PA.blink) P(CA.blink ? "5;" : "25;");
-    if (cell->fg != prev->fg) p += color_as_sgr(p, SZ, cell->fg, 30, 90, 38);
-    if (cell->bg != prev->bg) p += color_as_sgr(p, SZ, cell->bg, 40, 100, 48);
-    if (cell->decoration_fg != prev->decoration_fg) p += color_as_sgr(p, SZ, cell->decoration_fg, 0, 0, DECORATION_FG_CODE);
+    if (cell->fg != prev->fg || CA.gamut_fg != PA.gamut_fg) p += color_as_sgr(p, SZ, cell->fg, CA.gamut_fg, 30, 90, 38);
+    if (cell->bg != prev->bg || CA.gamut_bg != PA.gamut_bg) p += color_as_sgr(p, SZ, cell->bg, CA.gamut_bg, 40, 100, 48);
+    if (cell->decoration_fg != prev->decoration_fg) p += color_as_sgr(p, SZ, cell->decoration_fg, 0, 0, 0, DECORATION_FG_CODE);
     if (CA.decoration != PA.decoration) P(decoration_as_sgr(CA.decoration));
 #undef PA
 #undef CA

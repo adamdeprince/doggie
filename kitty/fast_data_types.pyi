@@ -302,6 +302,9 @@ GRAPHICS_PREMULT_PROGRAM: int
 MARK: int
 MARK_MASK: int
 DECORATION_MASK: int
+GAMUT_FG: int
+GAMUT_BG: int
+GAMUT_MASK: int
 FILE_TRANSFER_CODE: int
 ESC_CSI: int
 ESC_OSC: int
@@ -1053,6 +1056,8 @@ class Cursor:
     y: int
     bg: int
     fg: int
+    gamut_fg: int
+    gamut_bg: int
     bold: bool
     italic: bool
     blink: bool

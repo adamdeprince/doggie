@@ -102,6 +102,22 @@ color_vec4(GLint location, color_type color, GLfloat alpha) {
     glUniform4f(location, srgb_lut[(color >> 16) & 0xFF], srgb_lut[(color >> 8) & 0xFF], srgb_lut[color & 0xFF], alpha);
 }
 
+// The colorspace of the window, cell colors tagged with another gamut are
+// converted to it in the shaders, see docs/wide-gamut-protocol.rst. Matches
+// the GAMUT_ constants in background.slang
+static GLuint
+output_gamut(void) {
+#ifdef __APPLE__
+    switch (OPT(macos_colorspace)) {
+        case SRGB_COLORSPACE: return 0;
+        case DISPLAY_P3_COLORSPACE: return 1;
+        default: return 3; // the native colorspace of the display, unmanaged
+    }
+#else
+    return 0;
+#endif
+}
+
 // Write a color into a std140 float4 whose fourth component is unused. Uses
 // the same table as the shaders so the result is identical to converting the
 // color in the shader.
@@ -883,6 +899,7 @@ cell_update_uniform_block(
         GLuint columns, lines, sprites_xnum, sprites_ynum, cursor_shape, cell_width, cell_height;
         GLuint cursor_x1, cursor_x2, cursor_y1, cursor_y2;
         GLfloat cursor_opacity, inactive_text_alpha, fg_override_threshold, row_offset, dim_opacity, blink_opacity;
+        GLuint output_gamut;
 
         GLuint bg_colors0, bg_colors1, bg_colors2, bg_colors3, bg_colors4, bg_colors5, bg_colors6, bg_colors7;
         GLfloat bg_opacities0, bg_opacities1, bg_opacities2, bg_opacities3, bg_opacities4, bg_opacities5, bg_opacities6, bg_opacities7;
@@ -1042,6 +1059,7 @@ cell_update_uniform_block(
     rd->cell_height = os_window->fonts_data->fcm.cell_height;
     rd->inactive_text_alpha = inactive_text_alpha;
     rd->dim_opacity = OPT(dim_opacity);
+    rd->output_gamut = output_gamut();
 
 #undef COLOR
     rd->url_style = OPT(url_style);
