@@ -40,10 +40,11 @@ A program asks the terminal whether it supports the protocol::
 ``id`` is a non-negative 31 bit integer of the program's choosing, echoed in
 the reply so replies can be matched to queries. A supporting terminal answers::
 
-    <OSC> 777 ; frame ; v=1 : op=cap : id=42 : caps=1 : period=8333 <ST>
+    <OSC> 777 ; frame ; v=1 : op=cap : id=42 : caps=1 : mode=0 : period=8333 <ST>
 
 ``caps`` is a bit set of what the terminal can report, currently always
-``1`` for presentation events. ``period`` is the refresh period of the display
+``1`` for presentation events. ``mode`` is the current state of the mode
+described below. ``period`` is the refresh period of the display
 the window is on, in microseconds, or ``0`` when the terminal does not know
 it. It changes when the window moves to another display, so a program that
 cares queries again from time to time, or simply uses the value carried by
@@ -62,6 +63,14 @@ mode is local to the window and is reset by ``RIS``. Programs must turn it
 off when they exit, suspend or fail, and turn it back on when resumed.
 Multiplexers keep it with the rest of the terminal state and turn it off when
 detaching. There is no user setting that overrides the program's choice.
+
+A ``mode`` request without a ``mode`` field reads the state instead of
+changing it, and is answered with::
+
+    <OSC> 777 ; frame ; v=1 : op=mode : mode=1 <ST>
+
+A program resuming after a reconnection reads the mode to learn whether it
+survived, rather than assuming it did.
 
 Reports
 -----------

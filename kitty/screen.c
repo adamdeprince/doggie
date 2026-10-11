@@ -1810,9 +1810,14 @@ screen_frame_feedback(Screen *self, const char *data, size_t sz) {
     if (v != 1) return;
     if (!strcmp(op, "query") && id >= 0) {
         OSWindow *os_window = os_window_for_kitty_window(self->window_id);
-        snprintf(reply, sizeof(reply), "777;frame;v=1:op=cap:id=%d:caps=1:period=%u", id, os_window ? os_window_refresh_period_us(os_window) : 0);
+        snprintf(reply, sizeof(reply), "777;frame;v=1:op=cap:id=%d:caps=1:mode=%d:period=%u", id, self->frame_feedback.on, os_window ? os_window_refresh_period_us(os_window) : 0);
         write_escape_code_to_child(self, ESC_OSC, reply);
-    } else if (!strcmp(op, "mode") && mode >= 0) {
+    } else if (!strcmp(op, "mode")) {
+        if (mode < 0) {  // a read
+            snprintf(reply, sizeof(reply), "777;frame;v=1:op=mode:mode=%d", self->frame_feedback.on);
+            write_escape_code_to_child(self, ESC_OSC, reply);
+            return;
+        }
         self->frame_feedback.on = mode != 0;
         self->frame_feedback.pending = false;
         self->frame_feedback.seq = 0;
