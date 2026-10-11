@@ -17,6 +17,10 @@
 #include <math.h>
 #include <ctype.h>
 
+#ifndef M_PI
+#define M_PI 3.14159265358979323846
+#endif
+
 #define MAX_ELEMENTS (1u << 22)
 #define MAX_DEPTH 64
 #define TOLERANCE 0.25  // flattening error in device pixels
@@ -1286,20 +1290,21 @@ static void
 eval_stops(const Elem *g, double t, float *r, float *gg, float *b, float *a) {
     const Stop *st = g->stops;
     unsigned n = g->nstops;
+    double c[4];
     if (t <= st[0].offset || n == 1) {
-        *r = st[0].r, *gg = st[0].g, *b = st[0].b, *a = st[0].a;
+        c[0] = st[0].r, c[1] = st[0].g, c[2] = st[0].b, c[3] = st[0].a;
     } else if (t >= st[n - 1].offset) {
-        *r = st[n - 1].r, *gg = st[n - 1].g, *b = st[n - 1].b, *a = st[n - 1].a;
+        c[0] = st[n - 1].r, c[1] = st[n - 1].g, c[2] = st[n - 1].b, c[3] = st[n - 1].a;
     } else {
         unsigned i = 1;
         while (i < n - 1 && st[i].offset < t) i++;
         double span = st[i].offset - st[i - 1].offset, f = span > 0 ? (t - st[i - 1].offset) / span : 0;
-        *r = st[i - 1].r + (st[i].r - st[i - 1].r) * f;
-        *gg = st[i - 1].g + (st[i].g - st[i - 1].g) * f;
-        *b = st[i - 1].b + (st[i].b - st[i - 1].b) * f;
-        *a = st[i - 1].a + (st[i].a - st[i - 1].a) * f;
+        c[0] = st[i - 1].r + (st[i].r - st[i - 1].r) * f;
+        c[1] = st[i - 1].g + (st[i].g - st[i - 1].g) * f;
+        c[2] = st[i - 1].b + (st[i].b - st[i - 1].b) * f;
+        c[3] = st[i - 1].a + (st[i].a - st[i - 1].a) * f;
     }
-    *r /= 255, *gg /= 255, *b /= 255, *a /= 255;
+    *r = (float)(c[0] / 255), *gg = (float)(c[1] / 255), *b = (float)(c[2] / 255), *a = (float)(c[3] / 255);
 }
 
 static inline void
