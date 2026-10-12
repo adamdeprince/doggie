@@ -783,6 +783,8 @@ def kitty_env(args: Options) -> Env:
             'AudioToolbox',
             '-framework',
             'IOKit',
+            '-framework',
+            'IOSurface',
         ]
         test_program_src = """#include <UserNotifications/UserNotifications.h>
         int main(void) { return 0; }\n"""
@@ -1147,7 +1149,9 @@ def find_c_files() -> Tuple[List[str], List[str]]:
     ans, headers = [], []
     d = 'kitty'
     exclude = (
-        {'fontconfig.c', 'freetype.c', 'desktop.c', 'freetype_render_ui_text.c'} if is_macos else {'core_text.m', 'cocoa_window.m', 'macos_process_info.c'}
+        {'fontconfig.c', 'freetype.c', 'desktop.c', 'freetype_render_ui_text.c'}
+        if is_macos
+        else {'core_text.m', 'cocoa_window.m', 'macos_process_info.c', 'iosurface.m'}
     )
     for x in sorted(os.listdir(d)):
         ext = os.path.splitext(x)[1]

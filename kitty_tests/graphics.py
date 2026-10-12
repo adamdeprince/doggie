@@ -455,6 +455,11 @@ class TestGraphics(BaseTest):
         self.ae(pl('abcdefgh', s=1, v=1, a='q', f=64), 'OK')
         self.ae(pl('abcdefg', s=1, v=1, f=64), 'ENODATA:Insufficient image data: 7 < 8')
         sl('abcdefgh' * 6, s=3, v=2, f=64)
+        # Test GPU surfaces, a real one needs a GPU so only the error paths
+        self.assertTrue(pl('dmabuf:1', t='g', i=5).startswith('EINVAL:'))
+        self.assertTrue(pl('iosurface:0', a='q', t='g', i=5).startswith('EINVAL:'))
+        self.ae(pl('', a='r', i=77), 'ENOENT:Refresh command refers to non-existent image with id: 77 and number: 0')
+        self.ae(pl('', a='r', i=1), 'EINVAL:Refresh command refers to image with id: 1 that is not backed by a GPU surface')
 
         # Test chunked load
         self.assertIsNone(pl('abcd', s=2, v=2, m=1))

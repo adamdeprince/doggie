@@ -12,6 +12,9 @@
 #include "iqsort.h"
 #include "safe-wrappers.h"
 #include "simd-string.h"
+#ifdef __APPLE__
+#include "iosurface.h"
+#endif
 
 #include <sys/types.h>
 #include <sys/stat.h>
@@ -171,6 +174,13 @@ free_image_resources(GraphicsManager *self, Image *img) {
     clear_texture_ref(&img->texture);
     vector_doc_free(img->vector);
     img->vector = NULL;
+#ifdef __APPLE__
+    if (img->surface) {
+        if (img->surface_texture) free_texture(&img->surface_texture);
+        iosurface_release(img->surface);
+        img->surface = NULL;
+    }
+#endif
     if (self->disk_cache) {
         ImageAndFrame key = {.image_id = img->internal_id, .frame_id = img->root_frame.id};
         if (!remove_from_cache(self, key) && PyErr_Occurred()) PyErr_Print();
@@ -1051,6 +1061,58 @@ upload_to_gpu(GraphicsManager *self, Image *img, const bool is_opaque, const boo
     if (img->texture) { send_image_to_gpu(&img->texture->id, data, img->width, img->height, is_opaque, is_float, is_4byte_aligned, true, REPEAT_CLAMP); }
 }
 
+// Copy the current contents of the surface into the image texture, on the GPU
+static bool
+refresh_surface_image(GraphicsManager *self, Image *img) {
+#ifdef __APPLE__
+    if (!self->context_made_current_for_this_command) {
+        if (!self->window_id) return true;
+        if (!make_window_context_current(self->window_id)) return false;
+        self->context_made_current_for_this_command = true;
+    }
+    if (!iosurface_bind_rectangle_texture(img->surface, &img->surface_texture, img->surface_is_bgra)) return false;
+    if (img->texture) copy_rectangle_texture_to_texture(img->surface_texture, &img->texture->id, img->width, img->height);
+    return true;
+#else
+    (void)self;
+    (void)img;
+    return false;
+#endif
+}
+
+static Image *
+load_surface_image(GraphicsManager *self, const GraphicsCommand *g, Image *img, const uint8_t *payload, bool is_query) {
+#ifdef __APPLE__
+    if (g->more || g->compressed) ABRT("EINVAL", "Chunking and compression are not supported for GPU surfaces");
+    char spec[64], err[128];
+    if (g->payload_sz >= sizeof(spec)) ABRT("EINVAL", "GPU surface specification too long");
+    snprintf(spec, sizeof(spec), "%.*s", (int)g->payload_sz, payload);
+    if (strncmp(spec, "iosurface:", 10) != 0) ABRT("EINVAL", "Unknown GPU surface type: %s", spec);
+    uint32_t width, height;
+    bool is_bgra;
+    void *surface = iosurface_lookup((uint32_t)strtoul(spec + 10, NULL, 10), &width, &height, &is_bgra, err, sizeof(err));
+    if (!surface) ABRT("EINVAL", "%s", err);
+    if (width > MAX_IMAGE_DIMENSION || height > MAX_IMAGE_DIMENSION) {
+        iosurface_release(surface);
+        ABRT("EINVAL", "Image too large, width or height greater than %u", MAX_IMAGE_DIMENSION);
+    }
+    img->surface = surface;
+    img->surface_is_bgra = is_bgra;
+    img->width = width;
+    img->height = height;
+    img->root_frame = (const Frame){.id = ++img->frame_id_counter, .is_4byte_aligned = true, .width = width, .height = height};
+    if (!is_query && !refresh_surface_image(self, img)) ABRT("EINVAL", "Failed to bind the GPU surface to a texture");
+    img->root_frame_data_loaded = true;
+    return img;
+#else
+    (void)g;
+    (void)img;
+    (void)payload;
+    (void)is_query;
+    ABRT("EINVAL", "GPU surfaces are not supported on this platform");
+#endif
+}
+
 static Image *
 handle_add_command(GraphicsManager *self, const GraphicsCommand *g, const uint8_t *payload, bool *is_dirty, uint32_t iid, bool is_query) {
     bool existing, init_img = true;
@@ -1088,6 +1150,11 @@ handle_add_command(GraphicsManager *self, const GraphicsCommand *g, const uint8_
         }
         img->atime = monotonic();
         img->used_storage = 0;
+        if (tt == 'g') {
+            self->currently_loading.start_command = *g;
+            self->currently_loading.start_command.id = iid;
+            return load_surface_image(self, g, img, payload, is_query);
+        }
         if (!initialize_load_data(self, g, img, tt, fmt, 0)) return NULL;
         self->currently_loading.start_command.id = iid;
     } else {
@@ -2022,7 +2089,7 @@ update_vector_texture(GraphicsManager *self, Image *img, double width, double he
     if (!img->vector_dirty && w == img->vector_tex_width && h == img->vector_tex_height) return;
     uint8_t *data = render_vector_image(self, img, w, h);
     if (!data) return;
-    if (img->texture) send_image_to_gpu(&img->texture->id, data, w, h, false, true, true, REPEAT_CLAMP);
+    if (img->texture) send_image_to_gpu(&img->texture->id, data, w, h, false, false, true, true, REPEAT_CLAMP);
     free(data);
     img->vector_tex_width = w;
     img->vector_tex_height = h;
@@ -2092,6 +2159,7 @@ handle_animation_frame_load_command(GraphicsManager *self, GraphicsCommand *g, I
         if (g->data_width > MAX_IMAGE_DIMENSION || g->data_height > MAX_IMAGE_DIMENSION)
             ABRT("EINVAL", "Image too large, width or height greater than %u", MAX_IMAGE_DIMENSION);
         if (img->root_frame.is_float != (fmt == RGBA16F)) ABRT("EINVAL", "Animation frame format must match the image format");
+        if (img->surface) ABRT("EINVAL", "Animation frames are not supported for GPU surface images");
         if (!initialize_load_data(self, g, img, tt, fmt, frame_number - 1)) return NULL;
     }
     LoadData *load_data = &self->currently_loading;
@@ -2427,6 +2495,10 @@ handle_compose_command(GraphicsManager *self, bool *is_dirty, const GraphicsComm
     Frame *dest_frame = frame_for_number(img, g->other_frame_number);
     if (!dest_frame) {
         set_command_failed_response("ENOENT", "No destination frame number %u exists in image id: %u\n", g->other_frame_number, img->client_id);
+        return;
+    }
+    if (img->surface) {
+        set_command_failed_response("EINVAL", "Composition is not supported for GPU surface images");
         return;
     }
     // Use uint64_t to avoid overflow when testing for validity. All dimensions are 32bit numbers.
@@ -3012,6 +3084,18 @@ grman_handle_command(GraphicsManager *self, const GraphicsCommand *g, const uint
             break;
         }
         case 'd': handle_delete_command(self, g, c, is_dirty, cell); break;
+        case 'r': {
+            if (!g->id && !g->image_number) {
+                REPORT_ERROR("Refresh command without image id or number");
+                break;
+            }
+            Image *img = g->id ? img_by_client_id(self, g->id) : img_by_client_number(self, g->image_number);
+            if (!img) set_command_failed_response("ENOENT", "Refresh command refers to non-existent image with id: %u and number: %u", g->id, g->image_number);
+            else if (!img->surface) set_command_failed_response("EINVAL", "Refresh command refers to image with id: %u that is not backed by a GPU surface", img->client_id);
+            else if (refresh_surface_image(self, img)) *is_dirty = true;
+            else set_command_failed_response("EINVAL", "Failed to refresh the GPU surface of image with id: %u", img->client_id);
+            ret = finish_command_response(g, true);
+        } break;
         case 'c':
             if (!g->id && !g->image_number) {
                 REPORT_ERROR("Compose frame data command without image id or number");
@@ -3064,8 +3148,8 @@ image_as_dict(GraphicsManager *self, Image *img) {
     }
     CoalescedFrameData cfd = {.is_4byte_aligned = true};
     if (img->vector) cfd.buf = render_vector_image(self, img, img->width, img->height);
-    else cfd = get_coalesced_frame_data(self, img, &img->root_frame);
-    if (!cfd.buf) {
+    else if (!img->surface) cfd = get_coalesced_frame_data(self, img, &img->root_frame);
+    if (!cfd.buf && !img->surface) {
         PyErr_SetString(PyExc_RuntimeError, "Failed to get data for root frame");
         return NULL;
     }
@@ -3097,7 +3181,7 @@ image_as_dict(GraphicsManager *self, Image *img) {
         U(animation_duration),
         "data",
         cfd.buf,
-        (Py_ssize_t)(pixel_size(cfd.is_opaque, cfd.is_float) * img->width * img->height),
+        (Py_ssize_t)(cfd.buf ? pixel_size(cfd.is_opaque, cfd.is_float) * img->width * img->height : 0),
         "extra_frames",
         frames,
         B(tone_map),

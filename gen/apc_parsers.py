@@ -288,9 +288,9 @@ def write_header(text: str, path: str) -> None:
 def parsers() -> None:
     flag = frozenset
     keymap: KeymapType = {
-        'a': ('action', flag('tTqpdface')),
+        'a': ('action', flag('tTqpdfacer')),
         'd': ('delete_action', flag('aAiIcCfFnNpPqQrRxXyYzZ')),
-        't': ('transmission_type', flag('dfts')),
+        't': ('transmission_type', flag('dftsg')),
         'o': ('compressed', flag('z')),
         'f': ('format', 'uint'),
         'm': ('more', 'uint'),

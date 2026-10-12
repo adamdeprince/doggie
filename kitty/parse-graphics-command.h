@@ -109,7 +109,7 @@ case tone_map: value_state = UINT; break;
 
             case action: {
                 g.action = parser_buf[pos++];
-                if (g.action != 'T' && g.action != 'a' && g.action != 'c' && g.action != 'd' && g.action != 'e' && g.action != 'f' && g.action != 'p' && g.action != 'q' && g.action != 't') {
+                if (g.action != 'T' && g.action != 'a' && g.action != 'c' && g.action != 'd' && g.action != 'e' && g.action != 'f' && g.action != 'p' && g.action != 'q' && g.action != 'r' && g.action != 't') {
                     REPORT_ERROR("Malformed GraphicsCommand control block, unknown flag value for action: 0x%x", g.action);
                     return;
                 };
@@ -129,7 +129,7 @@ case tone_map: value_state = UINT; break;
 
             case transmission_type: {
                 g.transmission_type = parser_buf[pos++];
-                if (g.transmission_type != 'd' && g.transmission_type != 'f' && g.transmission_type != 's' && g.transmission_type != 't') {
+                if (g.transmission_type != 'd' && g.transmission_type != 'f' && g.transmission_type != 'g' && g.transmission_type != 's' && g.transmission_type != 't') {
                     REPORT_ERROR("Malformed GraphicsCommand control block, unknown flag value for transmission_type: 0x%x", g.transmission_type);
                     return;
                 };
