@@ -1809,9 +1809,16 @@ screen_latency(Screen *self, const char *data, size_t sz) {
     }
     if (v != 1) return;
     if (!strcmp(op, "query") && id >= 0) {
-        snprintf(reply, sizeof(reply), "777;latency;v=1:op=cap:id=%d:caps=1:input=%d:repaint=%d", id, monotonic_t_to_us(OPT(input_delay)), monotonic_t_to_us(OPT(repaint_delay)));
+        snprintf(reply, sizeof(reply), "777;latency;v=1:op=cap:id=%d:caps=1:mode=%d:input=%d:repaint=%d", id, self->low_latency, monotonic_t_to_us(OPT(input_delay)), monotonic_t_to_us(OPT(repaint_delay)));
         write_escape_code_to_child(self, ESC_OSC, reply);
-    } else if (!strcmp(op, "mode") && mode >= 0) self->low_latency = mode != 0;
+    } else if (!strcmp(op, "mode")) {
+        if (mode < 0) {  // a read
+            snprintf(reply, sizeof(reply), "777;latency;v=1:op=mode:mode=%d", self->low_latency);
+            write_escape_code_to_child(self, ESC_OSC, reply);
+            return;
+        }
+        self->low_latency = mode != 0;
+    }
 }
 
 void

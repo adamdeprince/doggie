@@ -893,7 +893,7 @@ class TestScreen(BaseTest):
         s = self.create_screen()
         c = s.callbacks
         parse_bytes(s, b'\x1b]777;latency;v=1:op=query:id=7\x1b\\')
-        self.ae(c.wtcbuf, b'\x1b]777;latency;v=1:op=cap:id=7:caps=1:input=3000:repaint=10000\x1b\\')
+        self.ae(c.wtcbuf, b'\x1b]777;latency;v=1:op=cap:id=7:caps=1:mode=0:input=3000:repaint=10000\x1b\\')
         c.clear()
         parse_bytes(s, b'\x1b]777;latency;v=2:op=query:id=7\x1b\\')
         parse_bytes(s, b'\x1b]777;latency;v=1:op=query\x1b\\')
@@ -901,6 +901,15 @@ class TestScreen(BaseTest):
         parse_bytes(s, b'\x1b]777;latency;garbage\x1b\\')
         self.ae(c.wtcbuf, b'')
         self.ae(str(s.line(0)), '')
+        parse_bytes(s, b'\x1b]777;latency;v=1:op=mode\x1b\\')
+        self.ae(c.wtcbuf, b'\x1b]777;latency;v=1:op=mode:mode=1\x1b\\')
+        c.clear()
+        parse_bytes(s, b'\x1b]777;latency;v=1:op=query:id=8\x1b\\')
+        self.ae(c.wtcbuf, b'\x1b]777;latency;v=1:op=cap:id=8:caps=1:mode=1:input=3000:repaint=10000\x1b\\')
+        c.clear()
+        s.reset()
+        parse_bytes(s, b'\x1b]777;latency;v=1:op=mode\x1b\\')
+        self.ae(c.wtcbuf, b'\x1b]777;latency;v=1:op=mode:mode=0\x1b\\')
 
     def test_cursor_hidden(self):
         s = self.create_screen()
