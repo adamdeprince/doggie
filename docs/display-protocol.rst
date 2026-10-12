@@ -29,7 +29,7 @@ whole and never reaches a program as keystrokes. Spaces in the examples below
 are for clarity only.
 
 Every frame has ``v``, the protocol version, which is ``1``, and ``op``, one
-of ``query``, ``info``, ``mode`` and ``event``.
+of ``query``, ``cap``, ``mode`` and ``event``.
 
 Query
 -------------
@@ -42,12 +42,15 @@ A program asks about the display its window is on::
 the reply so replies can be matched to queries. A supporting terminal
 answers::
 
-    <OSC> 777 ; display ; v=1 : op=info : id=42 : kind=lcd : color=rgb : bits=8 : gamut=p3 : headroom=1 : scale=2 : period=8333 : ppi=254 <ST>
+    <OSC> 777 ; display ; v=1 : op=cap : id=42 : mode=0 : kind=lcd : color=rgb : bits=8 : gamut=p3 : headroom=1 : scale=2 : period=8333 : ppi=254 <ST>
 
 A terminal that does not support the protocol ignores the query, so a program
 must time out and fall back to assuming an ordinary color display.
 
 The fields of the reply are:
+
+``mode``
+    The current state of the mode described below, ``0`` or ``1``.
 
 ``kind``
     One of ``lcd``, ``oled``, ``eink`` and ``unknown``. On e-ink, updates are
@@ -101,6 +104,14 @@ it back on when resumed. Multiplexers keep it with the rest of the terminal
 state and turn it off when detaching. There is no user setting that overrides
 the program's choice.
 
+A ``mode`` request without a ``mode`` field reads the state instead of
+changing it, and is answered with::
+
+    <OSC> 777 ; display ; v=1 : op=mode : mode=1 <ST>
+
+A program resuming after a reconnection reads the mode to learn whether it
+survived, rather than assuming it did.
+
 Events
 -----------
 
@@ -112,7 +123,9 @@ the headroom, its color profile was switched::
 
     <OSC> 777 ; display ; v=1 : op=event : kind=lcd : color=rgb : bits=8 : gamut=srgb : headroom=1 : scale=1 : period=16666 : ppi=96 <ST>
 
-The fields are those of the ``info`` reply, without ``id``. A change can be
+The fields are those of the ``cap`` reply, without ``id`` and ``mode``.
+Changes are relative to the last event sent, so turning the mode off and on
+again reports the current values once and then only changes. A change can be
 reported a short while after it happens, and a program that has turned the
 mode off may still receive an event that was already on its way.
 
