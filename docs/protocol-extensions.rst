@@ -33,6 +33,7 @@ please do so by opening issues in the `GitHub bug tracker
    cell-alpha-protocol
    capabilities-protocol
    display-protocol
+   latency-protocol
    dnd-protocol
    multiple-cursors-protocol
    file-transfer-protocol

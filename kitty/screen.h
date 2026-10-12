@@ -167,6 +167,7 @@ typedef struct {
     bool has_focus;
     uint8_t visibility_state; // 0 = unknown, 1 = potentially visible, 2 = not visible
     bool display_events; // display protocol mode, see docs/display-protocol.rst
+    bool low_latency; // skip input batching for this window, see docs/latency-protocol.rst
     bool has_activity_since_last_focus;
     hyperlink_id_type active_hyperlink_id;
     HYPERLINK_POOL_HANDLE hyperlink_pool;
@@ -252,6 +253,7 @@ void screen_visibility_changed(Screen *self, bool potentially_visible);
 void screen_caps_query(Screen *self, const char *data, size_t sz);
 void screen_display_protocol(Screen *self, const char *data, size_t sz);
 void screen_display_changed(Screen *self, const DisplayInfo *d);
+void screen_latency(Screen *self, const char *data, size_t sz);
 void screen_cursor_position(Screen *, unsigned int, unsigned int);
 void screen_cursor_move(Screen *self, unsigned int count /*=1*/, int move_direction /*=-1*/, bool allow_move_to_previous_line);
 void screen_erase_in_line(Screen *, unsigned int, bool);

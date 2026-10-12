@@ -215,6 +215,7 @@ do_screen_reset(Screen *self, bool is_hard_reset) {
     self->main_pointer_shape_stack.count = 0;
     self->alternate_pointer_shape_stack.count = 0;
     self->display_events = false;
+    self->low_latency = false;
     if (is_hard_reset && self->linebuf == self->alt_linebuf) screen_toggle_screen_buffer(self, true, true);
     if (screen_is_overlay_active(self)) {
         deactivate_overlay_line(self);
@@ -1844,6 +1845,37 @@ screen_display_protocol(Screen *self, const char *data, size_t sz) {
 void
 screen_display_changed(Screen *self, const DisplayInfo *d) {
     if (self->display_events) send_display_report(self, "event", -1, d);
+}
+
+void
+screen_latency(Screen *self, const char *data, size_t sz) {
+    char buf[128], reply[128], *saveptr = NULL;
+    const char *op = "";
+    int v = 0, mode = -1, id = -1;
+    if (sz >= sizeof(buf)) return;
+    memcpy(buf, data, sz);
+    buf[sz] = 0;
+    for (char *tok = strtok_r(buf, ":", &saveptr); tok; tok = strtok_r(NULL, ":", &saveptr)) {
+        char *val = strchr(tok, '=');
+        if (!val) return;
+        *val++ = 0;
+        if (!strcmp(tok, "v")) v = atoi(val);
+        else if (!strcmp(tok, "op")) op = val;
+        else if (!strcmp(tok, "mode")) mode = atoi(val);
+        else if (!strcmp(tok, "id")) id = atoi(val);
+    }
+    if (v != 1) return;
+    if (!strcmp(op, "query") && id >= 0) {
+        snprintf(reply, sizeof(reply), "777;latency;v=1:op=cap:id=%d:caps=1:mode=%d:input=%d:repaint=%d", id, self->low_latency, monotonic_t_to_us(OPT(input_delay)), monotonic_t_to_us(OPT(repaint_delay)));
+        write_escape_code_to_child(self, ESC_OSC, reply);
+    } else if (!strcmp(op, "mode")) {
+        if (mode < 0) {  // a read
+            snprintf(reply, sizeof(reply), "777;latency;v=1:op=mode:mode=%d", self->low_latency);
+            write_escape_code_to_child(self, ESC_OSC, reply);
+            return;
+        }
+        self->low_latency = mode != 0;
+    }
 }
 
 void
