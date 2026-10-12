@@ -598,6 +598,10 @@ dispatch_osc(PS *self, uint8_t *buf, size_t limit, bool is_extended_osc) {
                 screen_frame_feedback(self->screen, (const char *)buf + i + 6, limit - i - 6);
                 break;
             }
+            if (limit - i > 7 && memcmp(buf + i, "scroll;", 7) == 0) {
+                screen_scroll_protocol(self->screen, (const char *)buf + i + 7, limit - i - 7);
+                break;
+            }
             /* fallthrough */
         case 9:
         case 99:

@@ -1436,6 +1436,15 @@ is_modifier_pressed(NSUInteger flags, NSUInteger target_mask, NSUInteger other_m
         case NSEventPhaseMayBegin: ev.momentum_type = GLFW_MOMENTUM_PHASE_MAY_BEGIN; break;
         case NSEventPhaseNone: break;
     }
+    switch ([event phase]) {
+        case NSEventPhaseBegan: ev.scroll_phase = GLFW_MOMENTUM_PHASE_BEGAN; break;
+        case NSEventPhaseStationary: ev.scroll_phase = GLFW_MOMENTUM_PHASE_STATIONARY; break;
+        case NSEventPhaseChanged: ev.scroll_phase = GLFW_MOMENTUM_PHASE_ACTIVE; break;
+        case NSEventPhaseEnded: ev.scroll_phase = GLFW_MOMENTUM_PHASE_ENDED; break;
+        case NSEventPhaseCancelled: ev.scroll_phase = GLFW_MOMENTUM_PHASE_CANCELED; break;
+        case NSEventPhaseMayBegin: ev.scroll_phase = GLFW_MOMENTUM_PHASE_MAY_BEGIN; break;
+        case NSEventPhaseNone: break;
+    }
 
     _glfwInputScroll(window, &ev);
 }

@@ -217,6 +217,7 @@ do_screen_reset(Screen *self, bool is_hard_reset) {
     self->display_events = false;
     self->low_latency = false;
     self->frame_feedback.on = false;
+    self->scroll_reports = 0;
     if (is_hard_reset && self->linebuf == self->alt_linebuf) screen_toggle_screen_buffer(self, true, true);
     if (screen_is_overlay_active(self)) {
         deactivate_overlay_line(self);

@@ -1572,6 +1572,106 @@ pixel_scroll_enabled_for_screen(const Screen *screen) {
     return OPT(pixel_scroll) && screen->linebuf == screen->main_linebuf;
 }
 
+// Scroll protocol {{{
+// Pixel precise scroll reports, see docs/scroll-protocol.rst
+
+void
+screen_scroll_protocol(Screen *screen, const char *data, size_t sz) {
+    char buf[128], reply[64], *saveptr = NULL;
+    const char *op = "";
+    int v = 0, mode = -1, id = -1;
+    if (sz >= sizeof(buf)) return;
+    memcpy(buf, data, sz);
+    buf[sz] = 0;
+    for (char *tok = strtok_r(buf, ":", &saveptr); tok; tok = strtok_r(NULL, ":", &saveptr)) {
+        char *val = strchr(tok, '=');
+        if (!val) return;
+        *val++ = 0;
+        if (!strcmp(tok, "v")) v = atoi(val);
+        else if (!strcmp(tok, "op")) op = val;
+        else if (!strcmp(tok, "mode")) mode = atoi(val);
+        else if (!strcmp(tok, "id")) id = atoi(val);
+    }
+    if (v != 1) return;
+    if (!strcmp(op, "query") && id >= 0) {
+        snprintf(reply, sizeof(reply), "777;scroll;v=1:op=cap:id=%d:caps=1:mode=%d", id, screen->scroll_reports != 0);
+        write_escape_code_to_child(screen, ESC_OSC, reply);
+    } else if (!strcmp(op, "mode")) {
+        if (mode >= 0) screen->scroll_reports = mode ? v : 0;
+        else {  // a read
+            snprintf(reply, sizeof(reply), "777;scroll;v=1:op=mode:mode=%d", screen->scroll_reports != 0);
+            write_escape_code_to_child(screen, ESC_OSC, reply);
+        }
+    }
+}
+
+static int
+scroll_phase_code(const GLFWScrollEvent *ev) {
+    switch (ev->momentum_type) {
+        case GLFW_MOMENTUM_PHASE_BEGAN: return 4;
+        case GLFW_MOMENTUM_PHASE_STATIONARY:
+        case GLFW_MOMENTUM_PHASE_ACTIVE: return 5;
+        case GLFW_MOMENTUM_PHASE_ENDED: return 6;
+        case GLFW_MOMENTUM_PHASE_CANCELED: return 7;
+        case GLFW_NO_MOMENTUM_DATA:
+        case GLFW_MOMENTUM_PHASE_MAY_BEGIN: break;
+    }
+    switch (ev->scroll_phase) {
+        case GLFW_MOMENTUM_PHASE_BEGAN: return 1;
+        case GLFW_MOMENTUM_PHASE_STATIONARY:
+        case GLFW_MOMENTUM_PHASE_ACTIVE: return 2;
+        case GLFW_MOMENTUM_PHASE_ENDED: return 3;
+        case GLFW_MOMENTUM_PHASE_CANCELED: return 7;
+        case GLFW_NO_MOMENTUM_DATA:
+        case GLFW_MOMENTUM_PHASE_MAY_BEGIN: break;
+    }
+    return 0;
+}
+
+// The distance the view should move in hundredths of a pixel, positive to the right and down
+static int
+scroll_delta(double offset, GLFWOffsetType type, unsigned cell_size) {
+    double pixels;
+    switch (type) {
+        case GLFW_SCROLL_OFFEST_HIGHRES: pixels = offset * OPT(touch_scroll_multiplier); break;
+        case GLFW_SCROLL_OFFEST_V120: pixels = offset / 120. * OPT(wheel_scroll_multiplier) * cell_size; break;
+        default: pixels = offset * OPT(wheel_scroll_multiplier) * cell_size; break;
+    }
+    return (int)round(-100. * pixels);
+}
+
+static bool
+screen_scroll_report(Screen *screen, const GLFWScrollEvent *ev, double x, double y) {
+    if (!screen->scroll_reports) return false;
+    char buf[160];
+    const int m = ev->keyboard_modifiers;
+    const int mods = (m & GLFW_MOD_SHIFT ? 1 : 0) | (m & GLFW_MOD_ALT ? 2 : 0) | (m & GLFW_MOD_CONTROL ? 4 : 0) | (m & GLFW_MOD_SUPER ? 8 : 0);
+    snprintf(
+        buf, sizeof(buf), "777;scroll;v=1:op=event:dx=%d:dy=%d:x=%d:y=%d:mods=%d:src=%d:phase=%d",
+        scroll_delta(ev->x_offset, ev->offset_type, screen->cell_size.width), scroll_delta(ev->y_offset, ev->offset_type, screen->cell_size.height),
+        (int)round(x), (int)round(y), mods, ev->offset_type == GLFW_SCROLL_OFFEST_HIGHRES ? 1 : 0, scroll_phase_code(ev));
+    write_escape_code_to_child(screen, ESC_OSC, buf);
+    return true;
+}
+
+static PyObject *
+send_scroll_report(PyObject *self UNUSED, PyObject *args, PyObject *kw) {
+    Screen *screen;
+    GLFWScrollEvent ev = {0};
+    int offset_type = 0, momentum = 0, phase = 0;
+    double x = 0, y = 0;
+    static const char *kwlist[] = {"screen", "x_offset", "y_offset", "offset_type", "momentum", "phase", "mods", "x", "y", NULL};
+    if (!PyArg_ParseTupleAndKeywords(
+            args, kw, "O!dd|iiiidd", (char **)kwlist, &Screen_Type, &screen, &ev.x_offset, &ev.y_offset, &offset_type, &momentum, &phase, &ev.keyboard_modifiers, &x, &y))
+        return NULL;
+    ev.offset_type = offset_type;
+    ev.momentum_type = momentum;
+    ev.scroll_phase = phase;
+    if (screen_scroll_report(screen, &ev, x, y)) Py_RETURN_TRUE;
+    Py_RETURN_FALSE;
+}
+// }}}
+
 void
 scroll_event(const GLFWScrollEvent *ev) {
     debug(
@@ -1614,6 +1714,11 @@ scroll_event(const GLFWScrollEvent *ev) {
         }
     }
     Screen *screen = w->render_data.screen;
+    if (screen->scroll_reports) {
+        const WindowGeometry *g = &w->render_data.geometry;
+        screen_scroll_report(screen, ev, osw->mouse_x - g->left, osw->mouse_y - g->top);
+        return;
+    }
 
     switch (ev->momentum_type) {
         case GLFW_NO_MOMENTUM_DATA: break;
@@ -1822,6 +1927,7 @@ test_scale_scroll(PyObject *self UNUSED, PyObject *args) {
 
 static PyMethodDef module_methods[] = {
     {"send_mouse_event", (PyCFunction)(void (*)(void))(send_mouse_event), METH_VARARGS | METH_KEYWORDS, NULL},
+    {"send_scroll_report", (PyCFunction)(void (*)(void))(send_scroll_report), METH_VARARGS | METH_KEYWORDS, NULL},
     METHODB(test_encode_mouse, METH_VARARGS),
     METHODB(test_scale_scroll, METH_VARARGS),
     METHODB(send_mock_mouse_event_to_window, METH_VARARGS),
