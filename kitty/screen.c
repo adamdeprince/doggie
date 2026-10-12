@@ -1790,6 +1790,44 @@ send_visibility_report(Screen *self) {
 }
 
 void
+screen_haptic(Screen *self, const char *data, size_t sz) {
+    char buf[128], reply[128], *saveptr = NULL;
+    const char *op = "", *pattern = "";
+    int v = 0, id = -1;
+    if (sz >= sizeof(buf)) return;
+    memcpy(buf, data, sz);
+    buf[sz] = 0;
+    for (char *tok = strtok_r(buf, ":", &saveptr); tok; tok = strtok_r(NULL, ":", &saveptr)) {
+        char *val = strchr(tok, '=');
+        if (!val) return;
+        *val++ = 0;
+        if (!strcmp(tok, "v")) v = atoi(val);
+        else if (!strcmp(tok, "op")) op = val;
+        else if (!strcmp(tok, "id")) id = atoi(val);
+        else if (!strcmp(tok, "pattern")) pattern = val;
+    }
+    if (v != 1) return;
+#ifdef __APPLE__
+    const bool available = OPT(haptic_feedback);
+#else
+    const bool available = false;
+#endif
+    if (!strcmp(op, "query") && id >= 0) {
+        snprintf(reply, sizeof(reply), "777;haptic;v=1:op=cap:id=%d:caps=%d", id, available);
+        write_escape_code_to_child(self, ESC_OSC, reply);
+    } else if (!strcmp(op, "play") && available) {
+        int which = !strcmp(pattern, "generic") ? 0 : !strcmp(pattern, "alignment") ? 1 : !strcmp(pattern, "level") ? 2 : -1;
+        OSWindow *os_window = os_window_for_kitty_window(self->window_id);
+        monotonic_t now = monotonic();
+        if (which < 0 || !os_window || !os_window->is_focused || now - os_window->last_haptic_at < ms_to_monotonic_t(50)) return;
+        os_window->last_haptic_at = now;
+#ifdef __APPLE__
+        cocoa_haptic_feedback(which);
+#endif
+    }
+}
+
+void
 screen_visibility_changed(Screen *self, bool potentially_visible) {
     const uint8_t state = potentially_visible ? 1 : 2;
     if (self->visibility_state != state) {

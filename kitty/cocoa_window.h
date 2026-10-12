@@ -52,6 +52,7 @@ long cocoa_window_number(void *w);
 void cocoa_application_lifecycle_event(bool);
 void cocoa_recreate_global_menu(void);
 void cocoa_system_beep(const char *);
+void cocoa_haptic_feedback(int);
 void cocoa_set_activation_policy(bool);
 bool cocoa_alt_option_key_pressed(unsigned long);
 void cocoa_toggle_secure_keyboard_entry(void);

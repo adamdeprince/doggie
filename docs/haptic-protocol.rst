@@ -20,9 +20,11 @@ Frames are ``OSC 777`` with the ``haptic`` selector::
 ``<OSC>`` is ``<ESC> ]`` and ``<ST>`` is ``<ESC> \``; ``BEL`` is also
 accepted as a terminator. Fields are ASCII ``key=value`` pairs separated by
 colons, in any order. Keys are case sensitive. Every frame has ``v``, the
-protocol version, which is ``1``, and ``op``, one of ``query``, ``cap`` and
-``play``. A frame with an unknown ``op``, a missing field or a value out of
-range is ignored. Spaces in the examples below are for clarity only.
+protocol version, which must be ``1``, and ``op``, one of ``query``, ``cap``
+and ``play``. A frame with a field that is not ``key=value``, an unknown
+version, an unknown ``op`` or a missing required field is ignored as a
+whole and never reaches a program as keystrokes; unknown keys are ignored.
+Spaces in the examples below are for clarity only.
 
 Discovery
 -------------
