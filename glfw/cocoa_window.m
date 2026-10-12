@@ -1449,6 +1449,59 @@ is_modifier_pressed(NSUInteger flags, NSUInteger target_mask, NSUInteger other_m
     _glfwInputScroll(window, &ev);
 }
 
+// Gestures {{{
+static void
+handleGestureEvent(_GLFWwindow *window, NSEvent *event, GLFWGestureKind kind, GLFWGesturePhase phase, double delta, int dx, int dy) {
+    const NSPoint pos = [event locationInWindow];
+    GLFWGestureEvent ev = {
+        .kind = kind,
+        .phase = phase,
+        .keyboard_modifiers = translateFlags([event modifierFlags]),
+        .x = pos.x,
+        .y = [window->ns.view frame].size.height - pos.y,
+        .delta = delta,
+        .dx = dx,
+        .dy = dy,
+    };
+    _glfwInputGesture(window, &ev);
+}
+
+// The phase of a continuous gesture, zero for the phases that are not reported
+static GLFWGesturePhase
+gesturePhase(NSEvent *event) {
+    switch ([event phase]) {
+        case NSEventPhaseBegan: return GLFW_GESTURE_BEGIN;
+        case NSEventPhaseChanged: return GLFW_GESTURE_UPDATE;
+        case NSEventPhaseEnded: return GLFW_GESTURE_END;
+        case NSEventPhaseCancelled: return GLFW_GESTURE_CANCEL;
+        default: return 0;
+    }
+}
+
+- (void)magnifyWithEvent:(NSEvent *)event {
+    const GLFWGesturePhase phase = gesturePhase(event);
+    if (phase) handleGestureEvent(window, event, GLFW_GESTURE_PINCH, phase, [event magnification], 0, 0);
+}
+
+- (void)rotateWithEvent:(NSEvent *)event {
+    const GLFWGesturePhase phase = gesturePhase(event);
+    // NSEvent rotation is counterclockwise positive
+    if (phase) handleGestureEvent(window, event, GLFW_GESTURE_ROTATE, phase, -[event rotation], 0, 0);
+}
+
+- (void)swipeWithEvent:(NSEvent *)event {
+    // NSEvent reports -1 for a swipe right and for a swipe down, see NSEvent.h
+    const int dx = -(int)[event deltaX], dy = -(int)[event deltaY];
+    handleGestureEvent(window, event, GLFW_GESTURE_SWIPE, GLFW_GESTURE_BEGIN, 0, dx, dy);
+    handleGestureEvent(window, event, GLFW_GESTURE_SWIPE, GLFW_GESTURE_END, 0, dx, dy);
+}
+
+- (void)smartMagnifyWithEvent:(NSEvent *)event {
+    handleGestureEvent(window, event, GLFW_GESTURE_SMART_ZOOM, GLFW_GESTURE_BEGIN, 0, 0, 0);
+    handleGestureEvent(window, event, GLFW_GESTURE_SMART_ZOOM, GLFW_GESTURE_END, 0, 0, 0);
+}
+// }}}
+
 // Drop implementation for drag and drop {{{
 // Return YES to receive periodic dragging updates even when the mouse hasn't moved.
 // This allows the application to update acceptance status asynchronously.

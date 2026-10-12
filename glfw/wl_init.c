@@ -699,6 +699,100 @@ static const struct zwp_pointer_gesture_hold_v1_listener holdGestureListener = {
 };
 
 static void
+inputGesture(GLFWGestureKind kind, GLFWGesturePhase phase, double delta, int dx, int dy) {
+    _GLFWwindow *window = _glfw.wl.pointerFocus;
+    if (!window) return;
+    GLFWGestureEvent ev = {
+        .kind = kind,
+        .phase = phase,
+        .keyboard_modifiers = _glfw.wl.xkb.states.modifiers,
+        .x = window->wl.cursorPosX,
+        .y = window->wl.cursorPosY,
+        .delta = delta,
+        .dx = dx,
+        .dy = dy,
+    };
+    _glfwInputGesture(window, &ev);
+}
+
+// A pinch carries both scale and rotation, reported as the two gestures macOS
+// recognizes separately
+static void
+pinchGestureHandleBegin(
+    void *data UNUSED,
+    struct zwp_pointer_gesture_pinch_v1 *gesture UNUSED,
+    uint32_t serial UNUSED,
+    uint32_t time UNUSED,
+    struct wl_surface *surface UNUSED,
+    uint32_t fingers UNUSED) {
+    _glfw.wl.pinch_scale = 1;
+    inputGesture(GLFW_GESTURE_PINCH, GLFW_GESTURE_BEGIN, 0, 0, 0);
+    inputGesture(GLFW_GESTURE_ROTATE, GLFW_GESTURE_BEGIN, 0, 0, 0);
+}
+
+static void
+pinchGestureHandleUpdate(
+    void *data UNUSED,
+    struct zwp_pointer_gesture_pinch_v1 *gesture UNUSED,
+    uint32_t time UNUSED,
+    wl_fixed_t dx UNUSED,
+    wl_fixed_t dy UNUSED,
+    wl_fixed_t scale,
+    wl_fixed_t rotation) {
+    const double s = wl_fixed_to_double(scale), r = wl_fixed_to_double(rotation);
+    if (s > 0 && _glfw.wl.pinch_scale > 0) inputGesture(GLFW_GESTURE_PINCH, GLFW_GESTURE_UPDATE, s / _glfw.wl.pinch_scale - 1, 0, 0);
+    _glfw.wl.pinch_scale = s;
+    if (r != 0) inputGesture(GLFW_GESTURE_ROTATE, GLFW_GESTURE_UPDATE, r, 0, 0);
+}
+
+static void
+pinchGestureHandleEnd(void *data UNUSED, struct zwp_pointer_gesture_pinch_v1 *gesture UNUSED, uint32_t serial UNUSED, uint32_t time UNUSED, int32_t cancelled) {
+    const GLFWGesturePhase phase = cancelled ? GLFW_GESTURE_CANCEL : GLFW_GESTURE_END;
+    inputGesture(GLFW_GESTURE_PINCH, phase, 0, 0, 0);
+    inputGesture(GLFW_GESTURE_ROTATE, phase, 0, 0, 0);
+}
+
+static const struct zwp_pointer_gesture_pinch_v1_listener pinchGestureListener = {
+    .begin = pinchGestureHandleBegin,
+    .update = pinchGestureHandleUpdate,
+    .end = pinchGestureHandleEnd,
+};
+
+// A swipe is reported once it ends, as its dominant direction
+static void
+swipeGestureHandleBegin(
+    void *data UNUSED,
+    struct zwp_pointer_gesture_swipe_v1 *gesture UNUSED,
+    uint32_t serial UNUSED,
+    uint32_t time UNUSED,
+    struct wl_surface *surface UNUSED,
+    uint32_t fingers UNUSED) {
+    _glfw.wl.swipe_dx = 0;
+    _glfw.wl.swipe_dy = 0;
+}
+
+static void
+swipeGestureHandleUpdate(void *data UNUSED, struct zwp_pointer_gesture_swipe_v1 *gesture UNUSED, uint32_t time UNUSED, wl_fixed_t dx, wl_fixed_t dy) {
+    _glfw.wl.swipe_dx += wl_fixed_to_double(dx);
+    _glfw.wl.swipe_dy += wl_fixed_to_double(dy);
+}
+
+static void
+swipeGestureHandleEnd(void *data UNUSED, struct zwp_pointer_gesture_swipe_v1 *gesture UNUSED, uint32_t serial UNUSED, uint32_t time UNUSED, int32_t cancelled) {
+    const double ax = fabs(_glfw.wl.swipe_dx), ay = fabs(_glfw.wl.swipe_dy);
+    if (cancelled || (ax < 1 && ay < 1)) return;
+    const int dx = ax >= ay ? (_glfw.wl.swipe_dx > 0 ? 1 : -1) : 0, dy = ax < ay ? (_glfw.wl.swipe_dy > 0 ? 1 : -1) : 0;
+    inputGesture(GLFW_GESTURE_SWIPE, GLFW_GESTURE_BEGIN, 0, dx, dy);
+    inputGesture(GLFW_GESTURE_SWIPE, GLFW_GESTURE_END, 0, dx, dy);
+}
+
+static const struct zwp_pointer_gesture_swipe_v1_listener swipeGestureListener = {
+    .begin = swipeGestureHandleBegin,
+    .update = swipeGestureHandleUpdate,
+    .end = swipeGestureHandleEnd,
+};
+
+static void
 seatHandleCapabilities(void *data UNUSED, struct wl_seat *seat, enum wl_seat_capability caps) {
     if ((caps & WL_SEAT_CAPABILITY_POINTER) && !_glfw.wl.pointer) {
         _glfw.wl.pointer = wl_seat_get_pointer(seat);
@@ -711,6 +805,10 @@ seatHandleCapabilities(void *data UNUSED, struct wl_seat *seat, enum wl_seat_cap
         if (_glfw.wl.pointer_gestures) {
             _glfw.wl.pointer_gesture_hold = zwp_pointer_gestures_v1_get_hold_gesture(_glfw.wl.pointer_gestures, _glfw.wl.pointer);
             zwp_pointer_gesture_hold_v1_add_listener(_glfw.wl.pointer_gesture_hold, &holdGestureListener, NULL);
+            _glfw.wl.pointer_gesture_pinch = zwp_pointer_gestures_v1_get_pinch_gesture(_glfw.wl.pointer_gestures, _glfw.wl.pointer);
+            zwp_pointer_gesture_pinch_v1_add_listener(_glfw.wl.pointer_gesture_pinch, &pinchGestureListener, NULL);
+            _glfw.wl.pointer_gesture_swipe = zwp_pointer_gestures_v1_get_swipe_gesture(_glfw.wl.pointer_gestures, _glfw.wl.pointer);
+            zwp_pointer_gesture_swipe_v1_add_listener(_glfw.wl.pointer_gesture_swipe, &swipeGestureListener, NULL);
         }
     } else if (!(caps & WL_SEAT_CAPABILITY_POINTER) && _glfw.wl.pointer) {
         if (_glfw.wl.wp_cursor_shape_device_v1) wp_cursor_shape_device_v1_destroy(_glfw.wl.wp_cursor_shape_device_v1);
@@ -718,6 +816,14 @@ seatHandleCapabilities(void *data UNUSED, struct wl_seat *seat, enum wl_seat_cap
         if (_glfw.wl.pointer_gesture_hold) {
             zwp_pointer_gesture_hold_v1_destroy(_glfw.wl.pointer_gesture_hold);
             _glfw.wl.pointer_gesture_hold = NULL;
+        }
+        if (_glfw.wl.pointer_gesture_pinch) {
+            zwp_pointer_gesture_pinch_v1_destroy(_glfw.wl.pointer_gesture_pinch);
+            _glfw.wl.pointer_gesture_pinch = NULL;
+        }
+        if (_glfw.wl.pointer_gesture_swipe) {
+            zwp_pointer_gesture_swipe_v1_destroy(_glfw.wl.pointer_gesture_swipe);
+            _glfw.wl.pointer_gesture_swipe = NULL;
         }
         wl_pointer_destroy(_glfw.wl.pointer);
         _glfw.wl.pointer = NULL;

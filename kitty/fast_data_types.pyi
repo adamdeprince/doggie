@@ -1417,6 +1417,7 @@ def send_mouse_event(
 def send_scroll_report(
     screen: Screen, x_offset: float, y_offset: float, offset_type: int = 0, momentum: int = 0, phase: int = 0, mods: int = 0, x: float = 0, y: float = 0
 ) -> bool: ...
+def send_gesture_report(screen: Screen, kind: int, phase: int, x: int, y: int, mods: int = 0, delta: float = 0, dx: int = 0, dy: int = 0) -> bool: ...
 def set_window_logo(os_window_id: int, tab_id: int, window_id: int, path: str, position: str, alpha: float, png_data: bytes = b'') -> None:
     pass
 

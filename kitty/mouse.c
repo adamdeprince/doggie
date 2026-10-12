@@ -1792,6 +1792,124 @@ scroll_event(const GLFWScrollEvent *ev) {
     }
 }
 
+// Gestures {{{
+// The trackpad gesture protocol, see docs/gesture-protocol.rst
+
+static id_type gesture_window_id;  // the window that captured the gestures in progress
+
+static void
+write_gesture_report(Screen *screen, int kind, int phase, int x, int y, int mods, double delta, double total, int dx, int dy) {
+    char buf[256];
+    int n = snprintf(buf, sizeof(buf), "777;gesture;v=1:op=event:kind=%d:phase=%d:x=%d:y=%d:mods=%d", kind, phase, x, y, mods);
+    switch (kind) {
+        case GESTURE_PINCH: snprintf(buf + n, sizeof(buf) - n, ":scale=%d:total=%d", (int)round(delta * 1000), (int)round(total * 1000)); break;
+        case GESTURE_ROTATE: snprintf(buf + n, sizeof(buf) - n, ":angle=%d:total=%d", (int)round(delta * 100), (int)round(total * 100)); break;
+        case GESTURE_SWIPE: snprintf(buf + n, sizeof(buf) - n, ":dx=%d:dy=%d", dx, dy); break;
+    }
+    write_escape_code_to_child(screen, ESC_OSC, buf);
+}
+
+bool
+screen_gesture_report(Screen *screen, int kind, int phase, int x, int y, int mods, double delta, int dx, int dy) {
+    if (!screen->gesture.version || kind < GESTURE_PINCH || kind > GESTURE_SMART_ZOOM) return false;
+    GestureState *g = screen->gesture.gestures + kind;
+    if (phase == GESTURE_BEGIN) {
+        if (g->active) write_gesture_report(screen, kind, GESTURE_CANCEL, g->x, g->y, g->mods, 0, g->total, 0, 0);
+        g->active = true;
+        g->total = kind == GESTURE_PINCH ? 1 : 0;
+    } else if (!g->active) return false;  // no gesture after a reset
+    g->x = x;
+    g->y = y;
+    g->mods = mods;
+    if (kind == GESTURE_PINCH) g->total *= 1 + delta;
+    else g->total += delta;
+    write_gesture_report(screen, kind, phase, x, y, mods, delta, g->total, dx, dy);
+    if (phase >= GESTURE_END) g->active = false;
+    return true;
+}
+
+void
+screen_gesture_cancel(Screen *screen) {
+    for (int kind = GESTURE_PINCH; kind <= GESTURE_SMART_ZOOM; kind++) {
+        GestureState *g = screen->gesture.gestures + kind;
+        if (!g->active) continue;
+        g->active = false;
+        write_gesture_report(screen, kind, GESTURE_CANCEL, g->x, g->y, g->mods, 0, g->total, 0, 0);
+    }
+}
+
+static unsigned
+gesture_caps(void) {
+#ifdef __APPLE__
+    return 15;
+#else
+    return global_state.is_wayland ? 7 : 0;
+#endif
+}
+
+void
+screen_gesture_osc(Screen *screen, const char *data, size_t sz) {
+    char buf[128], reply[128], *saveptr = NULL;
+    const char *op = "";
+    int v = 0, mode = -1, id = -1;
+    if (sz >= sizeof(buf)) return;
+    memcpy(buf, data, sz);
+    buf[sz] = 0;
+    for (char *tok = strtok_r(buf, ":", &saveptr); tok; tok = strtok_r(NULL, ":", &saveptr)) {
+        char *val = strchr(tok, '=');
+        if (!val) return;
+        *val++ = 0;
+        if (!strcmp(tok, "v")) v = atoi(val);
+        else if (!strcmp(tok, "op")) op = val;
+        else if (!strcmp(tok, "mode")) mode = atoi(val);
+        else if (!strcmp(tok, "id")) id = atoi(val);
+    }
+    if (v != 1) return;
+    if (!strcmp(op, "query") && id >= 0) {
+        snprintf(reply, sizeof(reply), "777;gesture;v=1:op=cap:id=%d:caps=%u:mode=%d", id, gesture_caps(), screen->gesture.version != 0);
+        write_escape_code_to_child(screen, ESC_OSC, reply);
+    } else if (!strcmp(op, "mode")) {
+        if (mode < 0) {  // a read
+            snprintf(reply, sizeof(reply), "777;gesture;v=1:op=mode:mode=%d", screen->gesture.version != 0);
+            write_escape_code_to_child(screen, ESC_OSC, reply);
+            return;
+        }
+        screen_gesture_cancel(screen);
+        screen->gesture.version = mode ? v : 0;
+    }
+}
+
+bool
+gesture_event(const GLFWGestureEvent *ev) {
+    const OSWindow *osw = global_state.callback_os_window;
+    Window *w = NULL;
+    if (ev->phase == GLFW_GESTURE_BEGIN) {
+        w = mouse_region(false, false).window;
+        if (w && !w->render_data.screen->gesture.version) w = NULL;
+        gesture_window_id = w ? w->id : 0;
+    } else if (gesture_window_id) w = window_for_window_id(gesture_window_id);
+    if (!w) return false;
+    const WindowGeometry *g = &w->render_data.geometry;
+#define coord(v) (int)round(MIN(MAX((v) * 256, -1073741823.), 1073741823.))
+    const int x = coord(osw->mouse_x - g->left), y = coord(osw->mouse_y - g->top);
+#undef coord
+    const int mods = (ev->keyboard_modifiers & GLFW_MOD_SHIFT ? 1 : 0) | (ev->keyboard_modifiers & GLFW_MOD_ALT ? 2 : 0) |
+                     (ev->keyboard_modifiers & GLFW_MOD_CONTROL ? 4 : 0) | (ev->keyboard_modifiers & GLFW_MOD_SUPER ? 8 : 0);
+    return screen_gesture_report(w->render_data.screen, ev->kind, ev->phase, x, y, mods, ev->delta, ev->dx, ev->dy);
+}
+
+static PyObject *
+send_gesture_report(PyObject *self UNUSED, PyObject *args, PyObject *kw) {
+    Screen *screen;
+    int kind, phase, x, y, mods = 0, dx = 0, dy = 0;
+    double delta = 0;
+    static const char *kwlist[] = {"screen", "kind", "phase", "x", "y", "mods", "delta", "dx", "dy", NULL};
+    if (!PyArg_ParseTupleAndKeywords(args, kw, "O!iiii|idii", (char **)kwlist, &Screen_Type, &screen, &kind, &phase, &x, &y, &mods, &delta, &dx, &dy)) return NULL;
+    if (screen_gesture_report(screen, kind, phase, x, y, mods, delta, dx, dy)) Py_RETURN_TRUE;
+    Py_RETURN_FALSE;
+}
+// }}}
+
 static PyObject *
 send_mouse_event(PyObject *self UNUSED, PyObject *args, PyObject *kw) {
     Screen *screen;
@@ -1928,6 +2046,7 @@ test_scale_scroll(PyObject *self UNUSED, PyObject *args) {
 static PyMethodDef module_methods[] = {
     {"send_mouse_event", (PyCFunction)(void (*)(void))(send_mouse_event), METH_VARARGS | METH_KEYWORDS, NULL},
     {"send_scroll_report", (PyCFunction)(void (*)(void))(send_scroll_report), METH_VARARGS | METH_KEYWORDS, NULL},
+    {"send_gesture_report", (PyCFunction)(void (*)(void))(send_gesture_report), METH_VARARGS | METH_KEYWORDS, NULL},
     METHODB(test_encode_mouse, METH_VARARGS),
     METHODB(test_scale_scroll, METH_VARARGS),
     METHODB(send_mock_mouse_event_to_window, METH_VARARGS),

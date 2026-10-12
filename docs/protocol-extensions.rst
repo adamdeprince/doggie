@@ -36,6 +36,7 @@ please do so by opening issues in the `GitHub bug tracker
    latency-protocol
    frame-protocol
    scroll-protocol
+   gesture-protocol
    dnd-protocol
    multiple-cursors-protocol
    file-transfer-protocol

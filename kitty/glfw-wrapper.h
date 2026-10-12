@@ -359,6 +359,37 @@ typedef struct GLFWTouchEvent {
     const GLFWTouchPoint *points;
 } GLFWTouchEvent;
 
+// The gestures the system recognizes on a trackpad. They arrive in addition to
+// the scroll and touch events of the same fingers.
+typedef enum GLFWGestureKind {
+    GLFW_GESTURE_PINCH = 1,
+    GLFW_GESTURE_ROTATE = 2,
+    GLFW_GESTURE_SWIPE = 3,
+    GLFW_GESTURE_SMART_ZOOM = 4,
+} GLFWGestureKind;
+
+typedef enum GLFWGesturePhase {
+    GLFW_GESTURE_BEGIN = 1,
+    GLFW_GESTURE_UPDATE = 2,
+    GLFW_GESTURE_END = 3,
+    // The system took the gesture over, discard what it did so far
+    GLFW_GESTURE_CANCEL = 4,
+} GLFWGesturePhase;
+
+typedef struct GLFWGestureEvent {
+    GLFWGestureKind kind;
+    GLFWGesturePhase phase;
+    int keyboard_modifiers;
+    // In window content coordinates, the same as the cursor position
+    double x, y;
+    // Since the previous event of this gesture: for a pinch the change in
+    // magnification, 0.1 being ten percent larger, for a rotation the angle in
+    // degrees, clockwise positive
+    double delta;
+    // The direction of a swipe, -1, 0 or 1 on each axis, positive right and down
+    int dx, dy;
+} GLFWGestureEvent;
+
 /*! @defgroup joysticks Joysticks
  *  @brief Joystick IDs.
  *
@@ -1598,6 +1629,17 @@ typedef void (*GLFWscrollfun)(GLFWwindow *, const GLFWScrollEvent *);
  */
 typedef void (*GLFWtouchfun)(GLFWwindow *, const GLFWTouchEvent *);
 
+/*! @brief The function pointer type for gesture callbacks.
+ *
+ *  A gesture opens with @ref GLFW_GESTURE_BEGIN and closes with either
+ *  @ref GLFW_GESTURE_END or @ref GLFW_GESTURE_CANCEL.
+ *
+ *  @sa @ref glfwSetGestureCallback
+ *
+ *  @ingroup input
+ */
+typedef void (*GLFWgesturefun)(GLFWwindow *, const GLFWGestureEvent *);
+
 /*! @brief The function pointer type for key callbacks.
  *
  *  This is the function pointer type for key callbacks.  A keyboard
@@ -2446,6 +2488,10 @@ GFW_EXTERN glfwSetScrollCallback_func glfwSetScrollCallback_impl;
 typedef GLFWtouchfun (*glfwSetTouchCallback_func)(GLFWwindow*, GLFWtouchfun);
 GFW_EXTERN glfwSetTouchCallback_func glfwSetTouchCallback_impl;
 #define glfwSetTouchCallback glfwSetTouchCallback_impl
+
+typedef GLFWgesturefun (*glfwSetGestureCallback_func)(GLFWwindow*, GLFWgesturefun);
+GFW_EXTERN glfwSetGestureCallback_func glfwSetGestureCallback_impl;
+#define glfwSetGestureCallback glfwSetGestureCallback_impl
 
 typedef GLFWliveresizefun (*glfwSetLiveResizeCallback_func)(GLFWwindow*, GLFWliveresizefun);
 GFW_EXTERN glfwSetLiveResizeCallback_func glfwSetLiveResizeCallback_impl;
