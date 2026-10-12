@@ -696,6 +696,16 @@ class Child:
         os.killpg(pgrp, s)
         return True
 
+    def kill(self) -> None:
+        import signal
+
+        for pid in (os.tcgetpgrp(self.child_fd) if self.child_fd is not None else None, self.pid):
+            if pid is not None:
+                try:
+                    os.killpg(pid, signal.SIGKILL)
+                except OSError:
+                    pass
+
     def reset_termios_state(self, when: int = termios.TCSANOW) -> None:
         if self.initial_termios_state is not None and self.child_fd is not None:
             try:
