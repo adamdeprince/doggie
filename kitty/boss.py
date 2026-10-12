@@ -1199,6 +1199,24 @@ class Boss:
     def close_window(self) -> None:
         self.mark_window_for_close(self.window_for_dispatch)
 
+    @ac(
+        'win',
+        '''
+        Kill the processes in the active window and close it
+
+        Sends SIGKILL to the foreground process group and to the shell, for a
+        program that no longer responds to anything else, then closes the
+        window. For example::
+
+            map kitty_mod+k kill_window
+        ''',
+    )
+    def kill_window(self) -> None:
+        window = self.window_for_dispatch or self.active_window
+        if window is not None:
+            window.child.kill()
+            self.mark_window_for_close(window)
+
     def close_windows_with_confirmation_msg(self, windows: Iterable[Window], active_window: Window | None = None) -> tuple[str, int]:
         num_running_programs = 0
         num_background_programs = 0

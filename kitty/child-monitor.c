@@ -1534,6 +1534,7 @@ process_cocoa_pending_actions(void) {
     if (cocoa_pending_actions[DETACH_TAB]) { call_boss(detach_tab, NULL); }
     if (cocoa_pending_actions[NEW_WINDOW]) { call_boss(new_window, NULL); }
     if (cocoa_pending_actions[CLOSE_WINDOW]) { call_boss(close_window, NULL); }
+    if (cocoa_pending_actions[KILL_WINDOW]) { call_boss(kill_window, NULL); }
     if (cocoa_pending_actions[RESET_TERMINAL]) { call_boss(clear_terminal, "sO", "reset", Py_True); }
     if (cocoa_pending_actions[CLEAR_TERMINAL_AND_SCROLLBACK]) { call_boss(clear_terminal, "sO", "to_cursor", Py_True); }
     if (cocoa_pending_actions[CLEAR_SCROLLBACK]) { call_boss(clear_terminal, "sO", "scrollback", Py_True); }

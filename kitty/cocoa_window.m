@@ -267,6 +267,7 @@ PENDING(next_tab, NEXT_TAB)
 PENDING(previous_tab, PREVIOUS_TAB)
 PENDING(new_window, NEW_WINDOW)
 PENDING(close_window, CLOSE_WINDOW)
+PENDING(kill_window, KILL_WINDOW)
 PENDING(reset_terminal, RESET_TERMINAL)
 PENDING(clear_terminal_and_scrollback, CLEAR_TERMINAL_AND_SCROLLBACK)
 PENDING(clear_scrollback, CLEAR_SCROLLBACK)
@@ -296,7 +297,7 @@ PENDING(copy_or_noop, COPY_OR_NOOP)
         NSWindow *window = [NSApp keyWindow];
         if (!window || window.miniaturized || [NSApp currentSystemPresentationOptions] & NSApplicationPresentationFullScreen) return NO;
     } else if (
-        item.action == @selector(close_os_window:) || item.action == @selector(close_tab:) || item.action == @selector(close_window:) ||
+        item.action == @selector(close_os_window:) || item.action == @selector(close_tab:) || item.action == @selector(close_window:) || item.action == @selector(kill_window:) ||
         item.action == @selector(reset_terminal:) || item.action == @selector(clear_terminal_and_scrollback:) ||
         item.action == @selector(clear_last_command:) || item.action == @selector(clear_scrollback:) || item.action == @selector(clear_screen:) ||
         item.action == @selector(previous_tab:) || item.action == @selector(next_tab:) || item.action == @selector(detach_tab:)) {
@@ -343,7 +344,7 @@ typedef struct {
 } GlobalShortcut;
 typedef struct {
     GlobalShortcut new_os_window, close_os_window, close_tab, edit_config_file, reload_config;
-    GlobalShortcut previous_tab, next_tab, new_tab, new_window, close_window, reset_terminal;
+    GlobalShortcut previous_tab, next_tab, new_tab, new_window, close_window, kill_window, reset_terminal;
     GlobalShortcut clear_terminal_and_scrollback, clear_screen, clear_scrollback, clear_last_command;
     GlobalShortcut toggle_macos_secure_keyboard_entry, toggle_fullscreen, open_kitty_website;
     GlobalShortcut hide_macos_app, hide_macos_other_apps, minimize_macos_window, quit, search_scrollback;
@@ -365,7 +366,7 @@ cocoa_set_global_shortcut(PyObject *self UNUSED, PyObject *args) {
     else Q(close_os_window); else Q(close_tab);
     else Q(edit_config_file); else Q(new_tab);
     else Q(next_tab); else Q(previous_tab);
-    else Q(new_window); else Q(close_window);
+    else Q(new_window); else Q(close_window); else Q(kill_window);
     else Q(reset_terminal); else Q(clear_terminal_and_scrollback);
     else Q(clear_scrollback); else Q(clear_screen);
     else Q(clear_last_command); else Q(reload_config);
@@ -854,6 +855,7 @@ cocoa_create_global_menu(void) {
     MENU_ITEM(shellMenu, @"Close OS Window", close_os_window);
     MENU_ITEM(shellMenu, @"Close Tab", close_tab);
     MENU_ITEM(shellMenu, @"Close Window", close_window);
+    MENU_ITEM(shellMenu, @"Kill Window", kill_window);
     [shellMenu addItem:[NSMenuItem separatorItem]];
     MENU_ITEM(shellMenu, @"Reset", reset_terminal);
     [shellMenu release];

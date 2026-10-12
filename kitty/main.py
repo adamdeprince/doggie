@@ -200,6 +200,7 @@ def set_cocoa_global_shortcuts(opts: Options) -> dict[str, SingleKey]:
             'new_tab',
             'new_window',
             'close_window',
+            'kill_window',
             'toggle_macos_secure_keyboard_entry',
             'toggle_fullscreen',
             'macos_cycle_through_os_windows',
