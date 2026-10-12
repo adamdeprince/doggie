@@ -567,11 +567,12 @@ typedef struct GLFWScrollEvent {
     int keyboard_modifiers;
 } GLFWScrollEvent;
 
-// Touch events are reported only for direct touch devices, i.e. touchscreens,
-// where a touch has a position in the window. Indirect devices such as
-// touchpads are reported as pointer and scroll events instead. While touch
-// events are delivered for a window, the system does not also deliver
-// pointer events emulated from the same touches.
+// Touch events are reported for direct touch devices, i.e. touchscreens, where
+// a touch has a position in the window, and on macOS also for the touchpad, as
+// indirect events whose positions are on the device. Indirect devices are
+// reported as pointer and scroll events as well. While direct touch events are
+// delivered for a window, the system does not also deliver pointer events
+// emulated from the same touches.
 typedef enum GLFWTouchEventType {
     // The first finger of a sequence touched the window
     GLFW_TOUCH_BEGIN = 1,
@@ -601,8 +602,13 @@ typedef struct GLFWTouchPoint {
     // reuse it after the point is released
     int32_t id;
     GLFWTouchPointState state;
-    // In window content coordinates, the same as the cursor position
+    // In window content coordinates, the same as the cursor position, for a
+    // direct touch; for an indirect touch the position on the device, 0 to 1 on
+    // each axis with the origin at the top left
     double x, y;
+    // The axes of the ellipse of the contact in window content coordinates and
+    // its orientation in degrees clockwise from the vertical, zero when unknown
+    double major, minor, angle;
 } GLFWTouchPoint;
 
 typedef struct GLFWTouchEvent {
@@ -617,6 +623,10 @@ typedef struct GLFWTouchEvent {
     // are ignored. The array is valid only during the callback
     size_t num_points;
     const GLFWTouchPoint *points;
+    // The points are on a touchpad rather than on the window
+    bool indirect;
+    // The size of an indirect device in millimeters, zero when unknown
+    double device_width, device_height;
 } GLFWTouchEvent;
 
 // The gestures the system recognizes on a trackpad. They arrive in addition to
@@ -649,6 +659,67 @@ typedef struct GLFWGestureEvent {
     // The direction of a swipe, -1, 0 or 1 on each axis, positive right and down
     int dx, dy;
 } GLFWGestureEvent;
+// A graphics tablet tool is reported with everything it measures beyond the
+// pointer position. The pointer events for the same input follow only when
+// the tablet callback does not consume the event.
+typedef enum GLFWTabletEventType {
+    // The position, buttons and measurements of a tool in proximity
+    GLFW_TABLET_POINT = 1,
+    // The tool left proximity
+    GLFW_TABLET_OUT = 2,
+    // The system took the tool over, discard what it did so far
+    GLFW_TABLET_CANCEL = 3,
+} GLFWTabletEventType;
+
+typedef enum GLFWTabletTool {
+    GLFW_TABLET_TOOL_UNKNOWN = 0,
+    GLFW_TABLET_TOOL_PEN = 1,
+    GLFW_TABLET_TOOL_ERASER = 2,
+    GLFW_TABLET_TOOL_BRUSH = 3,
+    GLFW_TABLET_TOOL_PENCIL = 4,
+    GLFW_TABLET_TOOL_AIRBRUSH = 5,
+    GLFW_TABLET_TOOL_MOUSE = 6,
+    GLFW_TABLET_TOOL_LENS = 7,
+} GLFWTabletTool;
+
+// The measurements a tool reports, as bits of GLFWTabletEvent.axes
+typedef enum GLFWTabletAxis {
+    GLFW_TABLET_PRESSURE = 1,
+    GLFW_TABLET_TILT = 2,
+    GLFW_TABLET_TWIST = 4,
+    GLFW_TABLET_TANGENT = 8,
+    GLFW_TABLET_Z = 16,
+    GLFW_TABLET_DISTANCE = 32,
+    GLFW_TABLET_WHEEL = 64,
+} GLFWTabletAxis;
+
+// The buttons held on a tool, as bits of GLFWTabletEvent.buttons
+typedef enum GLFWTabletButton {
+    GLFW_TABLET_BUTTON_TIP = 1,
+    GLFW_TABLET_BUTTON_BARREL = 2,
+    GLFW_TABLET_BUTTON_BARREL2 = 4,
+    GLFW_TABLET_BUTTON_BACK = 8,
+    GLFW_TABLET_BUTTON_FORWARD = 16,
+    GLFW_TABLET_BUTTON_BARREL3 = 32,
+} GLFWTabletButton;
+
+typedef struct GLFWTabletEvent {
+    GLFWTabletEventType type;
+    GLFWTabletTool tool;
+    int keyboard_modifiers;
+    unsigned buttons, axes;
+    // In window content coordinates, the same as the cursor position
+    double x, y;
+    double pressure, distance;            // 0 to 1
+    double tilt_x, tilt_y, twist, wheel;  // degrees, tilt positive to the right and bottom
+    double tangent;                       // -1 to 1, the airbrush wheel
+    double z;                             // device units
+    int wheel_clicks;
+    // device identifies the tool while it is in proximity. The rest are zero
+    // when the system does not report them
+    uint64_t device, serial, hardware_id;
+    unsigned vendor_id, product_id;
+} GLFWTabletEvent;
 
 /*! @defgroup joysticks Joysticks
  *  @brief Joystick IDs.
@@ -1899,6 +1970,16 @@ typedef void (*GLFWtouchfun)(GLFWwindow *, const GLFWTouchEvent *);
  *  @ingroup input
  */
 typedef void (*GLFWgesturefun)(GLFWwindow *, const GLFWGestureEvent *);
+/*! @brief The function pointer type for tablet callbacks.
+ *
+ *  Returns true when the application consumed the event and does not want
+ *  the pointer events the same input would otherwise produce.
+ *
+ *  @sa @ref glfwSetTabletCallback
+ *
+ *  @ingroup input
+ */
+typedef bool (*GLFWtabletfun)(GLFWwindow *, const GLFWTabletEvent *);
 
 /*! @brief The function pointer type for key callbacks.
  *
@@ -5203,6 +5284,8 @@ GLFWAPI GLFWscrollfun glfwSetScrollCallback(GLFWwindow *window, GLFWscrollfun ca
  */
 GLFWAPI GLFWtouchfun glfwSetTouchCallback(GLFWwindow *window, GLFWtouchfun callback);
 GLFWAPI GLFWgesturefun glfwSetGestureCallback(GLFWwindow *window, GLFWgesturefun callback);
+
+GLFWAPI GLFWtabletfun glfwSetTabletCallback(GLFWwindow *window, GLFWtabletfun callback);
 
 GLFWAPI GLFWliveresizefun glfwSetLiveResizeCallback(GLFWwindow *window, GLFWliveresizefun callback);
 

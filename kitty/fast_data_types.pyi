@@ -1418,6 +1418,11 @@ def send_scroll_report(
     screen: Screen, x_offset: float, y_offset: float, offset_type: int = 0, momentum: int = 0, phase: int = 0, mods: int = 0, x: float = 0, y: float = 0
 ) -> bool: ...
 def send_gesture_report(screen: Screen, kind: int, phase: int, x: int, y: int, mods: int = 0, delta: float = 0, dx: int = 0, dy: int = 0) -> bool: ...
+def send_pointer_report(
+    screen: Screen, kind: int, phase: int, device: int, contact: int, x: int, y: int, buttons: int = 0, mods: int = 0, tool: int = 1, valid: int = 0,
+    p: int = 0, tx: int = 0, ty: int = 0, twist: int = 0, tangent: int = 0, z: int = 0, dist: int = 0, wheel: int = 0, wclicks: int = 0,
+    serial: int = 0, hwid: int = 0, vid: int = 0, pid: int = 0, t: int = 0, src: int = 0, major: int = 0, minor: int = 0, angle: int = 0, w: int = 0, h: int = 0
+) -> bool: ...
 def set_window_logo(os_window_id: int, tab_id: int, window_id: int, path: str, position: str, alpha: float, png_data: bytes = b'') -> None:
     pass
 

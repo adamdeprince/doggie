@@ -196,6 +196,16 @@ typedef struct _GLFWwindowNS {
 
 // Cocoa-specific global data
 //
+// A tablet tool in proximity, as described by its proximity event
+//
+typedef struct _GLFWTabletToolNS {
+    bool in_proximity;
+    unsigned long device_id;
+    unsigned capabilities, vendor_id, product_id;
+    unsigned long long serial, hardware_id;
+    GLFWTabletTool tool;
+} _GLFWTabletToolNS;
+
 typedef struct _GLFWlibraryNS {
     CGEventSourceRef eventSource;
     id delegate;
@@ -231,6 +241,8 @@ typedef struct _GLFWlibraryNS {
 
     // Active drag session (NSDraggingSession*) and view (NSView*)
     id drag_session, drag_view, drag_image;
+
+    _GLFWTabletToolNS tablet_tools[4];
 } _GLFWlibraryNS;
 
 // Cocoa-specific per-monitor data

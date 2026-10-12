@@ -157,10 +157,49 @@ detectEWMH(void) {
     XFree(supportedAtoms);
 }
 
+static GLFWTabletTool
+tablet_tool_from_name(const char *name) {
+    static const struct {
+        const char *needle;
+        GLFWTabletTool tool;
+    } tools[] = {
+        {"eraser", GLFW_TABLET_TOOL_ERASER}, {"airbrush", GLFW_TABLET_TOOL_AIRBRUSH}, {"brush", GLFW_TABLET_TOOL_BRUSH},
+        {"pencil", GLFW_TABLET_TOOL_PENCIL},  {"cursor", GLFW_TABLET_TOOL_MOUSE},     {"mouse", GLFW_TABLET_TOOL_MOUSE},
+        {"lens", GLFW_TABLET_TOOL_LENS},      {"stylus", GLFW_TABLET_TOOL_PEN},       {"pen", GLFW_TABLET_TOOL_PEN},
+    };
+    for (size_t i = 0; i < arraysz(tools); i++) {
+        if (strcasestr(name, tools[i].needle)) return tools[i].tool;
+    }
+    return GLFW_TABLET_TOOL_UNKNOWN;
+}
+
+// The libinput, wacom and Xwayland drivers name tablet tools by their type
+// and give them a pressure axis
+static void
+read_xi_tablet_device(const XIDeviceInfo *device) {
+    XITabletDevice td = {.deviceid = device->deviceid, .tool = tablet_tool_from_name(device->name)};
+    const char *serial = strstr(device->name, "(0x");
+    if (serial) td.serial = strtoull(serial + 1, NULL, 16);
+    XITabletAxis *axes[] = {&td.pressure, &td.tilt_x, &td.tilt_y, &td.wheel, &td.distance, &td.rotation};
+    const Atom labels[] = {_glfw.x11.xi.label_pressure, _glfw.x11.xi.label_tilt_x, _glfw.x11.xi.label_tilt_y, _glfw.x11.xi.label_wheel, _glfw.x11.xi.label_distance, _glfw.x11.xi.label_rz};
+    for (size_t k = 0; k < arraysz(axes); k++) axes[k]->number = -1;
+    for (int j = 0; j < device->num_classes; j++) {
+        if (device->classes[j]->type != XIValuatorClass) continue;
+        XIValuatorClassInfo *vi = (XIValuatorClassInfo *)device->classes[j];
+        for (size_t k = 0; k < arraysz(axes); k++) {
+            if (vi->label == labels[k]) *axes[k] = (XITabletAxis){.number = vi->number, .min = vi->min, .max = vi->max, .value = vi->value};
+        }
+    }
+    if (td.tool != GLFW_TABLET_TOOL_UNKNOWN && td.pressure.number >= 0 && _glfw.x11.xi.num_tablet_devices < arraysz(_glfw.x11.xi.tablet_devices)) {
+        _glfw.x11.xi.tablet_devices[_glfw.x11.xi.num_tablet_devices++] = td;
+    }
+}
+
 void
 read_xi_scroll_devices(void) {
 #define xi _glfw.x11.xi
     xi.num_scroll_devices = 0;
+    xi.num_tablet_devices = 0;
     // Require XI2.1 or later for smooth scrolling
     if (!xi.available || xi.major < 2 || (xi.major == 2 && xi.minor < 1) || !xi.LIBINPUT_SCROLL_METHOD_ENABLED) return;
 #undef xi
@@ -176,7 +215,12 @@ read_xi_scroll_devices(void) {
     for (int i = 0; i < deviceCount; i++) {
         XIDeviceInfo *device = &devices[i];
         if (device->use == XIMasterPointer) _glfw.x11.xi.master_pointer_id = device->deviceid;
-        if (device->use != XISlavePointer || !device->enabled) continue;
+        if (!device->enabled) continue;
+        if (device->use == XIFloatingSlave) {
+            read_xi_tablet_device(device);  // Xwayland leaves tablet tools floating
+            continue;
+        }
+        if (device->use != XISlavePointer) continue;
         Atom actual_type;
         int actual_format;
         unsigned long nitems, bytes_after;
@@ -301,6 +345,7 @@ read_xi_scroll_devices(void) {
             v->max = vi->max;
             v->initialized = true;
         }
+        read_xi_tablet_device(device);
     }
     XIFreeDeviceInfo(devices);
     _glfwReleaseErrorHandlerX11();
@@ -525,6 +570,12 @@ initExtensions(void) {
 
     _glfw.x11.xi.LIBINPUT_SCROLL_METHOD_ENABLED = XInternAtom(_glfw.x11.display, "libinput Scroll Method Enabled", False);
     _glfw.x11.xi.LIBINPUT_TAPPING = XInternAtom(_glfw.x11.display, "libinput Tapping Enabled", False);
+    _glfw.x11.xi.label_pressure = XInternAtom(_glfw.x11.display, "Abs Pressure", False);
+    _glfw.x11.xi.label_tilt_x = XInternAtom(_glfw.x11.display, "Abs Tilt X", False);
+    _glfw.x11.xi.label_tilt_y = XInternAtom(_glfw.x11.display, "Abs Tilt Y", False);
+    _glfw.x11.xi.label_wheel = XInternAtom(_glfw.x11.display, "Abs Wheel", False);
+    _glfw.x11.xi.label_distance = XInternAtom(_glfw.x11.display, "Abs Distance", False);
+    _glfw.x11.xi.label_rz = XInternAtom(_glfw.x11.display, "Abs Rotary Z", False);
     read_xi_scroll_devices();
 
     // Select XI_HierarchyChanged events to detect device add/remove

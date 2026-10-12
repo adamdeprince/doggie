@@ -43,6 +43,7 @@ please do so by opening issues in the `GitHub bug tracker
    desktop-notifications
    pointer-shapes
    haptic-protocol
+   tablet-protocol
    unscroll
    color-stack
    deccara

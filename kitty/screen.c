@@ -245,6 +245,8 @@ do_screen_reset(Screen *self, bool is_hard_reset) {
         grman_clear(self->main_grman, false, self->cell_size); // dont delete images in scrollback
         grman_clear(self->alt_grman, true, self->cell_size);
     }
+    screen_pointer_cancel(self, 0);
+    self->pointer.mode = 0;
     self->modes = empty_modes;
     self->saved_modes = empty_modes;
     self->active_hyperlink_id = 0;
@@ -638,6 +640,7 @@ screen_resize(Screen *self, unsigned int lines, unsigned int columns) {
     screen_pause_rendering(self, false, 0);
     lines = MAX(1u, lines);
     columns = MAX(1u, columns);
+    if (lines != self->lines || columns != self->columns) screen_pointer_cancel(self, 0);
 
     bool is_main = self->linebuf == self->main_linebuf;
     index_type num_content_lines_before, num_content_lines_after;

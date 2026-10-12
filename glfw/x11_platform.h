@@ -261,6 +261,19 @@ typedef struct XIScrollDevice {
     bool v120_offset_needs_scaling;
 } XIScrollDevice;
 
+typedef struct XITabletAxis {
+    int number;  // -1 when the device lacks the axis
+    double min, max, value;
+} XITabletAxis;
+
+typedef struct XITabletDevice {
+    int deviceid;
+    GLFWTabletTool tool;
+    uint64_t serial;
+    GLFWid window_id;  // the window it last reported to
+    XITabletAxis pressure, tilt_x, tilt_y, wheel, distance, rotation;
+} XITabletDevice;
+
 typedef struct XdndSelectionRequest {
     char *mime;
     bool inflight, got_data;
@@ -499,6 +512,12 @@ typedef struct _GLFWlibraryX11 {
         Time last_smooth_scroll_time;
         int master_pointer_id;
         Atom LIBINPUT_SCROLL_METHOD_ENABLED, LIBINPUT_TAPPING;
+        XITabletDevice tablet_devices[8];
+        unsigned num_tablet_devices;
+        // Server timestamp of the last tablet event the application consumed.
+        // The core events the X server makes from it carry the same time.
+        Time last_tablet_time;
+        Atom label_pressure, label_tilt_x, label_tilt_y, label_wheel, label_distance, label_rz;  // valuator labels
     } xi;
 
     struct {

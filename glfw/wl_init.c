@@ -78,6 +78,13 @@ get_window_from_surface(struct wl_surface *surface) {
     return NULL;
 }
 
+// Compositors differ on whether a tool in proximity also drives wl_pointer. Its
+// own events are enough, so the pointer is ignored while a tool is over the window
+static bool
+toolOver(_GLFWwindow *window) {
+    return _glfw.wl.tablet_tool && _glfw.wl.tablet_tool->window == window;
+}
+
 static void
 pointerHandleEnter(void *data UNUSED, struct wl_pointer *pointer UNUSED, uint32_t serial, struct wl_surface *surface, wl_fixed_t sx, wl_fixed_t sy) {
     _GLFWwindow *window = get_window_from_surface(surface);
@@ -125,7 +132,7 @@ pointerHandleLeave(void *data UNUSED, struct wl_pointer *pointer UNUSED, uint32_
 static void
 pointerHandleMotion(void *data UNUSED, struct wl_pointer *pointer UNUSED, uint32_t time UNUSED, wl_fixed_t sx, wl_fixed_t sy) {
     _GLFWwindow *window = _glfw.wl.pointerFocus;
-    if (!window || window->cursorMode == GLFW_CURSOR_DISABLED) return;
+    if (!window || window->cursorMode == GLFW_CURSOR_DISABLED || toolOver(window)) return;
     window->wl.allCursorPosX = wl_fixed_to_double(sx);
     window->wl.allCursorPosY = wl_fixed_to_double(sy);
     if (window->wl.decorations.focus != CENTRAL_WINDOW) {
@@ -149,7 +156,7 @@ pointerHandleButton(void *data UNUSED, struct wl_pointer *pointer UNUSED, uint32
     } else if (_glfw.wl.pointer_button_count > 0) _glfw.wl.pointer_button_count--;
 
     _GLFWwindow *window = _glfw.wl.pointerFocus;
-    if (!window) return;
+    if (!window || toolOver(window)) return;
     if (window->wl.decorations.focus != CENTRAL_WINDOW) {
         csd_handle_pointer_event(window, button, state, NULL);
         return;
@@ -388,7 +395,7 @@ touch_send_to_window(GLFWid window_id, GLFWTouchEventType type, TouchReportMode 
                 state = GLFW_TOUCH_POINT_RELEASED;
                 break;
         }
-        points[n++] = (GLFWTouchPoint){.id = p->id, .state = state, .x = p->x, .y = p->y};
+        points[n++] = (GLFWTouchPoint){.id = p->id, .state = state, .x = p->x, .y = p->y, .major = p->major, .minor = p->minor, .angle = p->orientation};
     }
     if (!n) return;
     GLFWTouchEvent ev = {.type = type, .keyboard_modifiers = _glfw.wl.xkb.states.modifiers, .timestamp = timestamp, .num_points = n, .points = points};
@@ -502,11 +509,22 @@ touchHandleCancel(void *data UNUSED, struct wl_touch *wl_touch UNUSED) {
     touch.count = 0;
 }
 
+// The shape and orientation of a point arrive before the motion or down event
+// they belong to, and are reported with it
 static void
-touchHandleShape(void *data UNUSED, struct wl_touch *wl_touch UNUSED, int32_t id UNUSED, wl_fixed_t major UNUSED, wl_fixed_t minor UNUSED) {}
+touchHandleShape(void *data UNUSED, struct wl_touch *wl_touch UNUSED, int32_t id, wl_fixed_t major, wl_fixed_t minor) {
+    const ssize_t i = touch_point_index(id);
+    if (i < 0) return;
+    touch.points[i].major = wl_fixed_to_double(major);
+    touch.points[i].minor = wl_fixed_to_double(minor);
+}
 
 static void
-touchHandleOrientation(void *data UNUSED, struct wl_touch *wl_touch UNUSED, int32_t id UNUSED, wl_fixed_t orientation UNUSED) {}
+touchHandleOrientation(void *data UNUSED, struct wl_touch *wl_touch UNUSED, int32_t id, wl_fixed_t orientation) {
+    const ssize_t i = touch_point_index(id);
+    if (i < 0) return;
+    touch.points[i].orientation = wl_fixed_to_double(orientation);
+}
 
 #undef touch
 
@@ -519,6 +537,282 @@ static const struct wl_touch_listener touchListener = {
     .shape = touchHandleShape,
     .orientation = touchHandleOrientation,
 };
+
+// Tablet {{{
+#ifndef BTN_STYLUS3
+#define BTN_STYLUS3 0x149
+#endif
+
+static void
+tabletHandleName(void *data UNUSED, struct zwp_tablet_v2 *tablet UNUSED, const char *name UNUSED) {}
+
+static void
+tabletHandleId(void *data, struct zwp_tablet_v2 *tablet UNUSED, uint32_t vid, uint32_t pid) {
+    uint32_t *ids = data;
+    if (!ids) return;
+    ids[0] = vid;
+    ids[1] = pid;
+}
+
+static void
+tabletHandlePath(void *data UNUSED, struct zwp_tablet_v2 *tablet UNUSED, const char *path UNUSED) {}
+
+static void
+tabletHandleDone(void *data UNUSED, struct zwp_tablet_v2 *tablet UNUSED) {}
+
+static void
+tabletHandleRemoved(void *data, struct zwp_tablet_v2 *tablet) {
+    zwp_tablet_v2_destroy(tablet);
+    free(data);
+}
+
+static const struct zwp_tablet_v2_listener tabletListener = {
+    .name = tabletHandleName,
+    .id = tabletHandleId,
+    .path = tabletHandlePath,
+    .done = tabletHandleDone,
+    .removed = tabletHandleRemoved,
+};
+
+#define tt ((_GLFWWaylandTabletTool *)data)
+
+static void
+toolHandleType(void *data, struct zwp_tablet_tool_v2 *t UNUSED, uint32_t type) {
+    switch (type) {
+        case ZWP_TABLET_TOOL_V2_TYPE_PEN: tt->ev.tool = GLFW_TABLET_TOOL_PEN; break;
+        case ZWP_TABLET_TOOL_V2_TYPE_ERASER: tt->ev.tool = GLFW_TABLET_TOOL_ERASER; break;
+        case ZWP_TABLET_TOOL_V2_TYPE_BRUSH: tt->ev.tool = GLFW_TABLET_TOOL_BRUSH; break;
+        case ZWP_TABLET_TOOL_V2_TYPE_PENCIL: tt->ev.tool = GLFW_TABLET_TOOL_PENCIL; break;
+        case ZWP_TABLET_TOOL_V2_TYPE_AIRBRUSH: tt->ev.tool = GLFW_TABLET_TOOL_AIRBRUSH; break;
+        case ZWP_TABLET_TOOL_V2_TYPE_MOUSE: tt->ev.tool = GLFW_TABLET_TOOL_MOUSE; break;
+        case ZWP_TABLET_TOOL_V2_TYPE_LENS: tt->ev.tool = GLFW_TABLET_TOOL_LENS; break;
+        default: tt->ev.tool = GLFW_TABLET_TOOL_UNKNOWN; break;
+    }
+}
+
+static void
+toolHandleHardwareSerial(void *data, struct zwp_tablet_tool_v2 *t UNUSED, uint32_t hi, uint32_t lo) {
+    tt->ev.serial = ((uint64_t)hi << 32) | lo;
+}
+
+static void
+toolHandleHardwareIdWacom(void *data, struct zwp_tablet_tool_v2 *t UNUSED, uint32_t hi, uint32_t lo) {
+    tt->ev.hardware_id = ((uint64_t)hi << 32) | lo;
+}
+
+static void
+toolHandleCapability(void *data, struct zwp_tablet_tool_v2 *t UNUSED, uint32_t capability) {
+    switch (capability) {
+        case ZWP_TABLET_TOOL_V2_CAPABILITY_TILT: tt->ev.axes |= GLFW_TABLET_TILT; break;
+        case ZWP_TABLET_TOOL_V2_CAPABILITY_PRESSURE: tt->ev.axes |= GLFW_TABLET_PRESSURE; break;
+        case ZWP_TABLET_TOOL_V2_CAPABILITY_DISTANCE: tt->ev.axes |= GLFW_TABLET_DISTANCE; break;
+        case ZWP_TABLET_TOOL_V2_CAPABILITY_ROTATION: tt->ev.axes |= GLFW_TABLET_TWIST; break;
+        case ZWP_TABLET_TOOL_V2_CAPABILITY_SLIDER: tt->ev.axes |= GLFW_TABLET_TANGENT; break;
+        case ZWP_TABLET_TOOL_V2_CAPABILITY_WHEEL: tt->ev.axes |= GLFW_TABLET_WHEEL; break;
+    }
+}
+
+static void
+toolHandleDone(void *data UNUSED, struct zwp_tablet_tool_v2 *t UNUSED) {}
+
+static void
+toolHandleRemoved(void *data, struct zwp_tablet_tool_v2 *t) {
+    if (tt->window) {
+        tt->ev.type = GLFW_TABLET_CANCEL;
+        _glfwInputTablet(tt->window, &tt->ev);
+    }
+    if (_glfw.wl.tablet_tool == tt) _glfw.wl.tablet_tool = NULL;
+    if (tt->cursor_shape_device) wp_cursor_shape_device_v1_destroy(tt->cursor_shape_device);
+    zwp_tablet_tool_v2_destroy(t);
+    free(tt);
+}
+
+static void
+toolHandleProximityIn(void *data, struct zwp_tablet_tool_v2 *t, uint32_t serial, struct zwp_tablet_v2 *tablet, struct wl_surface *surface) {
+    _GLFWwindow *window = get_window_from_surface(surface);
+    if (!window || surface != window->wl.surface) return;
+    const uint32_t *ids = zwp_tablet_v2_get_user_data(tablet);
+    tt->window = window;
+    tt->serial = serial;
+    tt->entered = true;
+    tt->ev.vendor_id = ids ? ids[0] : 0;
+    tt->ev.product_id = ids ? ids[1] : 0;
+    if (_glfw.wl.wp_cursor_shape_manager_v1 && !tt->cursor_shape_device) {
+        tt->cursor_shape_device = wp_cursor_shape_manager_v1_get_tablet_tool_v2(_glfw.wl.wp_cursor_shape_manager_v1, t);
+    }
+    _glfw.wl.tablet_tool = tt;
+    _glfwWaylandSetTabletToolCursor(tt);
+}
+
+static void
+toolHandleProximityOut(void *data, struct zwp_tablet_tool_v2 *t UNUSED) {
+    tt->left = true;
+}
+
+static void
+toolHandleDown(void *data, struct zwp_tablet_tool_v2 *t UNUSED, uint32_t serial) {
+    _glfw.wl.serial = _glfw.wl.input_serial = serial;
+    tt->ev.buttons |= GLFW_TABLET_BUTTON_TIP;
+    tt->pressed |= 1u << GLFW_MOUSE_BUTTON_LEFT;
+}
+
+static void
+toolHandleUp(void *data, struct zwp_tablet_tool_v2 *t UNUSED) {
+    tt->ev.buttons &= ~GLFW_TABLET_BUTTON_TIP;
+    tt->released |= 1u << GLFW_MOUSE_BUTTON_LEFT;
+}
+
+static void
+toolHandleMotion(void *data, struct zwp_tablet_tool_v2 *t UNUSED, wl_fixed_t x, wl_fixed_t y) {
+    tt->ev.x = wl_fixed_to_double(x);
+    tt->ev.y = wl_fixed_to_double(y);
+    tt->moved = true;
+}
+
+static void
+toolHandlePressure(void *data, struct zwp_tablet_tool_v2 *t UNUSED, uint32_t pressure) {
+    tt->ev.pressure = pressure / 65535.;
+}
+
+static void
+toolHandleDistance(void *data, struct zwp_tablet_tool_v2 *t UNUSED, uint32_t distance) {
+    tt->ev.distance = distance / 65535.;
+}
+
+static void
+toolHandleTilt(void *data, struct zwp_tablet_tool_v2 *t UNUSED, wl_fixed_t tilt_x, wl_fixed_t tilt_y) {
+    tt->ev.tilt_x = wl_fixed_to_double(tilt_x);
+    tt->ev.tilt_y = wl_fixed_to_double(tilt_y);
+}
+
+static void
+toolHandleRotation(void *data, struct zwp_tablet_tool_v2 *t UNUSED, wl_fixed_t degrees) {
+    tt->ev.twist = wl_fixed_to_double(degrees);
+}
+
+static void
+toolHandleSlider(void *data, struct zwp_tablet_tool_v2 *t UNUSED, int32_t position) {
+    tt->ev.tangent = position / 65535.;
+}
+
+static void
+toolHandleWheel(void *data, struct zwp_tablet_tool_v2 *t UNUSED, wl_fixed_t degrees, int32_t clicks) {
+    tt->ev.wheel += wl_fixed_to_double(degrees);
+    tt->ev.wheel_clicks += clicks;
+}
+
+static void
+toolHandleButton(void *data, struct zwp_tablet_tool_v2 *t UNUSED, uint32_t serial, uint32_t button, uint32_t state) {
+    _glfw.wl.serial = _glfw.wl.input_serial = serial;
+    unsigned bit = 0;
+    int glfw_button = -1;
+    switch (button) {
+        case BTN_LEFT: bit = GLFW_TABLET_BUTTON_TIP; glfw_button = GLFW_MOUSE_BUTTON_LEFT; break;
+        case BTN_RIGHT:
+        case BTN_STYLUS: bit = GLFW_TABLET_BUTTON_BARREL; glfw_button = GLFW_MOUSE_BUTTON_RIGHT; break;
+        case BTN_MIDDLE:
+        case BTN_STYLUS2: bit = GLFW_TABLET_BUTTON_BARREL2; glfw_button = GLFW_MOUSE_BUTTON_MIDDLE; break;
+        case BTN_SIDE: bit = GLFW_TABLET_BUTTON_BACK; glfw_button = GLFW_MOUSE_BUTTON_4; break;
+        case BTN_EXTRA: bit = GLFW_TABLET_BUTTON_FORWARD; glfw_button = GLFW_MOUSE_BUTTON_5; break;
+        case BTN_STYLUS3: bit = GLFW_TABLET_BUTTON_BARREL3; break;
+        default: return;
+    }
+    const bool pressed = state == ZWP_TABLET_TOOL_V2_BUTTON_STATE_PRESSED;
+    if (pressed) tt->ev.buttons |= bit;
+    else tt->ev.buttons &= ~bit;
+    if (glfw_button < 0) return;
+    if (pressed) tt->pressed |= 1u << glfw_button;
+    else tt->released |= 1u << glfw_button;
+}
+
+static void
+toolHandleFrame(void *data, struct zwp_tablet_tool_v2 *t UNUSED, uint32_t time UNUSED) {
+    _GLFWwindow *window = tt->window;
+    if (!window) return;
+    tt->ev.type = tt->left ? GLFW_TABLET_OUT : GLFW_TABLET_POINT;
+    tt->ev.keyboard_modifiers = _glfw.wl.xkb.states.modifiers;
+    if (!_glfwInputTablet(window, &tt->ev)) {
+        // Compositors send no pointer events for a tool once this protocol is
+        // bound, so make them here
+        window->wl.cursorPosX = tt->ev.x;
+        window->wl.cursorPosY = tt->ev.y;
+        if (tt->entered) _glfwInputCursorEnter(window, true);
+        if (tt->moved) _glfwInputCursorPos(window, tt->ev.x, tt->ev.y);
+        for (int b = 0; b <= GLFW_MOUSE_BUTTON_LAST; b++) {
+            if (tt->pressed & (1u << b)) _glfwInputMouseClick(window, b, GLFW_PRESS, tt->ev.keyboard_modifiers);
+            if (tt->released & (1u << b)) _glfwInputMouseClick(window, b, GLFW_RELEASE, tt->ev.keyboard_modifiers);
+        }
+        if (tt->left) _glfwInputCursorEnter(window, false);
+    }
+    if (tt->left) {
+        tt->window = NULL;
+        if (_glfw.wl.tablet_tool == tt) _glfw.wl.tablet_tool = NULL;
+    }
+    tt->entered = tt->left = tt->moved = false;
+    tt->pressed = tt->released = 0;
+    tt->ev.wheel = 0;
+    tt->ev.wheel_clicks = 0;
+}
+#undef tt
+
+static const struct zwp_tablet_tool_v2_listener toolListener = {
+    .type = toolHandleType,
+    .hardware_serial = toolHandleHardwareSerial,
+    .hardware_id_wacom = toolHandleHardwareIdWacom,
+    .capability = toolHandleCapability,
+    .done = toolHandleDone,
+    .removed = toolHandleRemoved,
+    .proximity_in = toolHandleProximityIn,
+    .proximity_out = toolHandleProximityOut,
+    .down = toolHandleDown,
+    .up = toolHandleUp,
+    .motion = toolHandleMotion,
+    .pressure = toolHandlePressure,
+    .distance = toolHandleDistance,
+    .tilt = toolHandleTilt,
+    .rotation = toolHandleRotation,
+    .slider = toolHandleSlider,
+    .wheel = toolHandleWheel,
+    .button = toolHandleButton,
+    .frame = toolHandleFrame,
+};
+
+static void
+tabletSeatHandleTabletAdded(void *data UNUSED, struct zwp_tablet_seat_v2 *seat UNUSED, struct zwp_tablet_v2 *tablet) {
+    zwp_tablet_v2_add_listener(tablet, &tabletListener, calloc(2, sizeof(uint32_t)));
+}
+
+static void
+tabletSeatHandleToolAdded(void *data UNUSED, struct zwp_tablet_seat_v2 *seat UNUSED, struct zwp_tablet_tool_v2 *t) {
+    static uint64_t device_count = 0;
+    _GLFWWaylandTabletTool *tool = calloc(1, sizeof(_GLFWWaylandTabletTool));
+    if (!tool) {
+        zwp_tablet_tool_v2_destroy(t);
+        return;
+    }
+    tool->tool = t;
+    tool->ev.device = ++device_count;
+    zwp_tablet_tool_v2_add_listener(t, &toolListener, tool);
+}
+
+static void
+tabletSeatHandlePadAdded(void *data UNUSED, struct zwp_tablet_seat_v2 *seat UNUSED, struct zwp_tablet_pad_v2 *pad) {
+    zwp_tablet_pad_v2_destroy(pad);
+}
+
+static const struct zwp_tablet_seat_v2_listener tabletSeatListener = {
+    .tablet_added = tabletSeatHandleTabletAdded,
+    .tool_added = tabletSeatHandleToolAdded,
+    .pad_added = tabletSeatHandlePadAdded,
+};
+
+static void
+setupTabletSeat(void) {
+    if (!_glfw.wl.seat || !_glfw.wl.tablet_manager || _glfw.wl.tablet_seat) return;
+    _glfw.wl.tablet_seat = zwp_tablet_manager_v2_get_tablet_seat(_glfw.wl.tablet_manager, _glfw.wl.seat);
+    zwp_tablet_seat_v2_add_listener(_glfw.wl.tablet_seat, &tabletSeatListener, NULL);
+}
+// }}}
 
 static void
 keyboardHandleKeymap(void *data UNUSED, struct wl_keyboard *keyboard UNUSED, uint32_t format, int fd, uint32_t size) {
@@ -907,6 +1201,7 @@ registryHandleGlobal(void *data UNUSED, struct wl_registry *registry, uint32_t n
         if (_glfw.wl.seat) {
             if (_glfw.wl.dataDeviceManager && !_glfw.wl.dataDevice) _glfwSetupWaylandDataDevice();
             if (_glfw.wl.primarySelectionDeviceManager && !_glfw.wl.primarySelectionDevice) { _glfwSetupWaylandPrimarySelectionDevice(); }
+            setupTabletSeat();
         }
     } else if (is(xdg_wm_base)) {
         _glfw.wl.xdg_wm_base_version = 1;
@@ -955,6 +1250,9 @@ registryHandleGlobal(void *data UNUSED, struct wl_registry *registry, uint32_t n
         _glfw.wl.idle_inhibit_manager = wl_registry_bind(registry, name, &zwp_idle_inhibit_manager_v1_interface, 1);
     } else if (is(zwp_keyboard_shortcuts_inhibit_manager_v1)) {
         _glfw.wl.keyboard_shortcuts_inhibit_manager = wl_registry_bind(registry, name, &zwp_keyboard_shortcuts_inhibit_manager_v1_interface, 1);
+    } else if (is(zwp_tablet_manager_v2)) {
+        _glfw.wl.tablet_manager = wl_registry_bind(registry, name, &zwp_tablet_manager_v2_interface, 1);
+        setupTabletSeat();
     } else if (is(zwp_pointer_gestures_v1)) {
         if (version >= 3) _glfw.wl.pointer_gestures = wl_registry_bind(registry, name, &zwp_pointer_gestures_v1_interface, 3);
     } else if (is(xdg_toplevel_icon_manager_v1)) {
@@ -1261,6 +1559,8 @@ _glfwPlatformTerminate(void) {
     if (_glfw.wl.keyboard_shortcuts_inhibit_manager) zwp_keyboard_shortcuts_inhibit_manager_v1_destroy(_glfw.wl.keyboard_shortcuts_inhibit_manager);
     if (_glfw.wl.pointer_gesture_hold) zwp_pointer_gesture_hold_v1_destroy(_glfw.wl.pointer_gesture_hold);
     if (_glfw.wl.pointer_gestures) zwp_pointer_gestures_v1_release(_glfw.wl.pointer_gestures);
+    if (_glfw.wl.tablet_seat) zwp_tablet_seat_v2_destroy(_glfw.wl.tablet_seat);
+    if (_glfw.wl.tablet_manager) zwp_tablet_manager_v2_destroy(_glfw.wl.tablet_manager);
 
     if (_glfw.wl.registry) wl_registry_destroy(_glfw.wl.registry);
     // Call eglTerminate before disconnecting from the display: eglTerminate

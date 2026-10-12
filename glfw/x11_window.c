@@ -473,6 +473,16 @@ updateSmoothScrolling(_GLFWwindow *window) {
     if (_glfw.x11.xi.num_scroll_devices) XISetMask(mask, XI_Motion);
 
     XISelectEvents(_glfw.x11.display, window->x11.handle, &em, 1);
+
+    // Tablet tools are followed through their own devices, buttons included
+    for (unsigned i = 0; i < _glfw.x11.xi.num_tablet_devices; i++) {
+        unsigned char tmask[XIMaskLen(XI_Motion)] = {0};
+        XIEventMask tem = {.deviceid = _glfw.x11.xi.tablet_devices[i].deviceid, .mask_len = sizeof(tmask), .mask = tmask};
+        XISetMask(tmask, XI_Motion);
+        XISetMask(tmask, XI_ButtonPress);
+        XISetMask(tmask, XI_ButtonRelease);
+        XISelectEvents(_glfw.x11.display, window->x11.handle, &tem, 1);
+    }
 }
 
 // Return true if the core wheel button event was emulated by the X server from
@@ -481,6 +491,14 @@ updateSmoothScrolling(_GLFWwindow *window) {
 static bool
 isEmulatedScrollButton(const XButtonEvent *event) {
     return _glfw.x11.xi.num_scroll_devices && _glfw.x11.xi.last_smooth_scroll_time != CurrentTime && event->time == _glfw.x11.xi.last_smooth_scroll_time;
+}
+
+// Return true if the core event was made by the X server from a tablet event
+// that the application consumed
+//
+static bool
+isConsumedTabletEvent(Time time) {
+    return _glfw.x11.xi.num_tablet_devices && _glfw.x11.xi.last_tablet_time != CurrentTime && time == _glfw.x11.xi.last_tablet_time;
 }
 
 static void
@@ -1409,6 +1427,61 @@ handle_xi_motion_event(_GLFWwindow *window, XIDeviceEvent *de) {
     }
 }
 
+static XITabletDevice *
+tablet_device_for_id(int deviceid) {
+    for (unsigned i = 0; i < _glfw.x11.xi.num_tablet_devices; i++) {
+        if (_glfw.x11.xi.tablet_devices[i].deviceid == deviceid) return _glfw.x11.xi.tablet_devices + i;
+    }
+    return NULL;
+}
+
+static bool
+handle_xi_tablet_event(_GLFWwindow *window, XITabletDevice *d, XIDeviceEvent *de) {
+    XITabletAxis *axes[] = {&d->pressure, &d->tilt_x, &d->tilt_y, &d->wheel, &d->distance, &d->rotation};
+    unsigned vidx = 0;
+    for (int i = 0; i < de->valuators.mask_len * 8; i++) {
+        if (!XIMaskIsSet(de->valuators.mask, i)) continue;
+        const double value = de->valuators.values[vidx++];
+        for (size_t k = 0; k < arraysz(axes); k++) {
+            if (axes[k]->number == i) axes[k]->value = value;
+        }
+    }
+    unsigned buttons = 0;
+    for (int b = 1; b < de->buttons.mask_len * 8 && b < 16; b++) {
+        if (XIMaskIsSet(de->buttons.mask, b)) buttons |= 1u << b;
+    }
+    if (de->detail < 16) {
+        if (de->evtype == XI_ButtonPress) buttons |= 1u << de->detail;
+        else if (de->evtype == XI_ButtonRelease) buttons &= ~(1u << de->detail);
+    }
+#define norm(a) ((a).max > (a).min ? ((a).value - (a).min) / ((a).max - (a).min) : 0)
+    GLFWTabletEvent ev = {
+        .type = GLFW_TABLET_POINT,
+        .tool = d->tool,
+        .keyboard_modifiers = translateState(de->mods.effective),
+        // X buttons 1, 2 and 3 are the tip, BTN_STYLUS and BTN_STYLUS2
+        .buttons = (buttons & 2 ? GLFW_TABLET_BUTTON_TIP : 0) | (buttons & 4 ? GLFW_TABLET_BUTTON_BARREL : 0) | (buttons & 8 ? GLFW_TABLET_BUTTON_BARREL2 : 0) |
+                   (buttons & 256 ? GLFW_TABLET_BUTTON_BACK : 0) | (buttons & 512 ? GLFW_TABLET_BUTTON_FORWARD : 0),
+        .axes = (d->pressure.number >= 0 ? GLFW_TABLET_PRESSURE : 0) | (d->tilt_x.number >= 0 && d->tilt_y.number >= 0 ? GLFW_TABLET_TILT : 0) |
+                (d->rotation.number >= 0 ? GLFW_TABLET_TWIST : 0) | (d->wheel.number >= 0 ? GLFW_TABLET_TANGENT : 0) | (d->distance.number >= 0 ? GLFW_TABLET_DISTANCE : 0),
+        .x = de->event_x,
+        .y = de->event_y,
+        .pressure = norm(d->pressure),
+        .distance = norm(d->distance),
+        .tilt_x = d->tilt_x.value,
+        .tilt_y = d->tilt_y.value,
+        .twist = d->rotation.value,
+        .tangent = 2 * norm(d->wheel) - 1,
+        .device = (uint64_t)d->deviceid,
+        .serial = d->serial,
+    };
+#undef norm
+    d->window_id = window->id;
+    if (!_glfwInputTablet(window, &ev)) return false;
+    _glfw.x11.xi.last_tablet_time = de->time;
+    return true;
+}
+
 #define dnd _glfw.x11.xdnd
 // Dropping of data onto window {{{
 
@@ -1819,13 +1892,17 @@ processEvent(XEvent *event) {
                         }
                     }
                 }
-                // Handle XI_Motion for smooth scrolling
-                else if (event->xcookie.evtype == XI_Motion) {
+                // Handle XI_Motion for smooth scrolling and, with the buttons, tablet tools
+                else if (event->xcookie.evtype == XI_Motion || event->xcookie.evtype == XI_ButtonPress || event->xcookie.evtype == XI_ButtonRelease) {
                     XIDeviceEvent *de = (XIDeviceEvent *)event->xcookie.data;
                     if (de->deviceid != _glfw.x11.xi.master_pointer_id) {
                         // Find the window for this event
                         _GLFWwindow *window = NULL;
-                        if (XFindContext(_glfw.x11.display, de->event, _glfw.x11.context, (XPointer *)&window) == 0) handle_xi_motion_event(window, de);
+                        XITabletDevice *td = tablet_device_for_id(de->deviceid);
+                        if (XFindContext(_glfw.x11.display, de->event, _glfw.x11.context, (XPointer *)&window) == 0) {
+                            const bool consumed = td && handle_xi_tablet_event(window, td, de);
+                            if (!consumed && event->xcookie.evtype == XI_Motion) handle_xi_motion_event(window, de);
+                        }
                     }
                 }
                 // Handle XI_HierarchyChanged for device hotplug
@@ -1834,6 +1911,15 @@ processEvent(XEvent *event) {
                     // Check if any devices were added or removed
                     for (int i = 0; i < he->num_info; i++) {
                         if (he->info[i].flags & (XISlaveAdded | XISlaveRemoved | XIMasterAdded | XIMasterRemoved | XIDeviceEnabled | XIDeviceDisabled)) {
+                            // A tablet tool that goes away has left proximity
+                            for (int j = 0; j < he->num_info; j++) {
+                                XITabletDevice *d = he->info[j].flags & (XISlaveRemoved | XIDeviceDisabled) ? tablet_device_for_id(he->info[j].deviceid) : NULL;
+                                _GLFWwindow *w = d ? _glfwWindowForId(d->window_id) : NULL;
+                                if (w) {
+                                    GLFWTabletEvent ev = {.type = GLFW_TABLET_OUT, .tool = d->tool, .device = (uint64_t)d->deviceid};
+                                    _glfwInputTablet(w, &ev);
+                                }
+                            }
                             // Re-read scroll devices when devices are added, removed, enabled or disabled
                             // and update the smooth scrolling event selection on existing windows
                             read_xi_scroll_devices();
@@ -1953,6 +2039,7 @@ processEvent(XEvent *event) {
         }
 
         case ButtonPress: {
+            if (isConsumedTabletEvent(event->xbutton.time)) return;
             const int mods = translateState(event->xbutton.state);
 
 #define cancel_momentum()               \
@@ -1999,6 +2086,7 @@ processEvent(XEvent *event) {
         }
 
         case ButtonRelease: {
+            if (isConsumedTabletEvent(event->xbutton.time)) return;
             const int mods = translateState(event->xbutton.state);
 
             // Handle drag drop on button release
@@ -2051,6 +2139,7 @@ processEvent(XEvent *event) {
         }
 
         case MotionNotify: {
+            if (isConsumedTabletEvent(event->xmotion.time)) return;
             // Handle drag motion
             if (_glfw.x11.drag.active) {
                 int root_x, root_y;

@@ -540,3 +540,66 @@ class TestMouse(BaseTest):
         s.reset()
         self.ae(c.wtcbuf, ev('kind=4:phase=4') + b'mods=0\x1b\\')
         self.assertFalse(report(4, 3))
+
+    def test_tablet_protocol(self):
+        from kitty.constants import is_macos
+
+        s = self.create_screen()
+        c = s.callbacks
+        caps = 5 if is_macos else 1
+
+        def send(body):
+            c.clear()
+            parse_bytes(s, f'\x1b]777;tablet-pointer;{body}\x1b\\'.encode())
+
+        def report(kind, phase, contact=0, **kw):
+            c.clear()
+            kw.setdefault('t', 1000)
+            return send_pointer_report(s, kind, phase, 7, contact, 256, 512, **kw)
+
+        def ev(fields):
+            return f'\x1b]777;tablet-pointer;v=1:op=event:{fields}\x1b\\'.encode()
+
+        send('v=1:op=query:id=42')
+        self.ae(c.wtcbuf, f'\x1b]777;tablet-pointer;v=1:op=cap:id=42:caps={caps}:mode=0:w=50:h=100:cw=10:ch=20\x1b\\'.encode())
+        send('v=2:op=query:id=42')
+        self.ae(c.wtcbuf, b'')
+        self.assertFalse(report(1, 1))
+        send('v=1:op=mode:mode=1')
+        send('v=1:op=mode')
+        self.ae(c.wtcbuf, b'\x1b]777;tablet-pointer;v=1:op=mode:mode=1\x1b\\')
+        send('v=1:op=query:id=43')
+        self.ae(c.wtcbuf, f'\x1b]777;tablet-pointer;v=1:op=cap:id=43:caps={caps}:mode=1:w=50:h=100:cw=10:ch=20\x1b\\'.encode())
+        self.assertTrue(report(1, 1, buttons=1, tool=2, valid=3, p=100, tx=-10, ty=20, serial=99))
+        self.ae(c.wtcbuf, ev('kind=1:phase=1:device=7:t=1000:contact=0:x=256:y=512:buttons=1:mods=0:tool=2:valid=3:p=100:tx=-10:ty=20:serial=99'))
+        # Fingers are not reported while only tool reports are on
+        self.assertFalse(report(2, 1, 3, tool=0))
+        # Turning the mode off cancels the stroke, whose remaining reports are then dropped
+        send('v=1:op=mode:mode=0')
+        self.ae(c.wtcbuf, ev('kind=1:phase=4:device=7:t=1000:contact=0:x=256:y=512:buttons=0:mods=0:tool=2:valid=3:p=0:tx=-10:ty=20:serial=99'))
+        send('v=1:op=mode:mode=1')
+        self.assertFalse(report(1, 3))
+        # Finger reports have their own mode bit
+        send('v=1:op=mode:mode=2')
+        send('v=1:op=mode')
+        self.ae(c.wtcbuf, b'\x1b]777;tablet-pointer;v=1:op=mode:mode=2\x1b\\')
+        self.assertFalse(report(1, 0))
+        self.assertTrue(report(2, 1, 3, tool=0, buttons=1, mods=3))
+        self.ae(c.wtcbuf, ev('kind=2:phase=1:device=7:t=1000:contact=3:x=256:y=512:buttons=1:mods=3:tool=0:valid=0'))
+        report(2, 2, 3, tool=0, buttons=1, t=1016, valid=128, major=1280, minor=768, angle=4500)
+        self.ae(c.wtcbuf, ev('kind=2:phase=2:device=7:t=1016:contact=3:x=256:y=512:buttons=1:mods=0:tool=0:valid=128:major=1280:minor=768:angle=4500'))
+        report(2, 6, t=1016)
+        self.ae(c.wtcbuf, ev('kind=2:phase=6:device=7:t=1016'))
+        report(2, 1, 0, tool=0, buttons=1, t=2000, src=1, w=40960, h=25600)
+        self.ae(c.wtcbuf, ev('kind=2:phase=1:device=7:t=2000:contact=0:x=256:y=512:buttons=1:mods=0:tool=0:valid=0:src=1:w=40960:h=25600'))
+        # Changing the mode cancels every contact
+        send('v=1:op=mode:mode=3')
+        self.ae(
+            c.wtcbuf,
+            ev('kind=2:phase=4:device=7:t=1016:contact=3:x=256:y=512:buttons=0:mods=0:tool=0:valid=128:major=1280:minor=768:angle=4500')
+            + ev('kind=2:phase=4:device=7:t=2000:contact=0:x=256:y=512:buttons=0:mods=0:tool=0:valid=0:src=1:w=40960:h=25600'),
+        )
+        self.assertTrue(report(1, 0, valid=1, p=5))
+        self.ae(c.wtcbuf, ev('kind=1:phase=0:device=7:t=1000:contact=0:x=256:y=512:buttons=0:mods=0:tool=1:valid=1:p=5'))
+        s.reset()
+        self.assertFalse(report(1, 1))

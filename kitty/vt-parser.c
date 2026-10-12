@@ -610,6 +610,10 @@ dispatch_osc(PS *self, uint8_t *buf, size_t limit, bool is_extended_osc) {
                 screen_haptic(self->screen, (const char *)buf + i + 7, limit - i - 7);
                 break;
             }
+            if (limit - i > 15 && memcmp(buf + i, "tablet-pointer;", 15) == 0) {
+                screen_tablet_pointer(self->screen, (const char *)buf + i + 15, limit - i - 15);
+                break;
+            }
             /* fallthrough */
         case 9:
         case 99:
