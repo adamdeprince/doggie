@@ -3632,8 +3632,10 @@ The colorspace in which to interpret terminal colors. The default of
 :code:`default` will use whatever the native colorspace of the display is.
 The value of :code:`displayp3` will use Apple's special snowflake display P3
 color space, which will result in over saturated (brighter) colors with some
-color shift. Reloading configuration will change this value only for newly
-created OS windows.
+color shift. Colors that a program tags with a wider gamut, see
+:doc:`wide-gamut-protocol`, are converted to the chosen colorspace, except
+with :code:`default`, where they are used as is. Reloading configuration will
+change this value only for newly created OS windows.
 """,
 )
 

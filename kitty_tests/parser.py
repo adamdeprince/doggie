@@ -939,6 +939,8 @@ class TestParser(BaseTest):
         pb('\033[38;5;1m', ('select_graphic_rendition', '38:5:1'))
         pb('\033[58;2;1;2;3m', ('select_graphic_rendition', '58:2:1:2:3'))
         pb('\033[38;2;1;2;3m', ('select_graphic_rendition', '38:2:1:2:3'))
+        pb('\033[38:2:1:1:2:3;48:2:2:4:5:6m', ('select_graphic_rendition', '38:2:1:1:2:3'), ('select_graphic_rendition', '48:2:2:4:5:6'))
+        self.ae((s.cursor.gamut_fg, s.cursor.gamut_bg), (1, 2))
         pb('\033[1001:2:1:2:3m', ('select_graphic_rendition', '1001:2:1:2:3'))
         pb('\033[56:200;57m', ('select_graphic_rendition', '56:200'), ('select_graphic_rendition', '57'))
         self.ae((s.cursor.hdr_fg, s.cursor.hdr_bg), (4, 0))

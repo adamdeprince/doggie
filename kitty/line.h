@@ -21,7 +21,9 @@ typedef union CellAttrs {
         uint16_t mark : 2;
         uint32_t hdr_fg : 6;
         uint32_t hdr_bg : 6;
-        uint32_t : 9;
+        uint32_t gamut_fg : 2;
+        uint32_t gamut_bg : 2;
+        uint32_t : 5;
     };
     uint32_t val;
 } CellAttrs;
@@ -30,6 +32,7 @@ static_assert(sizeof(CellAttrs) == sizeof(uint32_t), "Fix the ordering of CellAt
 #define WIDTH_MASK (3u)
 #define DECORATION_MASK (7u)
 #define HDR_MASK (63u)
+#define GAMUT_MASK (3u)
 #define SGR_MASK (~(((CellAttrs){.mark = MARK_MASK}).val))
 #define MAX_NUM_CODEPOINTS_PER_CELL 24u
 // Text presentation selector
@@ -211,7 +214,9 @@ cursor_to_attrs(const Cursor *c) {
         .dim = c->sgr.dim,
         .blink = c->sgr.blink,
         .hdr_fg = c->sgr.hdr_fg,
-        .hdr_bg = c->sgr.hdr_bg};
+        .hdr_bg = c->sgr.hdr_bg,
+        .gamut_fg = c->sgr.gamut_fg,
+        .gamut_bg = c->sgr.gamut_bg};
     return ans;
 }
 
@@ -226,6 +231,8 @@ attrs_to_cursor(const CellAttrs attrs, Cursor *c) {
     c->sgr.blink = attrs.blink;
     c->sgr.hdr_fg = attrs.hdr_fg;
     c->sgr.hdr_bg = attrs.hdr_bg;
+    c->sgr.gamut_fg = attrs.gamut_fg;
+    c->sgr.gamut_bg = attrs.gamut_bg;
 }
 
 #define cursor_as_gpu_cell(cursor)      \

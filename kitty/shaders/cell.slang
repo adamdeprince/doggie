@@ -167,7 +167,9 @@ vertex_main(
         vo.effective_text_alpha =
             crd.inactive_text_alpha * if_one_then(has_dim, lerp(crd.dim_opacity, 1.0, undim), 1.0) * if_one_then(has_blink, crd.blink_opacity, 1.0);
         float in_url = float((is_selected >> 1) & BIT_MASK);
-        vo.decoration_fg = if_one_then(in_url, crd.url_color_lin.rgb, to_color(colors[2], fg_as_uint));
+        // an unset decoration color is the foreground, in its gamut
+        float3 decoration_fg = if_one_then(float(one_if_equal_zero_otherwise(colors[2] & BYTE_MASK, 0u)), foreground, to_color(colors[2], fg_as_uint));
+        vo.decoration_fg = if_one_then(in_url, crd.url_color_lin.rgb, decoration_fg);
         // Selection
         float3 selection_color = if_one_then(crd.use_cell_bg_for_selection_fg, bo.bg, crd.highlight_fg_lin.rgb);
         selection_color = if_one_then(crd.use_cell_fg_for_selection_fg, foreground, selection_color);

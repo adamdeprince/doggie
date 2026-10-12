@@ -35,6 +35,7 @@ public struct CellRenderData {
     public uint columns, lines, sprites_xnum, sprites_ynum, cursor_shape, cell_width, cell_height;
     public uint cursor_x1, cursor_x2, cursor_y1, cursor_y2;
     public float cursor_opacity, inactive_text_alpha, fg_override_threshold, row_offset, dim_opacity, blink_opacity, hdr_headroom;
+    public uint output_gamut;
 
     // must have unique entries with 0 being default_bg and unset being UINT32_MAX
     public uint bg_colors0, bg_colors1, bg_colors2, bg_colors3, bg_colors4, bg_colors5, bg_colors6, bg_colors7;
@@ -94,6 +95,27 @@ color_to_vec(uint c) {
     g = (c >> 8) & BYTE_MASK;
     b = c & BYTE_MASK;
     return float3(gamma_lut[r], gamma_lut[g], gamma_lut[b]);
+}
+
+// Gamuts of cell colors, see docs/wide-gamut-protocol.rst. A color tagged with
+// a gamut is converted to the colorspace of the window, through XYZ (D65).
+// Untagged colors are the colorspace of the window, as they always were, so
+// they and colors already in the output gamut are passed through untouched.
+public static const uint GAMUT_SRGB = 0, GAMUT_DISPLAY_P3 = 1, GAMUT_REC2020 = 2, GAMUT_UNMANAGED = 3;
+static const float3x3 gamut_to_xyz[3] = {
+    float3x3(0.4124564, 0.3575761, 0.1804375, 0.2126729, 0.7151522, 0.0721750, 0.0193339, 0.1191920, 0.9503041),
+    float3x3(0.4865709, 0.2656677, 0.1982173, 0.2289746, 0.6917385, 0.0792869, 0.0000000, 0.0451134, 1.0439444),
+    float3x3(0.6369580, 0.1446169, 0.1688810, 0.2627002, 0.6779981, 0.0593017, 0.0000000, 0.0280727, 1.0609851),
+};
+static const float3x3 xyz_to_gamut[2] = {
+    float3x3(3.2404542, -1.5371385, -0.4985314, -0.9692660, 1.8760108, 0.0415560, 0.0556434, -0.2040259, 1.0572252),
+    float3x3(2.4934969, -0.9313836, -0.4027108, -0.8294890, 1.7626641, 0.0236247, 0.0358458, -0.0761724, 0.9568845),
+};
+
+public float3
+convert_gamut(float3 c, uint gamut) {
+    if (gamut == GAMUT_SRGB || gamut == crd.output_gamut || crd.output_gamut == GAMUT_UNMANAGED) return c;
+    return clamp(mul(xyz_to_gamut[crd.output_gamut], mul(gamut_to_xyz[gamut], c)), 0.f, 1.f);
 }
 
 public float
@@ -254,6 +276,8 @@ compute_background(uint3 colors, uint2 sprite_idx, uint is_selected, uint instan
     int bg_index = 1 - fg_index;
     int mark = int(text_attrs >> MARK_SHIFT) & MARK_MASK;
     uint has_mark = uint(step(1, float(mark)));
+    // gamut of the RGB colors, follows the color under reverse video, mark colors are sRGB
+    uint2 gamut = uint2((text_attrs >> GAMUT_FG_SHIFT) & GAMUT_MASK, (text_attrs >> GAMUT_BG_SHIFT) & GAMUT_MASK) * (1u - has_mark);
     // HDR gain in quarter steps above SDR white, follows the color under reverse video
     uint2 hdr = uint2((text_attrs >> HDR_FG_SHIFT) & HDR_MASK, (text_attrs >> HDR_BG_SHIFT) & HDR_MASK);
     float fg_gain = min(1.f + 0.25f * float(hdr[fg_index]), crd.hdr_headroom);
@@ -262,11 +286,11 @@ compute_background(uint3 colors, uint2 sprite_idx, uint is_selected, uint instan
     bg_as_uint = has_mark * color_table[NUM_COLORS + mark - 1] + (BIT_MASK - has_mark) * bg_as_uint;
     float cell_has_default_bg = 1.f - step(1.f, abs(float(bg_as_uint - crd.bg_colors0))); // 1 if has default bg else 0
     cell_has_default_bg *= 1.f - step(1.01f, bg_gain);
-    float3 bg = color_to_vec(bg_as_uint) * bg_gain;
+    float3 bg = convert_gamut(color_to_vec(bg_as_uint), gamut[bg_index]) * bg_gain;
     float3 cell_bg = bg; // preserve original bg for the selection foreground color
     uint fg_as_uint = resolve_color(colors[fg_index], default_colors[fg_index]);
     fg_as_uint = has_mark * color_table[NUM_COLORS + MARK_MASK + mark] + (1u - has_mark) * fg_as_uint;
-    float3 foreground = color_to_vec(fg_as_uint) * fg_gain;
+    float3 foreground = convert_gamut(color_to_vec(fg_as_uint), gamut[fg_index]) * fg_gain;
     // }}}
 
     // Cell position {{{
