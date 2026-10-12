@@ -882,7 +882,8 @@ touch_callback(GLFWwindow *w, const GLFWTouchEvent *ev) {
         }
         timed_debug_print("\x1b[33mTouch\x1b[m %s modifiers: %s%s\n", touch_event_type_name(ev->type), format_mods(ev->keyboard_modifiers), points);
     }
-    if (touch_pointer_event(ev)) {
+    // A window that asked for finger reports gets the fingers themselves
+    if (is_window_ready_for_callbacks() && touch_pointer_event(ev)) {
         request_tick_callback();
         global_state.callback_os_window = NULL;
         return;

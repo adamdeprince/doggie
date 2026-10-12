@@ -337,7 +337,7 @@ typedef struct _GLFWWaylandTouchPoint {
     GLFWid window_id;
     GLFWTouchPointState state;
     bool pressed_in_frame;
-    double x, y;
+    double x, y, major, minor, orientation;
 } _GLFWWaylandTouchPoint;
 
 // A tablet tool. Its events collect in ev and are reported at the frame event

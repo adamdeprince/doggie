@@ -23,14 +23,15 @@ typedef struct DnDCommand {
     uint32_t operation;
 } DnDCommand;
 
-typedef enum PointerPhase { POINTER_HOVER, POINTER_DOWN, POINTER_MOVE, POINTER_UP, POINTER_CANCEL, POINTER_OUT } PointerPhase;
+typedef enum PointerPhase { POINTER_HOVER, POINTER_DOWN, POINTER_MOVE, POINTER_UP, POINTER_CANCEL, POINTER_OUT, POINTER_FRAME } PointerPhase;
 typedef enum PointerKind { POINTER_PEN = 1, POINTER_TOUCH = 2 } PointerKind;
 
 // A tablet pointer protocol event, see docs/tablet-protocol.rst
 typedef struct PointerReport {
-    int kind, phase, contact, x, y, mods, tool, p, tx, ty, twist, tangent, z, dist, wheel, wclicks;
+    int kind, phase, contact, x, y, mods, tool, p, tx, ty, twist, tangent, z, dist, wheel, wclicks, src, major, minor, angle, w, h;
     unsigned buttons, valid, vid, pid;
     uint64_t device, serial, hwid;
+    unsigned long long t;
 } PointerReport;
 
 typedef struct {
@@ -164,7 +165,6 @@ typedef struct {
     pthread_mutex_t write_buf_lock;
 
     CursorRenderInfo cursor_render_info;
-
     DisableLigature disable_ligatures;
     PyObject *marker;
     bool has_focus;
@@ -237,7 +237,7 @@ typedef struct {
         DnDCommand metadata;
     } dnd_chunking;
     struct {
-        unsigned version;  // of the tablet pointer protocol the child asked for, 0 when off
+        unsigned mode;  // the report kinds the child asked for, see docs/tablet-protocol.rst, 0 when off
         unsigned num_contacts;
         PointerReport contacts[8];
     } pointer;

@@ -240,7 +240,7 @@ do_screen_reset(Screen *self, bool is_hard_reset) {
         grman_clear(self->alt_grman, true, self->cell_size);
     }
     screen_pointer_cancel(self, 0);
-    self->pointer.version = 0;
+    self->pointer.mode = 0;
     self->modes = empty_modes;
     self->saved_modes = empty_modes;
     self->active_hyperlink_id = 0;
