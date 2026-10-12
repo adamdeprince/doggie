@@ -12,12 +12,16 @@
 // protocol, see docs/capabilities-protocol.rst. A selector handled in
 // dispatch_osc() must also be listed here.
 static const struct { const char *selector; unsigned version; } extensions[] = {
-    {"caps", 1},
+    {"caps", 1}, {"display", 1}, {"frame", 1}, {"gesture", 1}, {"haptic", 1}, {"latency", 1}, {"scroll", 1}, {"tablet-pointer", 1},
 };
 // The graphics protocol transmission media (the t key) and pixel formats (the
 // f key) this terminal accepts. A branch that adds one adds it here too.
-static const char *const media[] = {"d", "f", "t", "s"};
-static const char *const formats[] = {"24", "32", "100"};
+static const char *const media[] = {"d", "f", "t", "s",
+#ifdef __APPLE__
+    "g",
+#endif
+};
+static const char *const formats[] = {"24", "32", "64", "100", "200"};
 
 static int
 append_list(char *reply, size_t cap, int n, const char *key, const char *const *items, size_t count) {

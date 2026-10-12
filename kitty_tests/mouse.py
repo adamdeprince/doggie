@@ -11,7 +11,9 @@ from kitty.fast_data_types import (
     MOUSE_SELECTION_WORD_AND_LINE_FROM_POINT,
     create_mock_window,
     mock_mouse_selection,
+    send_gesture_report,
     send_mock_mouse_event_to_window,
+    send_pointer_report,
 )
 
 from .base import BaseTest, parse_bytes

@@ -1055,6 +1055,9 @@ class Parser:
     def forward_stdio(self, val: str, ans: dict[str, typing.Any]) -> None:
         ans['forward_stdio'] = to_bool(val)
 
+    def haptic_feedback(self, val: str, ans: dict[str, typing.Any]) -> None:
+        ans['haptic_feedback'] = to_bool(val)
+
     def hdr(self, val: str, ans: dict[str, typing.Any]) -> None:
         val = val.lower()
         if val not in self.choices_for_hdr:

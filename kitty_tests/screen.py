@@ -948,10 +948,13 @@ class TestScreen(BaseTest):
         self.ae((c.gamut_fg, c.gamut_bg), (0, 0))
 
     def test_caps_query(self):
+        from kitty.constants import is_macos
+
+        g = ',g' if is_macos else ''
         s = self.create_screen()
         c = s.callbacks
         parse_bytes(s, b'\x1b]777;caps;v=1:op=query:id=7\x1b\\')
-        self.ae(c.wtcbuf, b'\x1b]777;caps;v=1:op=cap:id=7:caps=1:ext=caps.1:media=d,f,t,s:format=24,32,100\x1b\\')
+        self.ae(c.wtcbuf, f'\x1b]777;caps;v=1:op=cap:id=7:caps=1:ext=caps.1,display.1,frame.1,gesture.1,haptic.1,latency.1,scroll.1,tablet-pointer.1:media=d,f,t,s{g}:format=24,32,64,100,200\x1b\\.encode())
         c.clear()
         parse_bytes(s, b'\x1b]777;caps;v=2:op=query:id=7\x1b\\')
         parse_bytes(s, b'\x1b]777;caps;v=1:op=query\x1b\\')

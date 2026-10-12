@@ -3276,7 +3276,7 @@ os_window_display_info(OSWindow *w, DisplayInfo *d) {
     GLFWdisplayinfo g = {0};
     char buf[256], *saveptr = NULL;
     if (w && w->handle) glfwGetWindowDisplayInfo(w->handle, &g);
-    *d = (DisplayInfo){.kind = display_kinds[g.kind], .color = display_colors[g.color], .gamut = display_gamuts[g.gamut], .bits = g.bits, .period_us = g.period_us, .headroom = 1.f, .scale = g.scale, .ppi = g.ppi};
+    *d = (DisplayInfo){.kind = display_kinds[g.kind], .color = display_colors[g.color], .gamut = display_gamuts[g.gamut], .bits = g.bits, .period_us = g.period_us, .headroom = w ? effective_hdr_headroom(w) : 1.f, .scale = g.scale, .ppi = g.ppi};
     // Overrides for what the OS cannot tell us
     if (!OPT(display_info) || snprintf(buf, sizeof(buf), "%s", OPT(display_info)) >= (int)sizeof(buf)) return;
     for (char *tok = strtok_r(buf, " ", &saveptr); tok; tok = strtok_r(NULL, " ", &saveptr)) {

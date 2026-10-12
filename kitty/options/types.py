@@ -377,6 +377,7 @@ option_names = (
     'force_ltr',
     'foreground',
     'forward_stdio',
+    'haptic_feedback',
     'hdr',
     'hdr_max_headroom',
     'hide_window_decorations',
@@ -605,6 +606,7 @@ class Options:
     force_ltr: bool = False
     foreground: Color = Color(221, 221, 221)
     forward_stdio: bool = False
+    haptic_feedback: bool = True
     hdr: choices_for_hdr = 'no'
     hdr_max_headroom: float = 4.0
     hide_window_decorations: int = 0
