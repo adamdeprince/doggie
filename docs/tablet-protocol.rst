@@ -199,7 +199,7 @@ captured. A tool leaving proximity cancels any stroke it had open, and then,
 when the system reports it, sends phase ``5``.
 
 The terminal cancels contacts, with ``buttons=0`` and ``p=0``, when the mode
-changes, the terminal is reset, the window is resized, the system takes the
+changes, the terminal is reset, the window's size in cells changes, the system takes the
 fingers over for a gesture of its own, or the device goes away. After a
 cancel the rest of that stroke is not reported, not even its ``up``.
 Programs must tolerate a lost ``hover``, a repeated cancel, and a fresh
