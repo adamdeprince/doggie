@@ -31,6 +31,7 @@ please do so by opening issues in the `GitHub bug tracker
    text-sizing-protocol
    hdr-protocol
    cell-alpha-protocol
+   capabilities-protocol
    dnd-protocol
    multiple-cursors-protocol
    file-transfer-protocol
