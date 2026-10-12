@@ -163,6 +163,13 @@ typedef struct ImageAnchorPosition {
 // color space ids in 38:2:<id>:r:g:b, see docs/wide-gamut-protocol.rst
 #define GAMUT_DISPLAY_P3 1
 #define GAMUT_REC2020 2
+#define BG_ALPHA_CODE 70
+// The type of a color is in the low two bits of its lowest byte, the alpha of
+// a cell background is in the high six bits of its bg color, 0 being opaque
+#define COLOR_TYPE_MASK 3u
+#define BG_ALPHA_SHIFT 2
+#define BG_ALPHA_MASK 63u
+#define BG_ALPHA_BITS (BG_ALPHA_MASK << BG_ALPHA_SHIFT)
 
 // PUA character used as an image placeholder.
 #define IMAGE_PLACEHOLDER_CHAR 0x10EEEE

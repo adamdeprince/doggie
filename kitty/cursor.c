@@ -66,6 +66,13 @@ hdr_code(int percent) {
     return MAX(0, MIN(code, (int)HDR_MASK));
 }
 
+static int
+bg_alpha_code(int percent) {
+    // 2% steps, zero being opaque, see BG_ALPHA_BITS
+    if (percent >= 100) return 0;
+    return MAX(1, MIN((100 - MAX(0, percent) + 1) / 2, 50));
+}
+
 static void
 parse_color(int *params, unsigned int *i, unsigned int count, bool is_group, uint32_t *result, uint8_t *gamut) {
     unsigned int attr;
@@ -156,11 +163,23 @@ cursor_from_sgr(Cursor *self, int *params, unsigned int count, bool is_group) {
             case 30 ... 37: PALETTE(fg, ((attr - 30) << 8) | 1);
             case 38: SET_COLOR(fg, &self->sgr.gamut_fg);
             case 39: PALETTE(fg, 0);
-            case 40 ... 47: PALETTE(bg, ((attr - 40) << 8) | 1);
-            case 48: SET_COLOR(bg, &self->sgr.gamut_bg);
-            case 49: PALETTE(bg, 0);
+            case 40 ... 47: PALETTE(bg, (self->sgr.bg & BG_ALPHA_BITS) | ((attr - 40) << 8) | 1);
+            case 48: {
+                const color_type alpha = self->sgr.bg & BG_ALPHA_BITS;
+                parse_color(params, &i, count, is_group, &self->sgr.bg, &self->sgr.gamut_bg);
+                self->sgr.bg |= alpha;
+            } break;
+            case 49: PALETTE(bg, self->sgr.bg & BG_ALPHA_BITS);
             case 90 ... 97: PALETTE(fg, ((attr - 90 + 8) << 8) | 1);
-            case 100 ... 107: PALETTE(bg, ((attr - 100 + 8) << 8) | 1);
+            case 100 ... 107: PALETTE(bg, (self->sgr.bg & BG_ALPHA_BITS) | ((attr - 100 + 8) << 8) | 1);
+            case BG_ALPHA_CODE: {
+                uint8_t val = 0;
+                if (is_group && i < count) {
+                    val = bg_alpha_code(params[i]);
+                    i++;
+                }
+                self->sgr.bg = (self->sgr.bg & ~BG_ALPHA_BITS) | (val << BG_ALPHA_SHIFT);
+            } break;
             case DECORATION_FG_CODE: SET_COLOR(decoration_fg, NULL);
             case DECORATION_FG_CODE + 1: self->sgr.decoration_fg = 0; break;
         }
@@ -198,6 +217,12 @@ apply_sgr_to_cells(GPUCell *first_cell, unsigned int cell_count, int *params, un
     break;
 #define S(which, val)                    \
     RANGE { cell->attrs.which = (val); } \
+    break;
+#define SET_BG(val)                                        \
+    RANGE {                                                \
+        cell->bg = (cell->bg & BG_ALPHA_BITS) | (val);     \
+        cell->attrs.gamut_bg = 0;                          \
+    }                                                      \
     break;
 
     unsigned int i = 0, attr;
@@ -259,11 +284,29 @@ apply_sgr_to_cells(GPUCell *first_cell, unsigned int cell_count, int *params, un
             case 30 ... 37: PALETTE(fg, ((attr - 30) << 8) | 1);
             case 38: SET_COLOR(fg, cell->attrs.gamut_fg = gamut);
             case 39: PALETTE(fg, 0);
-            case 40 ... 47: PALETTE(bg, ((attr - 40) << 8) | 1);
-            case 48: SET_COLOR(bg, cell->attrs.gamut_bg = gamut);
-            case 49: PALETTE(bg, 0);
+            case 40 ... 47: SET_BG(((attr - 40) << 8) | 1);
+            case 48: {
+                color_type color = 0;
+                uint8_t gamut = 0;
+                parse_color(params, &i, count, is_group, &color, &gamut);
+                if (color) {
+                    RANGE {
+                        cell->bg = (cell->bg & BG_ALPHA_BITS) | color;
+                        cell->attrs.gamut_bg = gamut;
+                    }
+                }
+            } break;
+            case 49: SET_BG(0);
             case 90 ... 97: PALETTE(fg, ((attr - 90 + 8) << 8) | 1);
-            case 100 ... 107: PALETTE(bg, ((attr - 100 + 8) << 8) | 1); END_ALLOW_CASE_RANGE
+            case 100 ... 107: SET_BG(((attr - 100 + 8) << 8) | 1); END_ALLOW_CASE_RANGE
+            case BG_ALPHA_CODE: {
+                uint8_t val = 0;
+                if (is_group && i < count) {
+                    val = bg_alpha_code(params[i]);
+                    i++;
+                }
+                RANGE { cell->bg = (cell->bg & ~BG_ALPHA_BITS) | (val << BG_ALPHA_SHIFT); }
+            } break;
             case DECORATION_FG_CODE: SET_COLOR(decoration_fg, (void)gamut);
             case DECORATION_FG_CODE + 1: SIMPLE(decoration_fg, 0);
         }
@@ -274,6 +317,7 @@ apply_sgr_to_cells(GPUCell *first_cell, unsigned int cell_count, int *params, un
 #undef SIMPLE
 #undef PALETTE
 #undef S
+#undef SET_BG
 }
 
 const char *
@@ -400,6 +444,25 @@ SGR_UINT_GETSET(hdr_bg)
 SGR_UINT_GETSET(gamut_fg)
 SGR_UINT_GETSET(gamut_bg)
 
+static PyObject *
+bg_alpha_get(Cursor *self, void UNUSED *closure) {
+    return PyLong_FromLong(100 - 2 * (long)((self->sgr.bg & BG_ALPHA_BITS) >> BG_ALPHA_SHIFT));
+}
+
+static int
+bg_alpha_set(Cursor *self, PyObject *value, void UNUSED *closure) {
+    if (value == NULL) {
+        PyErr_SetString(PyExc_TypeError, "Cannot delete attribute");
+        return -1;
+    }
+    if (!PyLong_Check(value)) {
+        PyErr_SetString(PyExc_TypeError, "value must be an int");
+        return -1;
+    }
+    self->sgr.bg = (self->sgr.bg & ~BG_ALPHA_BITS) | (bg_alpha_code(PyLong_AsLong(value)) << BG_ALPHA_SHIFT);
+    return 0;
+}
+
 static PyMemberDef members[] = {
     {"x", T_UINT, offsetof(Cursor, x), 0, "x"},
     {"y", T_UINT, offsetof(Cursor, y), 0, "y"},
@@ -409,7 +472,7 @@ static PyMemberDef members[] = {
 
 static PyGetSetDef getseters[] = {
     GETSET(bold) GETSET(italic) GETSET(reverse) GETSET(strikethrough) GETSET(dim) GETSET(blink) GETSET(text_blink) GETSET(decoration) GETSET(fg) GETSET(bg)
-        GETSET(decoration_fg) GETSET(hdr_fg) GETSET(hdr_bg) GETSET(gamut_fg) GETSET(gamut_bg){NULL} /* Sentinel */
+        GETSET(decoration_fg) GETSET(hdr_fg) GETSET(hdr_bg) GETSET(gamut_fg) GETSET(gamut_bg) GETSET(bg_alpha){NULL} /* Sentinel */
 };
 
 static PyMethodDef methods[] = {

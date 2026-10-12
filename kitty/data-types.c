@@ -1008,6 +1008,9 @@ PyInit_fast_data_types(void) {
     PyModule_AddIntConstant(m, "DECORATION_MASK", DECORATION_MASK);
     PyModule_AddIntConstant(m, "HDR_MASK", HDR_MASK);
     PyModule_AddIntConstant(m, "GAMUT_MASK", GAMUT_MASK);
+    PyModule_AddIntConstant(m, "COLOR_TYPE_MASK", COLOR_TYPE_MASK);
+    PyModule_AddIntConstant(m, "BG_ALPHA_SHIFT", BG_ALPHA_SHIFT);
+    PyModule_AddIntConstant(m, "BG_ALPHA_MASK", BG_ALPHA_MASK);
     PyModule_AddStringMacro(m, ERROR_PREFIX);
 #ifdef KITTY_VCS_REV
     PyModule_AddStringMacro(m, KITTY_VCS_REV);

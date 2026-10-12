@@ -30,6 +30,7 @@ please do so by opening issues in the `GitHub bug tracker
    keyboard-protocol
    text-sizing-protocol
    hdr-protocol
+   cell-alpha-protocol
    dnd-protocol
    multiple-cursors-protocol
    file-transfer-protocol

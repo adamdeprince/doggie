@@ -1883,7 +1883,7 @@ screen_needs_rendering_in_layers(OSWindow *os_window, Window *w, Screen *screen)
     const bool has_ui = w && ((screen->start_visual_bell_at | screen->start_drag_overlay_at) || has_scrollbar(w, screen) || has_progress_bar(screen) ||
                               has_hyperlink_target(os_window, w, screen) || has_window_number(w, screen) || w->window_logo.id);
     GraphicsManager *grman = screen->paused_rendering.expires_at && screen->paused_rendering.grman ? screen->paused_rendering.grman : screen->grman;
-    return has_ui || grman_has_images(grman);
+    return has_ui || grman_has_images(grman) || screen->has_translucent_cells;
 }
 
 bool

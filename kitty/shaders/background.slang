@@ -137,7 +137,7 @@ one_if_equal_zero_otherwise(uint a, uint b) {
 
 public uint
 resolve_color(uint c, uint defval) {
-    int t = int(c & BYTE_MASK);
+    int t = int(c & COLOR_TYPE_MASK);
     uint is_one = one_if_equal_zero_otherwise(t, 1);
     uint is_two = one_if_equal_zero_otherwise(t, 2);
     uint is_neither_one_nor_two = 1u - is_one - is_two;
@@ -227,7 +227,7 @@ background_opacity_for(uint bg, uint colorval, float opacity_if_matched) {
     return not_matched + opacity_if_matched * (1.0 - not_matched);
 }
 
-float
+public float
 calc_background_opacity(uint bg) {
     return (
         background_opacity_for(bg, crd.bg_colors0, crd.bg_opacities0) * background_opacity_for(bg, crd.bg_colors1, crd.bg_opacities1) *
@@ -255,6 +255,7 @@ public struct BackgroundOutput {
     public float3 background_rgb; // final background color (linear, post cursor/selection)
     public float bg_alpha;        // final alpha, post special-cell opacity (pre draw_bg_bitfield mask)
     public float cell_has_default_bg;
+    public float cell_alpha; // per cell background alpha, 1 unless translucent and not a special cell
     public float3 bg;         // original background color, pre selection/cursor (used for selection fg)
     public float3 foreground; // resolved foreground color, pre selection/override
     public uint fg_as_uint;
@@ -284,8 +285,11 @@ compute_background(uint3 colors, uint2 sprite_idx, uint is_selected, uint instan
     float bg_gain = min(1.f + 0.25f * float(hdr[bg_index]), crd.hdr_headroom);
     uint bg_as_uint = resolve_color(colors[bg_index], default_colors[bg_index]);
     bg_as_uint = has_mark * color_table[NUM_COLORS + mark - 1] + (BIT_MASK - has_mark) * bg_as_uint;
+    // per cell background alpha in 2% steps, see BG_ALPHA_SHIFT, ignored under reverse video
+    float cell_alpha = 1.f - 0.02f * float((colors[bg_index] >> BG_ALPHA_SHIFT) & BG_ALPHA_MASK);
     float cell_has_default_bg = 1.f - step(1.f, abs(float(bg_as_uint - crd.bg_colors0))); // 1 if has default bg else 0
     cell_has_default_bg *= 1.f - step(1.01f, bg_gain);
+    cell_has_default_bg *= step(1.f, cell_alpha);
     float3 bg = convert_gamut(color_to_vec(bg_as_uint), gamut[bg_index]) * bg_gain;
     float3 cell_bg = bg; // preserve original bg for the selection foreground color
     uint fg_as_uint = resolve_color(colors[fg_index], default_colors[fg_index]);
@@ -348,7 +352,7 @@ compute_background(uint3 colors, uint2 sprite_idx, uint is_selected, uint instan
     // }}}
 
     // Background {{{
-    float bg_alpha = calc_background_opacity(bg_as_uint);
+    float bg_alpha = calc_background_opacity(bg_as_uint) * cell_alpha;
     // we use max so that opacity of the block cursor cell background goes from bg_alpha to 1
     float effective_cursor_opacity = max(crd.cursor_opacity, bg_alpha);
     // is_special_cell is either 0 or 1
@@ -368,6 +372,7 @@ compute_background(uint3 colors, uint2 sprite_idx, uint is_selected, uint instan
     bo.background_rgb = background_rgb;
     bo.bg_alpha = bg_alpha;
     bo.cell_has_default_bg = cell_has_default_bg;
+    bo.cell_alpha = if_one_then(is_special_cell, 1.f, cell_alpha);
     bo.bg = cell_bg;
     bo.foreground = foreground;
     bo.fg_as_uint = fg_as_uint;
