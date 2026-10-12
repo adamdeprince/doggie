@@ -37,7 +37,7 @@ A program asks which selectors the terminal speaks::
 ``id`` is a non-negative 31 bit integer of the program's choosing, echoed in
 the reply so replies can be matched to queries. The terminal answers::
 
-    <OSC> 777 ; caps ; v=1 : op=cap : id=42 : caps=1 : ext=caps.1,frame.1,gesture.1 <ST>
+    <OSC> 777 ; caps ; v=1 : op=cap : id=42 : caps=1 : ext=caps.1,frame.1,gesture.1 : media=d,f,t,s : format=24,32,100 <ST>
 
 ``caps`` is a bit set of what the terminal can report, currently always
 ``1`` for the listing. ``ext`` is a comma separated list, in no particular
@@ -53,6 +53,22 @@ The answer is the same for every window of a terminal and does not change
 while the terminal runs, so a program needs it once. A terminal that does not
 support this protocol ignores the query, so a program must time out and may
 then fall back to probing the selectors it needs one at a time.
+
+Graphics media and formats
+-----------------------------
+
+The same reply says which transmission media and pixel formats of the
+:doc:`graphics protocol <graphics-protocol>` the terminal accepts. ``media``
+lists the values of the ``t`` key: ``d`` direct, ``f`` a file, ``t`` a
+temporary file, ``s`` shared memory, and any medium an extension adds, such
+as ``g`` for a GPU surface. ``format`` lists the values of the ``f`` key:
+``24`` RGB, ``32`` RGBA, ``100`` PNG, and any format an extension adds, such
+as ``64`` for HDR images and ``200`` for vector images. Both describe what the
+terminal accepts, not what is wise over a given connection, and the graphics
+protocol's own query action (``a=q``) remains the check for one particular
+image. A relay answers with what it can carry to the terminal behind it:
+files, shared memory and GPU surfaces do not cross machines, so over a
+network relay only ``d`` is available.
 
 Reading a mode
 -----------------

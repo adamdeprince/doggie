@@ -893,7 +893,7 @@ class TestScreen(BaseTest):
         s = self.create_screen()
         c = s.callbacks
         parse_bytes(s, b'\x1b]777;caps;v=1:op=query:id=7\x1b\\')
-        self.ae(c.wtcbuf, b'\x1b]777;caps;v=1:op=cap:id=7:caps=1:ext=caps.1\x1b\\')
+        self.ae(c.wtcbuf, b'\x1b]777;caps;v=1:op=cap:id=7:caps=1:ext=caps.1:media=d,f,t,s:format=24,32,100\x1b\\')
         c.clear()
         parse_bytes(s, b'\x1b]777;caps;v=2:op=query:id=7\x1b\\')
         parse_bytes(s, b'\x1b]777;caps;v=1:op=query\x1b\\')
