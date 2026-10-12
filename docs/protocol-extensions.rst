@@ -42,6 +42,7 @@ please do so by opening issues in the `GitHub bug tracker
    file-transfer-protocol
    desktop-notifications
    pointer-shapes
+   haptic-protocol
    unscroll
    color-stack
    deccara

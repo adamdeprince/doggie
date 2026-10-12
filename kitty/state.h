@@ -62,6 +62,7 @@ typedef struct Options {
     int wheel_scroll_min_lines;
     bool pixel_scroll;
     bool enable_audio_bell;
+    bool haptic_feedback;
     CursorShape cursor_shape, cursor_shape_unfocused;
     float cursor_beam_thickness;
     float cursor_underline_thickness;
@@ -589,6 +590,7 @@ typedef struct OSWindow {
     id_type temp_font_group_id;
     enum RENDER_STATE render_state;
     monotonic_t last_render_frame_received_at, last_rendered_at;
+    monotonic_t last_haptic_at;  // see docs/haptic-protocol.rst
     uint64_t render_calls;
     uint32_t frame_counter;
     id_type last_focused_counter;

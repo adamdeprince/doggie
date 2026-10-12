@@ -1306,6 +1306,17 @@ bundle_image_as_png(PyObject *self UNUSED, PyObject *args, PyObject *kw) {
     }
 }
 
+void
+cocoa_haptic_feedback(int which) {
+    NSHapticFeedbackPattern pattern;
+    switch (which) {
+        case 1: pattern = NSHapticFeedbackPatternAlignment; break;
+        case 2: pattern = NSHapticFeedbackPatternLevelChange; break;
+        default: pattern = NSHapticFeedbackPatternGeneric; break;
+    }
+    [[NSHapticFeedbackManager defaultPerformer] performFeedbackPattern:pattern performanceTime:NSHapticFeedbackPerformanceTimeNow];
+}
+
 static PyObject *
 play_system_sound_by_id_async(PyObject *self UNUSED, PyObject *which) {
     if (!PyLong_Check(which)) {

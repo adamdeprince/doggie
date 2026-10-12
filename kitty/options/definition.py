@@ -1535,6 +1535,17 @@ The audio bell. Useful to disable it in environments that require silence.
 )
 
 opt(
+    'haptic_feedback',
+    'yes',
+    option_type='to_bool',
+    ctype='bool',
+    long_text="""
+Allow programs to play haptic feedback on the trackpad, see
+:doc:`/haptic-protocol`. Only available on macOS.
+""",
+)
+
+opt(
     'visual_bell_duration',
     '0.0',
     option_type='visual_bell_duration',
