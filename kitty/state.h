@@ -89,7 +89,7 @@ typedef struct Options {
     float macos_thicken_font;
     WindowTitleIn macos_show_window_title_in;
     char *bell_path, *bell_theme, *macos_ns_window_layer;
-    float background_opacity, dim_opacity;
+    float background_opacity, dim_opacity, cursor_brightness, hdr_max_headroom;
 
     ScrollbarVisibilityPolicy scrollbar;
     bool scrollbar_interactive, scrollbar_jump_on_click;
@@ -156,7 +156,7 @@ typedef struct Options {
         double outer, inner;
     } tab_bar_margin_height;
     long macos_menubar_title_max_length;
-    int macos_colorspace;
+    int macos_colorspace, hdr;
     struct {
         float val;
         AdjustmentUnit unit;
@@ -582,6 +582,8 @@ typedef struct OSWindow {
         float alpha;
         bool os_forces_opaque, supports_transparency;
     } background_opacity;
+    float hdr_headroom;
+    bool hdr_active, hdr_content, linear_output, linear_output_checked;
     FONTS_DATA_HANDLE fonts_data;
     id_type temp_font_group_id;
     enum RENDER_STATE render_state;
@@ -680,6 +682,7 @@ typedef struct GlobalState {
     struct {
         uint32_t texture_id, framebuffer_id, texture_generation;
         int width, height;
+        bool is_float;
         uint32_t extra_texture_id, extra_texture_setup_fbo_id;
         uint32_t texture_a_id, texture_a_fbo_id;
         uint32_t texture_b_id, texture_b_fbo_id;
@@ -747,7 +750,9 @@ bool update_cursor_trail(CursorTrail *ct, Window *w, monotonic_t now, OSWindow *
 void set_gpu_viewport(unsigned w, unsigned h);
 void free_texture(uint32_t *);
 void free_framebuffer(uint32_t *);
-void send_image_to_gpu(uint32_t *, const void *, int32_t, int32_t, bool, bool, bool, RepeatStrategy);
+void send_image_to_gpu(uint32_t *, const void *, int32_t, int32_t, bool, bool, bool, bool, RepeatStrategy);
+float effective_hdr_headroom(const OSWindow *w);
+bool backbuffer_is_float(void);
 void send_sprite_to_gpu(FONTS_DATA_HANDLE fg, sprite_index, pixel *, sprite_index);
 void blank_canvas(float, color_type, bool);
 void blank_os_window(OSWindow *);

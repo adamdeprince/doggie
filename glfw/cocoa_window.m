@@ -2593,6 +2593,35 @@ createNativeWindow(_GLFWwindow *window, const _GLFWwndconfig *wndconfig, const _
 //////                       GLFW platform API                      //////
 //////////////////////////////////////////////////////////////////////////
 
+static NSColorSpace *
+colorspace_for(int color_space, bool hdr) {
+    if (hdr) {
+        // linear so that the float framebuffer is displayed as is, 1.0 being SDR white
+        CGColorSpaceRef cg = CGColorSpaceCreateWithName(color_space == DISPLAY_P3_COLORSPACE ? kCGColorSpaceExtendedLinearDisplayP3 : kCGColorSpaceExtendedLinearSRGB);
+        NSColorSpace *ans = [[[NSColorSpace alloc] initWithCGColorSpace:cg] autorelease];
+        CGColorSpaceRelease(cg);
+        return ans;
+    }
+    switch ((GlfwCocoaColorSpaces)color_space) {
+        case SRGB_COLORSPACE: return [NSColorSpace sRGBColorSpace];
+        case DISPLAY_P3_COLORSPACE: return [NSColorSpace displayP3ColorSpace];
+        case DEFAULT_COLORSPACE: break; // using deviceRGBColorSpace causes a hang when transitioning to fullscreen
+    }
+    return nil;
+}
+
+float
+_glfwPlatformGetWindowHDRHeadroom(_GLFWwindow *window) {
+    NSScreen *screen = window->ns.hdr ? [window->ns.object screen] : nil;
+    return screen ? (float)[screen maximumExtendedDynamicRangeColorComponentValue] : 1.f;
+}
+
+void
+_glfwPlatformSetWindowHDRActive(_GLFWwindow *window, bool active) {
+    CALayer *layer = window->ns.hdr ? [window->ns.view layer] : nil;
+    if (layer && [layer respondsToSelector:@selector(setWantsExtendedDynamicRangeContent:)]) [layer setValue:@(active) forKey:@"wantsExtendedDynamicRangeContent"];
+}
+
 int
 _glfwPlatformCreateWindow(
     _GLFWwindow *window, const _GLFWwndconfig *wndconfig, const _GLFWctxconfig *ctxconfig, const _GLFWfbconfig *fbconfig, const GLFWLayerShellConfig *lsc) {
@@ -2606,12 +2635,11 @@ _glfwPlatformCreateWindow(
         _glfw.ns.finishedLaunching = true;
     }
 
+    window->ns.hdr = wndconfig->ns.hdr;
     if (!createNativeWindow(window, wndconfig, fbconfig)) return false;
-    switch ((GlfwCocoaColorSpaces)wndconfig->ns.color_space) {
-        case SRGB_COLORSPACE: [window->ns.object setColorSpace:[NSColorSpace sRGBColorSpace]]; break;
-        case DISPLAY_P3_COLORSPACE: [window->ns.object setColorSpace:[NSColorSpace displayP3ColorSpace]]; break;
-        case DEFAULT_COLORSPACE: break;
-    }
+    NSColorSpace *cs = colorspace_for(wndconfig->ns.color_space, window->ns.hdr);
+    if (cs) [window->ns.object setColorSpace:cs];
+    if (window->ns.hdr) [window->ns.view setWantsLayer:YES];
 
     if (ctxconfig->client != GLFW_NO_API) {
         if (ctxconfig->source == GLFW_NATIVE_CONTEXT_API) {
@@ -2852,13 +2880,7 @@ _glfwPlatformSetLayerShellConfig(_GLFWwindow *window, const GLFWLayerShellConfig
     [nswindow setTitlebarAppearsTransparent:false];
     [nswindow setHasShadow:false];
     [nswindow setTitleVisibility:NSWindowTitleHidden];
-    NSColorSpace *cs = nil;
-    switch (config.related.color_space) {
-        case SRGB_COLORSPACE: cs = [NSColorSpace sRGBColorSpace]; break;
-        case DISPLAY_P3_COLORSPACE: cs = [NSColorSpace displayP3ColorSpace]; break;
-        case DEFAULT_COLORSPACE: cs = nil; break; // using deviceRGBColorSpace causes a hang when transitioning to fullscreen
-    }
-    [nswindow setColorSpace:cs];
+    [nswindow setColorSpace:colorspace_for(config.related.color_space, window->ns.hdr)];
     [[nswindow standardWindowButton:NSWindowCloseButton] setHidden:true];
     [[nswindow standardWindowButton:NSWindowMiniaturizeButton] setHidden:true];
     [[nswindow standardWindowButton:NSWindowZoomButton] setHidden:true];
@@ -4227,12 +4249,7 @@ glfwCocoaSetWindowChrome(
         [nsw setTitlebarAppearsTransparent:window->ns.last_applied_titlebar_settings.transparent];
         [nsw setHasShadow:has_shadow];
         [nsw setTitleVisibility:(show_text_in_titlebar) ? NSWindowTitleVisible : NSWindowTitleHidden];
-        NSColorSpace *cs = nil;
-        switch (color_space) {
-            case SRGB_COLORSPACE: cs = [NSColorSpace sRGBColorSpace]; break;
-            case DISPLAY_P3_COLORSPACE: cs = [NSColorSpace displayP3ColorSpace]; break;
-            case DEFAULT_COLORSPACE: cs = nil; break; // using deviceRGBColorSpace causes a hang when transitioning to fullscreen
-        }
+        NSColorSpace *cs = colorspace_for(color_space, window->ns.hdr);
         window->resizable = resizable;
         debug(
             "Window Chrome state:\n\tbackground: %s\n\tappearance: %s color_space: %s\n\t"

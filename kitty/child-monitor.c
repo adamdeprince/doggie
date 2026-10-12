@@ -862,6 +862,7 @@ prepare_to_render_os_window(
 #define WD w->render_data
         if (w->visible && WD.screen) {
             os_window->needs_layers = os_window->needs_layers || screen_needs_rendering_in_layers(os_window, w, WD.screen);
+            if (OPT(hdr) == 1 && !os_window->hdr_content) os_window->hdr_content = screen_has_hdr_content(WD.screen);
             screen_check_pause_rendering(WD.screen, now);
             *num_visible_windows += 1;
             color_type window_bg =
@@ -1100,6 +1101,9 @@ render_os_window(OSWindow *w, monotonic_t now, bool scan_for_animated_images) {
     }
     w->render_calls++;
     make_os_window_context_current(w);
+    if (!w->linear_output_checked) { w->linear_output = backbuffer_is_float(); w->linear_output_checked = true; }
+    w->hdr_headroom = glfwGetWindowHDRHeadroom(w->handle);
+    w->hdr_content = OPT(cursor_brightness) > 1;
     bool needs_render = w->redraw_count > 0 || w->live_resize.in_progress || global_state.thumbnail_callback.os_window == w->id;
     if (w->viewport_size_dirty) {
         set_gpu_viewport(w->viewport_width, w->viewport_height);
@@ -1115,6 +1119,11 @@ render_os_window(OSWindow *w, monotonic_t now, bool scan_for_animated_images) {
     }
     if (prepare_to_render_os_window(w, now, &active_window_id, &active_window_bg, &num_visible_windows, &all_windows_have_same_bg, scan_for_animated_images))
         needs_render = true;
+    const bool hdr_active = OPT(hdr) == 2 || (OPT(hdr) == 1 && w->hdr_content);
+    if (hdr_active != w->hdr_active) {
+        w->hdr_active = hdr_active;
+        glfwSetWindowHDRActive(w->handle, hdr_active);
+    }
     if (w->last_active_window_id != active_window_id || w->last_active_tab != w->active_tab || w->focused_at_last_render != w->is_focused) needs_render = true;
     if (w->render_calls < 3 && background_image_for_os_window(w) != NULL) needs_render = true;
     if (needs_render) render_prepared_os_window(w, active_window_id, active_window_bg, num_visible_windows, all_windows_have_same_bg, now);

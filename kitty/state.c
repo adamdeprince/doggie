@@ -221,7 +221,7 @@ send_bgimage_to_gpu(BackgroundImageLayout layout, BackgroundImage *bgimage) {
     }
     bgimage->texture_id = 0;
     size_t delta = bgimage->mmap_size ? bgimage->mmap_size - ((size_t)4) * bgimage->width * bgimage->height : 0;
-    send_image_to_gpu(&bgimage->texture_id, bgimage->bitmap + delta, bgimage->width, bgimage->height, false, true, OPT(background_image_linear), r);
+    send_image_to_gpu(&bgimage->texture_id, bgimage->bitmap + delta, bgimage->width, bgimage->height, false, false, true, OPT(background_image_linear), r);
     free_bgimage_bitmap(bgimage);
     return bgimage->texture_id > 0;
 }
@@ -1329,6 +1329,15 @@ PYWRAP1(background_opacity_of) {
     Py_RETURN_NONE;
 }
 
+PYWRAP1(hdr_headroom_of) {
+    id_type os_window_id = PyLong_AsUnsignedLongLong(args);
+    if (PyErr_Occurred()) return NULL;
+    WITH_OS_WINDOW(os_window_id)
+    return PyFloat_FromDouble((double)effective_hdr_headroom(os_window));
+    END_WITH_OS_WINDOW
+    Py_RETURN_NONE;
+}
+
 PYWRAP1(set_window_padding) {
     id_type os_window_id, tab_id, window_id;
     unsigned int left, top, right, bottom;
@@ -2090,6 +2099,7 @@ static PyMethodDef module_methods[] = {
     MW(run_with_activation_token, METH_O),
     MW(change_background_opacity, METH_VARARGS),
     MW(background_opacity_of, METH_O),
+    MW(hdr_headroom_of, METH_O),
     MW(update_window_visibility, METH_VARARGS),
     MW(sync_os_window_title, METH_VARARGS),
     MW(get_os_window_title, METH_VARARGS),

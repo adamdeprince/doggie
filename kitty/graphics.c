@@ -692,7 +692,58 @@ get_free_client_id(const GraphicsManager *self) {
     }
 
 #define MAX_DATA_SZ (4u * 100000000u)
-enum FORMATS { RGB = 24, RGBA = 32, PNG = 100 };
+enum FORMATS { RGB = 24, RGBA = 32, RGBA16F = 64, PNG = 100 };
+
+static inline unsigned
+pixel_size(const bool is_opaque, const bool is_float) {
+    return is_opaque ? 3 : is_float ? 8 : 4;
+}
+
+static inline float
+half_to_float(const uint16_t h) {
+    const unsigned exp = (h >> 10) & 0x1f, mant = h & 0x3ff;
+    float ans;
+    if (exp == 0) ans = ldexpf((float)mant, -24);
+    else if (exp == 31) ans = mant ? NAN : INFINITY;
+    else ans = ldexpf((float)(0x400 | mant), (int)exp - 25);
+    return h & 0x8000 ? -ans : ans;
+}
+
+static inline uint16_t
+float_to_half(const float f) {
+    // round to nearest even, as the hardware conversions do
+    uint32_t bits, mant;
+    memcpy(&bits, &f, sizeof(bits));
+    const uint16_t sign = (bits >> 16) & 0x8000;
+    const int exp = (int)((bits >> 23) & 0xff) - 112;
+    mant = bits & 0x7fffff;
+    if (exp == 143) return sign | 0x7c00 | (mant ? 0x200 : 0); // inf or nan
+    if (exp >= 31) return sign | 0x7c00;
+    unsigned shift = 13;
+    if (exp <= 0) { // subnormal half
+        shift = 14 - exp;
+        if (shift > 24) return sign;
+        mant |= 0x800000;
+    }
+    uint32_t h = (exp > 0 ? exp << 10 : 0) | (mant >> shift);
+    const uint32_t rem = mant & ((1u << shift) - 1), half = 1u << (shift - 1);
+    if (rem > half || (rem == half && (h & 1))) h++;
+    return sign | h;
+}
+
+static float
+peak_of_half_data(const uint8_t *data, const size_t sz) {
+    // the largest color component, at least SDR white
+    float ans = 1.f;
+    const uint16_t *p = (const uint16_t *)data;
+    for (size_t i = 0; i + 3 < sz / sizeof(uint16_t); i += 4) {
+        for (unsigned c = 0; c < 3; c++) {
+            const float v = half_to_float(p[i + c]);
+            if (v > ans && v < INFINITY) ans = v;
+        }
+    }
+    return ans;
+}
 
 static bool
 is_file_transmission(const unsigned char transmission_type) {
@@ -900,10 +951,12 @@ initialize_load_data(
             break;
         case RGB:
         case RGBA:
+        case RGBA16F:
             self->currently_loading.data_sz = (size_t)g->data_width * g->data_height * (data_fmt / 8);
             if (!self->currently_loading.data_sz) ABRT("EINVAL", "Zero width/height not allowed");
-            self->currently_loading.is_4byte_aligned = data_fmt == RGBA || (self->currently_loading.width % 4 == 0);
+            self->currently_loading.is_4byte_aligned = data_fmt != RGB || (self->currently_loading.width % 4 == 0);
             self->currently_loading.is_opaque = data_fmt == RGB;
+            self->currently_loading.is_float = data_fmt == RGBA16F;
             break;
         default: ABRT("EINVAL", "Unknown image format: %u", data_fmt);
     }
@@ -932,13 +985,13 @@ initialize_load_data(
     }
 
 static void
-upload_to_gpu(GraphicsManager *self, Image *img, const bool is_opaque, const bool is_4byte_aligned, const uint8_t *data) {
+upload_to_gpu(GraphicsManager *self, Image *img, const bool is_opaque, const bool is_float, const bool is_4byte_aligned, const uint8_t *data) {
     if (!self->context_made_current_for_this_command) {
         if (!self->window_id) return;
         if (!make_window_context_current(self->window_id)) return;
         self->context_made_current_for_this_command = true;
     }
-    if (img->texture) { send_image_to_gpu(&img->texture->id, data, img->width, img->height, is_opaque, is_4byte_aligned, true, REPEAT_CLAMP); }
+    if (img->texture) { send_image_to_gpu(&img->texture->id, data, img->width, img->height, is_opaque, is_float, is_4byte_aligned, true, REPEAT_CLAMP); }
 }
 
 static Image *
@@ -993,7 +1046,7 @@ handle_add_command(GraphicsManager *self, const GraphicsCommand *g, const uint8_
     self->currently_loading.loading_for = (const ImageAndFrame){0};
     img = process_image_data(self, img, g, fmt);
     if (!img) return NULL;
-    size_t required_sz = (size_t)(self->currently_loading.is_opaque ? 3 : 4) * self->currently_loading.width * self->currently_loading.height;
+    size_t required_sz = (size_t)pixel_size(self->currently_loading.is_opaque, self->currently_loading.is_float) * self->currently_loading.width * self->currently_loading.height;
     if (self->currently_loading.data_sz != required_sz)
         ABRT(
             "EINVAL",
@@ -1009,14 +1062,17 @@ handle_add_command(GraphicsManager *self, const GraphicsCommand *g, const uint8_
         img->root_frame = (const Frame){
             .id = ++img->frame_id_counter,
             .is_opaque = self->currently_loading.is_opaque,
+            .is_float = self->currently_loading.is_float,
             .is_4byte_aligned = self->currently_loading.is_4byte_aligned,
             .width = img->width,
             .height = img->height,
             .transient = (g->usage_hints & GRAPHICS_USAGE_HINT_TRANSIENT) != 0,
         };
+        img->tone_map = g->tone_map == 1;
+        img->peak = img->root_frame.is_float ? peak_of_half_data(self->currently_loading.data, required_sz) : 0;
         if (!is_query) {
             // Upload before caching, the cache takes ownership of the data
-            upload_to_gpu(self, img, img->root_frame.is_opaque, img->root_frame.is_4byte_aligned, self->currently_loading.data);
+            upload_to_gpu(self, img, img->root_frame.is_opaque, img->root_frame.is_float, img->root_frame.is_4byte_aligned, self->currently_loading.data);
             if (!add_load_data_to_cache(self, (const ImageAndFrame){.image_id = img->internal_id, .frame_id = img->root_frame.id}, img->root_frame.transient)) {
                 if (PyErr_Occurred()) PyErr_Print();
                 ABRT("ENOSPC", "Failed to store image data in cache");
@@ -1514,6 +1570,7 @@ grman_update_layers(
 
     // Iterate over all visible refs and create render data
     self->render_data.count = 0;
+    self->render_data.has_hdr = false;
 
     for (image_map_itr imgitr = vt_first(&self->images_by_internal_id); !vt_is_end(imgitr);) {
         Image *img = imgitr.data->val;
@@ -1570,11 +1627,14 @@ grman_update_layers(
             zero_at_ptr(rd);
             rd->dest_rect = r;
             rd->src_rect = ref->src_rect;
+            self->render_data.has_hdr |= img->root_frame.is_float;
             self->render_data.count++;
             rd->z_index = ref->z_index;
             rd->image_id = img->internal_id;
             rd->ref_id = ref->internal_id;
             rd->texture_id = texture_id_for_img(img);
+            rd->peak = img->peak;
+            rd->tone_map = img->tone_map;
             img->is_drawn = true;
             refitr = vt_next(refitr);
         }
@@ -1649,7 +1709,7 @@ change_gap(Image *img, Frame *f, int32_t gap) {
 
 typedef struct {
     uint8_t *buf;
-    bool is_4byte_aligned, is_opaque, transient;
+    bool is_4byte_aligned, is_opaque, transient, is_float;
 } CoalescedFrameData;
 
 typedef struct {
@@ -1660,9 +1720,23 @@ typedef struct {
 } ComposeData;
 
 static void
+blend_over_half(uint8_t *under_row, const uint8_t *over_row, const unsigned num_px) {
+    // the over operator on straight alpha, in linear light, see blend_pixel_over_straight()
+    uint16_t *d = (uint16_t *)under_row;
+    const uint16_t *s = (const uint16_t *)over_row;
+    for (unsigned x = 0; x < num_px; x++, d += 4, s += 4) {
+        const float alpha = half_to_float(s[3]), dst_alpha = half_to_float(d[3]) * (1.f - alpha), out_alpha = alpha + dst_alpha;
+        if (out_alpha <= 0.f) continue;
+        for (unsigned c = 0; c < 3; c++) d[c] = float_to_half((half_to_float(s[c]) * alpha + half_to_float(d[c]) * dst_alpha) / out_alpha);
+        d[3] = float_to_half(out_alpha);
+    }
+}
+
+static void
 copy_or_blend_row(
     uint8_t *under_row, const uint8_t *over_row, const unsigned num_px, const uint32_t under_px_sz, const uint32_t over_px_sz, const bool needs_blending) {
-    if (needs_blending && over_px_sz == 4) {
+    if (needs_blending && over_px_sz == 8) blend_over_half(under_row, over_row, num_px);
+    else if (needs_blending && over_px_sz == 4) {
         // over is straight alpha RGBA
         if (under_px_sz == 4) blend_over_straight(under_row, over_row, num_px);
         else blend_over_opaque(under_row, 3, over_row, num_px);
@@ -1727,16 +1801,20 @@ get_coalesced_frame_data_standalone(const Image *img, const Frame *f, uint8_t *f
         ans.buf = frame_data;
         ans.is_4byte_aligned = f->is_4byte_aligned;
         ans.is_opaque = f->is_opaque;
+        ans.is_float = f->is_float;
         return ans;
     }
-    const unsigned bytes_per_pixel = f->is_opaque ? 3 : 4;
+    const unsigned bytes_per_pixel = pixel_size(f->is_opaque, f->is_float);
     uint8_t *base;
     if (f->bgcolor) {
         base = malloc((size_t)img->width * img->height * bytes_per_pixel);
         if (base) {
             uint8_t *p = base;
             const uint8_t r = (f->bgcolor >> 24) & 0xff, g = (f->bgcolor >> 16) & 0xff, b = (f->bgcolor >> 8) & 0xff, a = f->bgcolor & 0xff;
-            if (bytes_per_pixel == 4) {
+            if (bytes_per_pixel == 8) {
+                const uint16_t px[4] = {float_to_half(r / 255.f), float_to_half(g / 255.f), float_to_half(b / 255.f), float_to_half(a / 255.f)};
+                for (uint32_t i = 0; i < img->width * img->height; i++, p += sizeof(px)) memcpy(p, px, sizeof(px));
+            } else if (bytes_per_pixel == 4) {
                 for (uint32_t i = 0; i < img->width * img->height; i++) {
                     *(p++) = r;
                     *(p++) = g;
@@ -1768,8 +1846,9 @@ get_coalesced_frame_data_standalone(const Image *img, const Frame *f, uint8_t *f
         .needs_blending = f->alpha_blend && !f->is_opaque};
     compose(d, base, (size_t)img->width * img->height * bytes_per_pixel, frame_data, frame_data_sz);
     ans.buf = base;
-    ans.is_4byte_aligned = bytes_per_pixel == 4 || (img->width % 4) == 0;
+    ans.is_4byte_aligned = bytes_per_pixel != 3 || (img->width % 4) == 0;
     ans.is_opaque = f->is_opaque;
+    ans.is_float = f->is_float;
     free(frame_data);
     return ans;
 }
@@ -1795,8 +1874,8 @@ get_coalesced_frame_data_impl(GraphicsManager *self, Image *img, const Frame *f,
         return ans;
     }
     ComposeData d = {
-        .over_px_sz = f->is_opaque ? 3 : 4,
-        .under_px_sz = base_data.is_opaque ? 3 : 4,
+        .over_px_sz = pixel_size(f->is_opaque, f->is_float),
+        .under_px_sz = pixel_size(base_data.is_opaque, base_data.is_float),
         .over_width = f->width,
         .over_height = f->height,
         .over_offset_x = f->x,
@@ -1829,7 +1908,7 @@ update_current_frame(GraphicsManager *self, Image *img, const CoalescedFrameData
         }
         data = &cfd;
     }
-    upload_to_gpu(self, img, data->is_opaque, data->is_4byte_aligned, data->buf);
+    upload_to_gpu(self, img, data->is_opaque, data->is_float, data->is_4byte_aligned, data->buf);
     if (needs_load) free(data->buf);
     img->current_frame_shown_at = monotonic();
 }
@@ -1874,6 +1953,7 @@ handle_animation_frame_load_command(GraphicsManager *self, GraphicsCommand *g, I
         self->currently_loading.loading_for = (const ImageAndFrame){0};
         if (g->data_width > MAX_IMAGE_DIMENSION || g->data_height > MAX_IMAGE_DIMENSION)
             ABRT("EINVAL", "Image too large, width or height greater than %u", MAX_IMAGE_DIMENSION);
+        if (img->root_frame.is_float != (fmt == RGBA16F)) ABRT("EINVAL", "Animation frame format must match the image format");
         if (!initialize_load_data(self, g, img, tt, fmt, frame_number - 1)) return NULL;
     }
     LoadData *load_data = &self->currently_loading;
@@ -1883,10 +1963,11 @@ handle_animation_frame_load_command(GraphicsManager *self, GraphicsCommand *g, I
     img = process_image_data(self, img, g, fmt);
     if (!img || !load_data->loading_completed_successfully) return img;
 
-    const unsigned long bytes_per_pixel = load_data->is_opaque ? 3 : 4;
+    const unsigned long bytes_per_pixel = pixel_size(load_data->is_opaque, load_data->is_float);
     if (load_data->data_sz < bytes_per_pixel * load_data->width * load_data->height)
         ABRT("ENODATA", "Insufficient image data %zu < %zu", load_data->data_sz, bytes_per_pixel * g->data_width * g->data_height);
     if (load_data->width > img->width) ABRT("EINVAL", "Frame width %u larger than image width: %u", load_data->width, img->width);
+    if (load_data->is_float) img->peak = MAX(img->peak, peak_of_half_data(load_data->data, load_data->data_sz));
     if (load_data->height > img->height) ABRT("EINVAL", "Frame height %u larger than image height: %u", load_data->height, img->height);
     if (is_new_frame && cache_size(self) + load_data->data_sz > self->storage_limit * 5) {
         remove_images(self, trim_predicate, img->internal_id);
@@ -1900,6 +1981,7 @@ handle_animation_frame_load_command(GraphicsManager *self, GraphicsCommand *g, I
         .y = g->y_offset,
         .is_4byte_aligned = load_data->is_4byte_aligned,
         .is_opaque = load_data->is_opaque,
+        .is_float = load_data->is_float,
         .alpha_blend = g->blend_mode != 1 && !load_data->is_opaque,
         .gap = g->gap > 0     ? g->gap
                : (g->gap < 0) ? 0
@@ -1928,8 +2010,8 @@ handle_animation_frame_load_command(GraphicsManager *self, GraphicsCommand *g, I
                 CoalescedFrameData cfd = get_coalesced_frame_data(self, img, other_frame);
                 if (!cfd.buf) ABRT("EINVAL", "Failed to get data from frame referenced by frame: %u", frame_number);
                 ComposeData d = {
-                    .over_px_sz = transmitted_frame.is_opaque ? 3 : 4,
-                    .under_px_sz = cfd.is_opaque ? 3 : 4,
+                    .over_px_sz = pixel_size(transmitted_frame.is_opaque, transmitted_frame.is_float),
+                    .under_px_sz = pixel_size(cfd.is_opaque, cfd.is_float),
                     .over_width = transmitted_frame.width,
                     .over_height = transmitted_frame.height,
                     .over_offset_x = transmitted_frame.x,
@@ -1953,6 +2035,7 @@ handle_animation_frame_load_command(GraphicsManager *self, GraphicsCommand *g, I
                 transmitted_frame.y = 0;
                 transmitted_frame.is_4byte_aligned = cfd.is_4byte_aligned;
                 transmitted_frame.is_opaque = cfd.is_opaque;
+                transmitted_frame.is_float = cfd.is_float;
                 transmitted_frame.transient = transmitted_frame.transient || cfd.transient;
             } else {
                 transmitted_frame.base_frame_id = other_frame->id;
@@ -1981,14 +2064,15 @@ handle_animation_frame_load_command(GraphicsManager *self, GraphicsCommand *g, I
         frame->base_frame_id = 0;
         frame->bgcolor = 0;
         frame->is_opaque = cfd.is_opaque;
+        frame->is_float = cfd.is_float;
         frame->is_4byte_aligned = cfd.is_4byte_aligned;
         frame->x = 0;
         frame->y = 0;
         frame->width = img->width;
         frame->height = img->height;
-        const unsigned bytes_per_pixel = frame->is_opaque ? 3 : 4;
+        const unsigned bytes_per_pixel = pixel_size(frame->is_opaque, frame->is_float);
         ComposeData d = {
-            .over_px_sz = transmitted_frame.is_opaque ? 3 : 4,
+            .over_px_sz = pixel_size(transmitted_frame.is_opaque, transmitted_frame.is_float),
             .under_px_sz = bytes_per_pixel,
             .over_width = transmitted_frame.width,
             .over_height = transmitted_frame.height,
@@ -2201,8 +2285,8 @@ handle_compose_command(GraphicsManager *self, bool *is_dirty, const GraphicsComm
         return;
     }
     ComposeData d = {
-        .over_px_sz = src_data.is_opaque ? 3 : 4,
-        .under_px_sz = dest_data.is_opaque ? 3 : 4,
+        .over_px_sz = pixel_size(src_data.is_opaque, src_data.is_float),
+        .under_px_sz = pixel_size(dest_data.is_opaque, dest_data.is_float),
         .needs_blending = !g->compose_mode && !src_data.is_opaque,
         .over_offset_x = src_x,
         .over_offset_y = src_y,
@@ -2220,7 +2304,7 @@ handle_compose_command(GraphicsManager *self, bool *is_dirty, const GraphicsComm
     const bool is_current_frame = (g->other_frame_number - 1) == img->current_frame_index;
     *is_dirty = is_current_frame;
     if (is_current_frame) update_current_frame(self, img, &dest_data);
-    const size_t dest_sz = ((size_t)(dest_data.is_opaque ? 3 : 4)) * img->width * img->height;
+    const size_t dest_sz = ((size_t)pixel_size(dest_data.is_opaque, dest_data.is_float)) * img->width * img->height;
     void *dest_buf = dest_data.buf;
     dest_data.buf = NULL;
     if (!add_to_cache(self, key, &dest_buf, dest_sz, transient)) {
@@ -2403,6 +2487,11 @@ grman_scroll_images(GraphicsManager *self, const ScrollData *data, CellPixelSize
 bool
 grman_has_any_images(GraphicsManager *self) {
     return vt_size(&self->images_by_internal_id) > 0;
+}
+
+bool
+grman_has_hdr_images(GraphicsManager *self) {
+    return self->render_data.has_hdr;
 }
 
 static bool
@@ -2764,7 +2853,7 @@ image_as_dict(GraphicsManager *self, Image *img) {
         PyTuple_SET_ITEM(
             frames,
             i,
-            Py_BuildValue("{sI sI sy#}", "gap", f->gap, "id", f->id, "data", cfd.buf, (Py_ssize_t)((cfd.is_opaque ? 3 : 4) * img->width * img->height)));
+            Py_BuildValue("{sI sI sy#}", "gap", f->gap, "id", f->id, "data", cfd.buf, (Py_ssize_t)(pixel_size(cfd.is_opaque, cfd.is_float) * img->width * img->height)));
         free(cfd.buf);
         if (PyErr_Occurred()) {
             Py_CLEAR(frames);
@@ -2780,7 +2869,7 @@ image_as_dict(GraphicsManager *self, Image *img) {
         "{sI sI sI sI sI sI sI "
         "sO sI sO "
         "sI sI sI "
-        "sI sy# sN}",
+        "sI sy# sN sO sf}",
         "texture_id",
         texture_id_for_img(img),
         U(client_id),
@@ -2804,9 +2893,12 @@ image_as_dict(GraphicsManager *self, Image *img) {
         U(animation_duration),
         "data",
         cfd.buf,
-        (Py_ssize_t)((cfd.is_opaque ? 3 : 4) * img->width * img->height),
+        (Py_ssize_t)(pixel_size(cfd.is_opaque, cfd.is_float) * img->width * img->height),
         "extra_frames",
-        frames);
+        frames,
+        B(tone_map),
+        "peak",
+        (double)img->peak);
     free(cfd.buf);
     return ans;
 #undef B

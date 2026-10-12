@@ -27,14 +27,25 @@ uniform Sampler2D image;
 
 [shader("fragment")]
 float4
-fragment_main(float2 texcoord: TEXCOORD, uniform float3 amask_fg, uniform float4 amask_bg_premult, uniform float extra_alpha)
+fragment_main(float2 texcoord: TEXCOORD, uniform float3 amask_fg, uniform float4 amask_bg_premult, uniform float extra_alpha, uniform float hdr_headroom, uniform float tone_peak)
     : SV_Target {
     float4 color = image.Sample(texcoord);
     if (is_alpha_mask) {
         color = float4(amask_fg, color.r);
         color = vec4_premul(color);
         color = alpha_blend_premul(color, amask_bg_premult);
-    } else color.a *= extra_alpha;
+    } else {
+        color.a *= extra_alpha;
+        // HDR images, SDR ones are never above 1. With tone mapping (tone_peak > 0) the
+        // range from the knee to the image peak is compressed into the headroom, preserving
+        // hue, otherwise what is above the headroom is clipped. See docs/hdr-protocol.rst
+        float knee = 0.75f * hdr_headroom, m = max(color.r, max(color.g, color.b));
+        if (tone_peak > hdr_headroom && m > knee) {
+            float s = 1.f / (hdr_headroom - knee) - 1.f / (tone_peak - knee);
+            color.rgb *= (knee + (m - knee) / (1.f + s * (m - knee))) / m;
+        }
+        color.rgb = min(color.rgb, float3(hdr_headroom));
+    }
 
     if (texture_is_not_premultiplied) color = vec4_premul(color);
 

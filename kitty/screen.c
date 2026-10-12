@@ -4071,6 +4071,24 @@ screen_update_only_line_graphics_data(Screen *self) {
     }
 }
 
+bool
+screen_has_hdr_content(Screen *self) {
+    if (grman_has_hdr_images(self->grman)) return true;
+    const unsigned int render_lines = render_lines_for_screen(self);
+    const int render_row_offset = pixel_scroll_enabled(self);
+    Line line = {.text_cache = self->text_cache};
+    for (unsigned int render_row = 0; render_row < render_lines; render_row++) {
+        bool is_history;
+        index_type lnum;
+        Line *linep = render_line_for_virtual_y(self, (int)render_row - render_row_offset, &line, &lnum, &is_history);
+        if (linep == NULL) continue;
+        for (index_type x = 0; x < linep->xnum; x++) {
+            if (linep->gpu_cells[x].attrs.hdr_fg || linep->gpu_cells[x].attrs.hdr_bg) return true;
+        }
+    }
+    return false;
+}
+
 void
 screen_update_cell_data(Screen *self, void *address, FONTS_DATA_HANDLE fonts_data, bool cursor_has_moved) {
     if (self->paused_rendering.expires_at) {

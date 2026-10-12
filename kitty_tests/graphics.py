@@ -451,6 +451,11 @@ class TestGraphics(BaseTest):
             img = sl(p, s=1, v=1, f=f)
             self.ae(bool(img['is_4byte_aligned']), f == 32)
 
+        # Test HDR load
+        self.ae(pl('abcdefgh', s=1, v=1, a='q', f=64), 'OK')
+        self.ae(pl('abcdefg', s=1, v=1, f=64), 'ENODATA:Insufficient image data: 7 < 8')
+        sl('abcdefgh' * 6, s=3, v=2, f=64)
+
         # Test chunked load
         self.assertIsNone(pl('abcd', s=2, v=2, m=1))
         self.assertIsNone(pl('efgh', m=1))
@@ -1729,6 +1734,51 @@ class TestGraphics(BaseTest):
                 'EINVAL',
                 f'Expected EINVAL for overflow in compose offset parameter {offset_param!r}',
             )
+
+    def test_hdr_animation_frames(self):
+        from struct import pack, unpack
+
+        s = self.create_screen()
+        g = s.grman
+        li = make_send_command(s)
+
+        def px(*channels):
+            return pack('<4e', *channels)
+
+        def pixels(data):
+            return tuple(unpack('<4e', data[i:i + 8]) for i in range(0, len(data), 8))
+
+        self.assertEqual(li(payload=px(0.5, 0.5, 0.5, 1.0) * 4, s=2, v=2, f=64, a='t').code, 'OK')
+        # frames must have the format of the image
+        self.assertEqual(li(payload=b'\0' * 16, s=2, v=2, f=32).code, 'EINVAL')
+        self.assertEqual(li(payload=b'\0' * 32, s=2, v=2, f=64, i=2, a='t').code, 'OK')
+        self.assertEqual(li(payload=b'\0' * 16, s=2, v=2, f=32, i=2, a='t').code, 'OK')
+        self.assertEqual(li(payload=px(1, 1, 1, 1), s=1, v=1, f=64, i=2).code, 'EINVAL')
+        # a half transparent frame blended in linear light over the root frame
+        self.assertEqual(li(payload=px(2.0, 0.0, 0.0, 0.5), s=1, v=1, f=64, x=1, y=1, c=1, z=10).code, 'OK')
+        img = g.image_for_client_id(1)
+        self.assertEqual(len(img['extra_frames'][0]['data']), 32)
+        self.assertEqual(pixels(img['extra_frames'][0]['data']), ((0.5, 0.5, 0.5, 1.0),) * 3 + ((1.25, 0.25, 0.25, 1.0),))
+        # the same frame without a base is composed over transparent
+        self.assertEqual(li(payload=px(2.0, 0.0, 0.0, 0.5), s=1, v=1, f=64, x=1, y=1, z=10).code, 'OK')
+        img = g.image_for_client_id(1)
+        self.assertEqual(pixels(img['extra_frames'][1]['data']), ((0.0, 0.0, 0.0, 0.0),) * 3 + ((2.0, 0.0, 0.0, 0.5),))
+        # composition between frames
+        self.assertEqual(li(payload=b'', a='c', f=0, s=0, v=0, r=2, c=1, w=1, h=1, X=1, Y=1).code, 'OK')
+        img = g.image_for_client_id(1)
+        self.assertEqual(pixels(img['data']), ((1.25, 0.25, 0.25, 1.0),) + ((0.5, 0.5, 0.5, 1.0),) * 3)
+        # frame background color
+        self.assertEqual(li(payload=px(1.0, 1.0, 1.0, 1.0), s=1, v=1, f=64, Y=0xff00007f).code, 'OK')
+        img = g.image_for_client_id(1)
+        self.assertEqual(pixels(img['extra_frames'][2]['data']), ((1.0, 1.0, 1.0, 1.0),) + ((1.0, 0.0, 0.0, unpack('<e', pack('<e', 127 / 255))[0]),) * 3)
+        # the peak used for tone mapping covers all frames
+        self.assertEqual((img['tone_map'], img['peak']), (False, 2.0))
+        self.assertEqual(li(payload=px(3.0, 0.25, 0.25, 1.0), s=1, v=1, f=64, i=3, a='t', T=1).code, 'OK')
+        img = g.image_for_client_id(3)
+        self.assertEqual((img['tone_map'], img['peak']), (True, 3.0))
+        self.assertEqual(li(payload=b'abcd', s=1, v=1, f=32, i=3, a='t', T=1).code, 'OK')
+        img = g.image_for_client_id(3)
+        self.assertEqual((img['tone_map'], img['peak']), (True, 0.0))
 
     def test_graphics_compose_canvas_bounds(self):
         from kitty.fast_data_types import create_canvas

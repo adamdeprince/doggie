@@ -380,6 +380,19 @@ place your value after the lines where the theme file is included.
 )
 
 opt(
+    'cursor_brightness',
+    '1.0',
+    option_type='positive_float',
+    ctype='float',
+    long_text="""
+The brightness of the block cursor as a multiple of SDR white, so :code:`2.0`
+makes it twice as bright as normal white text. Values above one only take
+effect on an HDR display with :opt:`hdr` enabled, otherwise the cursor is
+rendered as usual. See :doc:`/hdr-protocol`.
+""",
+)
+
+opt(
     'cursor_shape',
     'block',
     option_type='to_cursor_shape',
@@ -2691,6 +2704,34 @@ opt(
     long_text="""
 How much to dim text that has the DIM/FAINT attribute set. One means no dimming
 and zero means fully dimmed (i.e. invisible).
+""",
+)
+
+opt(
+    'hdr',
+    'no',
+    choices=('no', 'auto', 'always'),
+    ctype='hdr',
+    long_text="""
+Allow colors brighter than SDR white on HDR displays. Normal (SDR) content is
+rendered exactly as it is with this option off, HDR only adds extra brightness
+requested by programs via the :doc:`/hdr-protocol`, by :opt:`cursor_brightness`
+and by HDR images. :code:`auto` enables the extended range of the display only
+while something brighter than SDR white is on screen, :code:`always` keeps it
+enabled. Currently only supported on macOS.
+""",
+)
+
+opt(
+    'hdr_max_headroom',
+    '4.0',
+    option_type='positive_float',
+    ctype='float',
+    long_text="""
+The maximum brightness, as a multiple of SDR white, that kitty will use for HDR
+content. The display may offer more headroom than this, particularly at low
+brightness settings, but very bright text is unpleasant to look at. Requests for
+more brightness are clamped to this value. The display's own limit always applies.
 """,
 )
 

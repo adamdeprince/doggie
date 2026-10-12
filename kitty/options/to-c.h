@@ -434,6 +434,13 @@ dragging_pointer_shape(PyObject *parts, Options *opts) {
 }
 
 static inline int
+hdr(PyObject *val) {
+    if (PyUnicode_CompareWithASCIIString(val, "auto") == 0) return 1;
+    if (PyUnicode_CompareWithASCIIString(val, "always") == 0) return 2;
+    return 0;
+}
+
+static inline int
 macos_colorspace(PyObject *csname) {
     if (PyUnicode_CompareWithASCIIString(csname, "srgb") == 0) return 1;
     if (PyUnicode_CompareWithASCIIString(csname, "displayp3") == 0) return 2;

@@ -852,6 +852,12 @@ typedef enum {
     SRGB_COLORSPACE = 1,
     DISPLAY_P3_COLORSPACE = 2,
 } GlfwCocoaColorSpaces;
+/*! @brief macOS specific
+ *  [window hint](@ref GLFW_COCOA_HDR_hint). Use a float framebuffer and an
+ *  extended linear color space so that values above 1.0 are displayed
+ *  brighter than SDR white, see glfwSetWindowHDRActive.
+ */
+#define GLFW_COCOA_HDR 0x00023005
 /*! @brief Blur Radius. On macOS the actual radius is used. On Linux it is treated as a bool.
  *  [window hint](@ref GLFW_BLUR_RADIUS).
  */
@@ -2229,6 +2235,14 @@ GFW_EXTERN glfwSetWindowAttrib_func glfwSetWindowAttrib_impl;
 typedef int (*glfwSetWindowBlur_func)(GLFWwindow*, int);
 GFW_EXTERN glfwSetWindowBlur_func glfwSetWindowBlur_impl;
 #define glfwSetWindowBlur glfwSetWindowBlur_impl
+
+typedef float (*glfwGetWindowHDRHeadroom_func)(GLFWwindow*);
+GFW_EXTERN glfwGetWindowHDRHeadroom_func glfwGetWindowHDRHeadroom_impl;
+#define glfwGetWindowHDRHeadroom glfwGetWindowHDRHeadroom_impl
+
+typedef void (*glfwSetWindowHDRActive_func)(GLFWwindow*, bool);
+GFW_EXTERN glfwSetWindowHDRActive_func glfwSetWindowHDRActive_impl;
+#define glfwSetWindowHDRActive glfwSetWindowHDRActive_impl
 
 typedef void (*glfwSetWindowUserPointer_func)(GLFWwindow*, void*);
 GFW_EXTERN glfwSetWindowUserPointer_func glfwSetWindowUserPointer_impl;

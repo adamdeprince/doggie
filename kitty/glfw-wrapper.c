@@ -239,6 +239,12 @@ load_glfw(const char* path) {
     *(void **) (&glfwSetWindowBlur_impl) = dlsym(handle, "glfwSetWindowBlur");
     if (glfwSetWindowBlur_impl == NULL) fail("Failed to load glfw function glfwSetWindowBlur with error: %s", dlerror());
 
+    *(void **) (&glfwGetWindowHDRHeadroom_impl) = dlsym(handle, "glfwGetWindowHDRHeadroom");
+    if (glfwGetWindowHDRHeadroom_impl == NULL) fail("Failed to load glfw function glfwGetWindowHDRHeadroom with error: %s", dlerror());
+
+    *(void **) (&glfwSetWindowHDRActive_impl) = dlsym(handle, "glfwSetWindowHDRActive");
+    if (glfwSetWindowHDRActive_impl == NULL) fail("Failed to load glfw function glfwSetWindowHDRActive with error: %s", dlerror());
+
     *(void **) (&glfwSetWindowUserPointer_impl) = dlsym(handle, "glfwSetWindowUserPointer");
     if (glfwSetWindowUserPointer_impl == NULL) fail("Failed to load glfw function glfwSetWindowUserPointer with error: %s", dlerror());
 

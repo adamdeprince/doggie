@@ -1112,6 +1112,12 @@ typedef enum {
     SRGB_COLORSPACE = 1,
     DISPLAY_P3_COLORSPACE = 2,
 } GlfwCocoaColorSpaces;
+/*! @brief macOS specific
+ *  [window hint](@ref GLFW_COCOA_HDR_hint). Use a float framebuffer and an
+ *  extended linear color space so that values above 1.0 are displayed
+ *  brighter than SDR white, see glfwSetWindowHDRActive.
+ */
+#define GLFW_COCOA_HDR 0x00023005
 /*! @brief Blur Radius. On macOS the actual radius is used. On Linux it is treated as a bool.
  *  [window hint](@ref GLFW_BLUR_RADIUS).
  */
@@ -4056,6 +4062,17 @@ GLFWAPI int glfwGetWindowAttrib(GLFWwindow *window, int attrib);
  */
 GLFWAPI void glfwSetWindowAttrib(GLFWwindow *window, int attrib, int value);
 GLFWAPI int glfwSetWindowBlur(GLFWwindow *window, int value);
+
+/*! @brief The brightness the display can show, as a multiple of SDR white.
+ *  1.0 means no HDR headroom. The value changes with display brightness, the
+ *  refresh callback is called when it might have.
+ */
+GLFWAPI float glfwGetWindowHDRHeadroom(GLFWwindow *window);
+
+/*! @brief Enable or disable display of HDR content in the window. Only
+ *  effective when the window was created with the GLFW_COCOA_HDR hint.
+ */
+GLFWAPI void glfwSetWindowHDRActive(GLFWwindow *window, bool active);
 
 /*! @brief Sets the user pointer of the specified window.
  *

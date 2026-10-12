@@ -13,7 +13,7 @@
 
 typedef struct {
     unsigned char action, transmission_type, compressed, delete_action;
-    uint32_t format, more, id, image_number, data_sz, data_offset, placement_id, quiet, parent_id, parent_placement_id, usage_hints;
+    uint32_t format, more, id, image_number, data_sz, data_offset, placement_id, quiet, parent_id, parent_placement_id, usage_hints, tone_map;
     uint32_t width, height, x_offset, y_offset;
     union {
         uint32_t cursor_movement, compose_mode;
@@ -53,6 +53,8 @@ typedef struct {
     uint32_t texture_id, group_count;
     int z_index;
     id_type image_id, ref_id;
+    float peak; // of HDR images, see docs/hdr-protocol.rst
+    bool tone_map;
 } ImageRenderData;
 
 typedef struct {
@@ -92,7 +94,7 @@ typedef struct {
 
 typedef struct {
     uint32_t gap, id, width, height, x, y, base_frame_id, bgcolor;
-    bool is_opaque, is_4byte_aligned, alpha_blend, transient;
+    bool is_opaque, is_4byte_aligned, alpha_blend, transient, is_float;
 } Frame;
 
 typedef enum { ANIMATION_STOPPED = 0, ANIMATION_LOADING = 1, ANIMATION_RUNNING = 2 } AnimationState;
@@ -124,6 +126,8 @@ typedef struct {
     uint32_t max_loops, current_loop;
     monotonic_t current_frame_shown_at;
     ref_map refs_by_internal_id;
+    float peak; // of HDR images, see docs/hdr-protocol.rst
+    bool tone_map;
 } Image;
 
 typedef struct {
@@ -138,7 +142,7 @@ typedef struct {
     size_t data_sz;
     uint8_t *data;
     bool is_4byte_aligned;
-    bool is_opaque, loading_completed_successfully;
+    bool is_opaque, loading_completed_successfully, is_float;
     uint32_t width, height;
     GraphicsCommand start_command;
     ImageAndFrame loading_for;
@@ -158,6 +162,7 @@ typedef struct {
     struct {
         size_t count, capacity;
         ImageRenderData *item;
+        bool has_hdr;
     } render_data;
     bool layers_dirty;
     // The number of images below MIN_ZINDEX / 2, then the number of refs between MIN_ZINDEX / 2 and -1 inclusive, then the number of refs above 0 inclusive.
@@ -248,6 +253,7 @@ bool grman_update_layers(
     CellPixelSize);
 void grman_scroll_images(GraphicsManager *self, const ScrollData *, CellPixelSize fg);
 bool grman_has_any_images(GraphicsManager *self);
+bool grman_has_hdr_images(GraphicsManager *self);
 void grman_resize(GraphicsManager *, index_type, index_type, index_type, index_type, index_type, index_type);
 void grman_rescale(GraphicsManager *self, CellPixelSize fg);
 void grman_remove_cell_images(GraphicsManager *self, int32_t top, int32_t bottom);

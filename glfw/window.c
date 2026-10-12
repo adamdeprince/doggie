@@ -308,6 +308,7 @@ glfwDefaultWindowHints(void) {
     _glfw.hints.window.ns.retina = true;
     // use the default colorspace assigned by the system
     _glfw.hints.window.ns.color_space = 0;
+    _glfw.hints.window.ns.hdr = false;
 }
 
 GLFWAPI void
@@ -340,6 +341,7 @@ glfwWindowHint(int hint, int value) {
         case GLFW_VISIBLE: _glfw.hints.window.visible = value ? true : false; return;
         case GLFW_COCOA_RETINA_FRAMEBUFFER: _glfw.hints.window.ns.retina = value ? true : false; return;
         case GLFW_COCOA_COLOR_SPACE: _glfw.hints.window.ns.color_space = value; return;
+        case GLFW_COCOA_HDR: _glfw.hints.window.ns.hdr = value ? true : false; return;
         case GLFW_BLUR_RADIUS: _glfw.hints.window.blur_radius = value; return;
         case GLFW_COCOA_GRAPHICS_SWITCHING: _glfw.hints.context.nsgl.offline = value ? true : false; return;
         case GLFW_SCALE_TO_MONITOR: _glfw.hints.window.scaleToMonitor = value ? true : false; return;
@@ -828,6 +830,24 @@ glfwSetWindowBlur(GLFWwindow *handle, int value) {
 
     _GLFW_REQUIRE_INIT_OR_RETURN(0);
     return _glfwPlatformSetWindowBlur(window, value);
+}
+
+GLFWAPI float
+glfwGetWindowHDRHeadroom(GLFWwindow *handle) {
+    _GLFWwindow *window = (_GLFWwindow *)handle;
+    assert(window != NULL);
+
+    _GLFW_REQUIRE_INIT_OR_RETURN(1.f);
+    return _glfwPlatformGetWindowHDRHeadroom(window);
+}
+
+GLFWAPI void
+glfwSetWindowHDRActive(GLFWwindow *handle, bool active) {
+    _GLFWwindow *window = (_GLFWwindow *)handle;
+    assert(window != NULL);
+
+    _GLFW_REQUIRE_INIT();
+    _glfwPlatformSetWindowHDRActive(window, active);
 }
 
 

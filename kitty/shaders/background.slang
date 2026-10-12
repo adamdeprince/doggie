@@ -34,7 +34,7 @@ public struct CellRenderData {
 
     public uint columns, lines, sprites_xnum, sprites_ynum, cursor_shape, cell_width, cell_height;
     public uint cursor_x1, cursor_x2, cursor_y1, cursor_y2;
-    public float cursor_opacity, inactive_text_alpha, fg_override_threshold, row_offset, dim_opacity, blink_opacity;
+    public float cursor_opacity, inactive_text_alpha, fg_override_threshold, row_offset, dim_opacity, blink_opacity, hdr_headroom;
 
     // must have unique entries with 0 being default_bg and unset being UINT32_MAX
     public uint bg_colors0, bg_colors1, bg_colors2, bg_colors3, bg_colors4, bg_colors5, bg_colors6, bg_colors7;
@@ -254,14 +254,19 @@ compute_background(uint3 colors, uint2 sprite_idx, uint is_selected, uint instan
     int bg_index = 1 - fg_index;
     int mark = int(text_attrs >> MARK_SHIFT) & MARK_MASK;
     uint has_mark = uint(step(1, float(mark)));
+    // HDR gain in quarter steps above SDR white, follows the color under reverse video
+    uint2 hdr = uint2((text_attrs >> HDR_FG_SHIFT) & HDR_MASK, (text_attrs >> HDR_BG_SHIFT) & HDR_MASK);
+    float fg_gain = min(1.f + 0.25f * float(hdr[fg_index]), crd.hdr_headroom);
+    float bg_gain = min(1.f + 0.25f * float(hdr[bg_index]), crd.hdr_headroom);
     uint bg_as_uint = resolve_color(colors[bg_index], default_colors[bg_index]);
     bg_as_uint = has_mark * color_table[NUM_COLORS + mark - 1] + (BIT_MASK - has_mark) * bg_as_uint;
     float cell_has_default_bg = 1.f - step(1.f, abs(float(bg_as_uint - crd.bg_colors0))); // 1 if has default bg else 0
-    float3 bg = color_to_vec(bg_as_uint);
+    cell_has_default_bg *= 1.f - step(1.01f, bg_gain);
+    float3 bg = color_to_vec(bg_as_uint) * bg_gain;
     float3 cell_bg = bg; // preserve original bg for the selection foreground color
     uint fg_as_uint = resolve_color(colors[fg_index], default_colors[fg_index]);
     fg_as_uint = has_mark * color_table[NUM_COLORS + MARK_MASK + mark] + (1u - has_mark) * fg_as_uint;
-    float3 foreground = color_to_vec(fg_as_uint);
+    float3 foreground = color_to_vec(fg_as_uint) * fg_gain;
     // }}}
 
     // Cell position {{{

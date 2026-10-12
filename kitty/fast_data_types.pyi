@@ -302,6 +302,9 @@ GRAPHICS_PREMULT_PROGRAM: int
 MARK: int
 MARK_MASK: int
 DECORATION_MASK: int
+HDR_FG: int
+HDR_BG: int
+HDR_MASK: int
 FILE_TRANSFER_CODE: int
 ESC_CSI: int
 ESC_OSC: int
@@ -881,6 +884,10 @@ def change_background_opacity(os_window_id: int, opacity: float) -> bool:
     pass
 
 def background_opacity_of(os_window_id: int) -> Optional[float]:
+    pass
+
+
+def hdr_headroom_of(os_window_id: int) -> Optional[float]:
     pass
 
 def read_command_response(fd: int, timeout: float, list: List[bytes]) -> None:

@@ -3743,3 +3743,11 @@ _glfwPlatformStartDrag(_GLFWwindow *window, const GLFWimage *thumbnail) {
     return 0;
 }
 // }}}
+
+float
+_glfwPlatformGetWindowHDRHeadroom(_GLFWwindow *window UNUSED) {
+    return 1.f;
+}
+
+void
+_glfwPlatformSetWindowHDRActive(_GLFWwindow *window UNUSED, bool active UNUSED) {}

@@ -940,6 +940,8 @@ class TestParser(BaseTest):
         pb('\033[58;2;1;2;3m', ('select_graphic_rendition', '58:2:1:2:3'))
         pb('\033[38;2;1;2;3m', ('select_graphic_rendition', '38:2:1:2:3'))
         pb('\033[1001:2:1:2:3m', ('select_graphic_rendition', '1001:2:1:2:3'))
+        pb('\033[56:200;57m', ('select_graphic_rendition', '56:200'), ('select_graphic_rendition', '57'))
+        self.ae((s.cursor.hdr_fg, s.cursor.hdr_bg), (4, 0))
         pb(
             '\033[38:2:1:2:3;48:5:9;58;5;7m',
             ('select_graphic_rendition', '38:2:1:2:3'),
@@ -1156,7 +1158,7 @@ class TestParser(BaseTest):
             for f in (
                 'format more id data_sz data_offset width height x_offset y_offset data_height data_width cursor_movement'
                 ' num_cells num_lines cell_x_offset cell_y_offset z_index placement_id image_number quiet unicode_placement'
-                ' parent_id parent_placement_id usage_hints offset_from_parent_x offset_from_parent_y'
+                ' parent_id parent_placement_id usage_hints offset_from_parent_x offset_from_parent_y tone_map'
             ).split():
                 k.setdefault(f, 0)
             p = k.pop('payload', '')

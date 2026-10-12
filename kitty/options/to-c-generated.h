@@ -4,6 +4,7 @@
 #include "to-c.h"
 
 
+
 static void
 convert_from_python_font_size(PyObject *val, Options *opts) {
     opts->font_size = PyFloat_AsDouble(val);
@@ -131,6 +132,19 @@ convert_from_opts_text_fg_override_threshold(PyObject *py_opts, Options *opts) {
     PyObject *ret = PyObject_GetAttrString(py_opts, "text_fg_override_threshold");
     if (ret == NULL) return;
     convert_from_python_text_fg_override_threshold(ret, opts);
+    Py_DECREF(ret);
+}
+
+static void
+convert_from_python_cursor_brightness(PyObject *val, Options *opts) {
+    opts->cursor_brightness = PyFloat_AsFloat(val);
+}
+
+static void
+convert_from_opts_cursor_brightness(PyObject *py_opts, Options *opts) {
+    PyObject *ret = PyObject_GetAttrString(py_opts, "cursor_brightness");
+    if (ret == NULL) return;
+    convert_from_python_cursor_brightness(ret, opts);
     Py_DECREF(ret);
 }
 
@@ -1331,6 +1345,32 @@ convert_from_opts_dim_opacity(PyObject *py_opts, Options *opts) {
 }
 
 static void
+convert_from_python_hdr(PyObject *val, Options *opts) {
+    opts->hdr = hdr(val);
+}
+
+static void
+convert_from_opts_hdr(PyObject *py_opts, Options *opts) {
+    PyObject *ret = PyObject_GetAttrString(py_opts, "hdr");
+    if (ret == NULL) return;
+    convert_from_python_hdr(ret, opts);
+    Py_DECREF(ret);
+}
+
+static void
+convert_from_python_hdr_max_headroom(PyObject *val, Options *opts) {
+    opts->hdr_max_headroom = PyFloat_AsFloat(val);
+}
+
+static void
+convert_from_opts_hdr_max_headroom(PyObject *py_opts, Options *opts) {
+    PyObject *ret = PyObject_GetAttrString(py_opts, "hdr_max_headroom");
+    if (ret == NULL) return;
+    convert_from_python_hdr_max_headroom(ret, opts);
+    Py_DECREF(ret);
+}
+
+static void
 convert_from_python_close_on_child_death(PyObject *val, Options *opts) {
     opts->close_on_child_death = PyObject_IsTrue(val);
 }
@@ -1599,6 +1639,8 @@ convert_opts_from_python_opts(PyObject *py_opts, Options *opts) {
     if (PyErr_Occurred()) return false;
     convert_from_opts_text_fg_override_threshold(py_opts, opts);
     if (PyErr_Occurred()) return false;
+    convert_from_opts_cursor_brightness(py_opts, opts);
+    if (PyErr_Occurred()) return false;
     convert_from_opts_cursor_shape(py_opts, opts);
     if (PyErr_Occurred()) return false;
     convert_from_opts_cursor_shape_unfocused(py_opts, opts);
@@ -1782,6 +1824,10 @@ convert_opts_from_python_opts(PyObject *py_opts, Options *opts) {
     convert_from_opts_background_tint_gaps(py_opts, opts);
     if (PyErr_Occurred()) return false;
     convert_from_opts_dim_opacity(py_opts, opts);
+    if (PyErr_Occurred()) return false;
+    convert_from_opts_hdr(py_opts, opts);
+    if (PyErr_Occurred()) return false;
+    convert_from_opts_hdr_max_headroom(py_opts, opts);
     if (PyErr_Occurred()) return false;
     convert_from_opts_close_on_child_death(py_opts, opts);
     if (PyErr_Occurred()) return false;
