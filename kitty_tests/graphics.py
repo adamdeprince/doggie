@@ -1890,6 +1890,7 @@ class TestGraphics(BaseTest):
         self.ae(cmd('p id=5 d=M0,0L1,1Z\nq id=6 whatever=1\n', a='e').code, 'OK')
         self.ae(g.image_for_client_id(1)['vector_elements'], 1)
         self.ae(cmd('p id=1 d=M0,0', a='T', f=200, s=0, v=1, i=3).code, 'EINVAL')
+        self.ae(cmd('p id=1 d=M0,0L1,1Z5', a='T', f=200, s=1, v=1, i=3).code, 'EINVAL')  # a number after Z
         self.ae(cmd('p id=1 d=M0,0', a='e', i=2).code, 'ENOENT')
 
         # frames and composition are refused, edits of raster images too

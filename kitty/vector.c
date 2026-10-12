@@ -773,7 +773,7 @@ parse_path(const char *s, const char *end, Path *path) {
             continue;
         }
         if (isalpha((unsigned char)*s)) cmd = *s++;
-        else if (!cmd) FAIL("Path data must start with a command");
+        else if (!cmd) FAIL("Number without a path command");
         bool rel = islower((unsigned char)cmd);
         double v[6];
         switch (toupper((unsigned char)cmd)) {
@@ -836,6 +836,7 @@ parse_path(const char *s, const char *end, Path *path) {
             case 'Z':
                 cx = sx, cy = sy;
                 if (!path_add(path, PC_CLOSE, NULL, 0)) FAIL("Out of memory");
+                cmd = 0;  // a number after a closepath would repeat it forever
                 break;
             default: FAIL("Unknown path command");
         }
