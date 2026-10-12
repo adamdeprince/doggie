@@ -109,7 +109,7 @@ case tone_map: value_state = UINT; break;
 
             case action: {
                 g.action = parser_buf[pos++];
-                if (g.action != 'T' && g.action != 'a' && g.action != 'c' && g.action != 'd' && g.action != 'f' && g.action != 'p' && g.action != 'q' && g.action != 't') {
+                if (g.action != 'T' && g.action != 'a' && g.action != 'c' && g.action != 'd' && g.action != 'e' && g.action != 'f' && g.action != 'p' && g.action != 'q' && g.action != 't') {
                     REPORT_ERROR("Malformed GraphicsCommand control block, unknown flag value for action: 0x%x", g.action);
                     return;
                 };

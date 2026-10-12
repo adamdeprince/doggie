@@ -282,7 +282,9 @@ PNG. This is specified using the ``f`` key in the control data. ``f=32`` (which 
 default) indicates 32-bit RGBA data and ``f=24`` indicates 24-bit RGB data and ``f=100``
 indicates PNG data. The PNG format is supported both for convenience, and as a compact way
 of transmitting paletted images. Terminals may additionally support ``f=64``, 64-bit
-floating point RGBA data for HDR images, see the :doc:`hdr-protocol`.
+floating point RGBA data for HDR images, see the :doc:`hdr-protocol`, and
+``f=200``, which is not pixels at all but a scene of paths that the terminal
+rasterizes itself, see `Vector images`_.
 
 RGB and RGBA data
 ~~~~~~~~~~~~~~~~~~~
@@ -310,6 +312,17 @@ The PNG format is specified using the ``f=100`` key. The width and height of
 the image will be read from the PNG data itself. Note that if you use both PNG and
 compression, then you must provide the ``S`` key with the size of the PNG data.
 
+
+Vector images
+~~~~~~~~~~~~~~~~~
+
+With ``f=200`` the data is text describing paths, glyph outlines, pen strokes,
+raster images and gradients, which the terminal keeps and rasterizes itself at
+whatever size the image is shown at. The image is placed, scrolled, deleted and
+queried like any other, and is changed afterwards with the ``a=e`` action,
+which applies a patch to it. Animation frames and composition are not
+supported for such images. The records, the editing action and how a relay
+holds such images are specified in :doc:`vector-protocol`.
 
 Compression
 ~~~~~~~~~~~~~
@@ -1069,17 +1082,18 @@ take, and the default value they take when missing. All integers are 32-bit.
 Key      Value                 Default    Description
 =======  ====================  =========  =================
 ``a``    Single character.     ``t``      The overall action this graphics command is performing.
-         ``(a, c, d, f,                   ``t`` - transmit data, ``T`` - transmit data and display image,
+         ``(a, c, d, e, f,                ``t`` - transmit data, ``T`` - transmit data and display image,
          p, q, t, T)``                    ``q`` - query terminal, ``p`` - put (display) previous transmitted image,
                                           ``d`` - delete image, ``f`` - transmit data for animation frames,
-                                          ``a`` - control animation, ``c`` - compose animation frames
+                                          ``a`` - control animation, ``c`` - compose animation frames,
+                                          ``e`` - edit a vector image
 
 ``q``    ``0, 1, 2``           ``0``      Suppress responses from the terminal to this graphics command.
 
 **Keys for image transmission**
 -----------------------------------------------------------
 ``f``    Positive integer.     ``32``     The format in which the image data is sent.
-         ``(24, 32, 100)``.
+         ``(24, 32, 100, 200)``.
 ``t``    Single character.     ``d``      The transmission medium used.
          ``(d, f, t, s)``.
 ``s``    Positive integer.     ``0``      The width of the image being sent.

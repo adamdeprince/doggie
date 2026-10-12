@@ -1883,6 +1883,79 @@ class TestGraphics(BaseTest):
         self.assertIsNone(li(payload='8' * 12, m=1, q=2))
         self.assertIsNone(parse_full_response(send_command(s, 'a=f,m=0')))
 
+    def test_vector_images(self):
+        s = self.create_screen()
+        g = s.grman
+
+        def cmd(payload, **kw):
+            kw.setdefault('i', 1)
+            return parse_full_response(send_command(s, ','.join(f'{k}={v}' for k, v in kw.items()), payload))
+
+        def pixel(img, x, y):
+            o = (y * img['width'] + x) * 4
+            return tuple(img['data'][o:o + 4])
+
+        # probing with a query answers OK, and the image is not kept
+        self.ae(cmd('p id=1 d=M0,0L1,0L1,1Z', a='q', f=200, s=1, v=1).code, 'OK')
+        self.ae(g.image_count, 0)
+        self.ae(cmd('p id=1 d=M0,0L1,0L1,1Z', a='q', f=200, s=1, v=1, o='z').code, 'EINVAL')
+
+        # a filled square and a stroked line, rasterized at the intrinsic size
+        doc = 'p id=1 d=M2,2L6.5,2L6.5,6L2,6Z fill=#ff0000\np id=2 d=M0,9L10,9 stroke=#0000ff w=2 fill=none\n'
+        res = cmd(doc, a='T', f=200, s=10, v=10)
+        self.ae((res.code, res.image_id), ('OK', 1))
+        img = g.image_for_client_id(1)
+        self.ae((img['width'], img['height'], img['vector_elements']), (10, 10, 2))
+        self.ae(len(img['data']), 10 * 10 * 4)
+        self.ae(pixel(img, 3, 3), (255, 0, 0, 255))
+        self.ae(pixel(img, 0, 0), (0, 0, 0, 0))
+        self.ae(pixel(img, 5, 9), (0, 0, 255, 255))
+        self.ae(pixel(img, 5, 7), (0, 0, 0, 0))
+        self.ae(pixel(img, 5, 8), (0, 0, 255, 255))
+        # an edge through the middle of a pixel gives half coverage
+        self.ae(pixel(img, 6, 3), (255, 0, 0, 128))
+
+        # a patch moves the square with a group transform, chunked and compressed
+        self.ae(cmd('g id=10 t=1,0,0,1,-2,-2\n', a='e').code, 'OK')
+        self.assertIsNone(cmd('p id=1 g=10 d=M2,2L6,2', a='e', m=1))
+        self.ae(cmd('L6,6L2,6Z fill=#00ff00\n', m=0).code, 'OK')
+        img = g.image_for_client_id(1)
+        self.ae(img['vector_elements'], 3)
+        self.ae(pixel(img, 1, 1), (0, 255, 0, 255))
+        self.ae(pixel(img, 4, 4), (0, 0, 0, 0))
+        self.ae(cmd(zlib.compress(b'g id=10 t=1,0,0,1,0,0\n'), a='e', o='z').code, 'OK')
+        self.ae(pixel(g.image_for_client_id(1), 3, 3), (0, 255, 0, 255))
+
+        # deleting a group takes its subtree, deleting all empties the document
+        self.ae(cmd('x g=10\n', a='e').code, 'OK')
+        img = g.image_for_client_id(1)
+        self.ae(img['vector_elements'], 1)
+        self.ae(pixel(img, 3, 3), (0, 0, 0, 0))
+        self.ae(cmd('x all', a='e').code, 'OK')
+        self.ae(g.image_for_client_id(1)['vector_elements'], 0)
+
+        # bad records fail the whole command and change nothing
+        self.ae(cmd('p id=5 d=M0,0L1,1Z\np id=6', a='e').code, 'EINVAL')
+        self.ae(g.image_for_client_id(1)['vector_elements'], 0)
+        self.ae(cmd('p id=5 d=M0,0L1,1Z\nq id=6 whatever=1\n', a='e').code, 'OK')
+        self.ae(g.image_for_client_id(1)['vector_elements'], 1)
+        self.ae(cmd('p id=1 d=M0,0', a='T', f=200, s=0, v=1, i=3).code, 'EINVAL')
+        self.ae(cmd('p id=1 d=M0,0L1,1Z5', a='T', f=200, s=1, v=1, i=3).code, 'EINVAL')  # a number after Z
+        self.ae(cmd('p id=1 d=M0,0', a='e', i=2).code, 'ENOENT')
+
+        # frames and composition are refused, edits of raster images too
+        self.ae(cmd('abcd', a='f', s=1, v=1).code, 'EINVAL')
+        self.ae(cmd('', a='c', r=1, c=1).code, 'EINVAL')
+        self.ae(cmd('abcd', a='T', f=32, i=2, s=1, v=1).code, 'OK')
+        self.ae(cmd('x all', a='e', i=2).code, 'EINVAL')
+
+        # a raster image drawn through an i record, scaled by its transform
+        self.ae(cmd(b'\xff\x00\x00\x00\xff\x00' * 2, a='T', f=24, i=2, s=2, v=2).code, 'OK')
+        self.ae(cmd('i id=1 img=2 t=5,0,0,5,0,0\n', a='T', f=200, s=10, v=10).code, 'OK')
+        img = g.image_for_client_id(1)
+        self.ae(pixel(img, 2, 2), (255, 0, 0, 255))
+        self.ae(pixel(img, 7, 7), (0, 255, 0, 255))
+
     def test_graphics_quota_enforcement(self):
         s = self.create_screen()
         g = s.grman
