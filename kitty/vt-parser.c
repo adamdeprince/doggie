@@ -594,6 +594,10 @@ dispatch_osc(PS *self, uint8_t *buf, size_t limit, bool is_extended_osc) {
                 screen_latency(self->screen, (const char *)buf + i + 8, limit - i - 8);
                 break;
             }
+            if (limit - i > 6 && memcmp(buf + i, "frame;", 6) == 0) {
+                screen_frame_feedback(self->screen, (const char *)buf + i + 6, limit - i - 6);
+                break;
+            }
             /* fallthrough */
         case 9:
         case 99:
@@ -1621,6 +1625,7 @@ run_worker(void *p, ParseData *pd, bool flush) {
                     self->write.pending = 0;
                 } while (self->read.pos < self->read.sz);
                 self->new_input_at = 0;
+                screen->frame_feedback.pending = screen->frame_feedback.on;
                 if (self->read.consumed) {
                     pd->write_space_created = self->read.sz >= BUF_SZ;
                     self->read.pos -= MIN(self->read.pos, self->read.consumed);

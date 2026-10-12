@@ -737,6 +737,7 @@ void run_with_activation_token_in_os_window(OSWindow *w, PyObject *callback);
 void set_os_window_title(OSWindow *w, const char *title);
 OSWindow *os_window_for_kitty_window(id_type);
 void os_window_display_info(OSWindow *w, DisplayInfo *d);
+unsigned os_window_refresh_period_us(OSWindow *w);
 OSWindow *os_window_for_id(id_type);
 OSWindow *add_os_window(void);
 OSWindow *current_os_window(void);

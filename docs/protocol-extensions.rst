@@ -34,6 +34,7 @@ please do so by opening issues in the `GitHub bug tracker
    capabilities-protocol
    display-protocol
    latency-protocol
+   frame-protocol
    dnd-protocol
    multiple-cursors-protocol
    file-transfer-protocol
