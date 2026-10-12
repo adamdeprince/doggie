@@ -3144,7 +3144,7 @@ _glfwPlatformGetNativeKeyForKey(uint32_t key) {
 }
 
 int
-_glfwPlatformCreateCursor(_GLFWcursor *cursor, const GLFWimage *image, int xhot, int yhot, int count UNUSED) {
+_glfwPlatformCreateCursor(_GLFWcursor *cursor, const GLFWimage *image, int xhot, int yhot, int count UNUSED, float scale UNUSED) {
     cursor->x11.handle = _glfwCreateCursorX11(image, xhot, yhot);
     if (!cursor->x11.handle) return false;
 

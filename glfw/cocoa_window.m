@@ -3651,11 +3651,12 @@ _glfwPlatformGetNativeKeyForKey(uint32_t glfw_key) {
 }
 
 int
-_glfwPlatformCreateCursor(_GLFWcursor *cursor, const GLFWimage *image, int xhot, int yhot, int count) {
+_glfwPlatformCreateCursor(_GLFWcursor *cursor, const GLFWimage *image, int xhot, int yhot, int count, float scale) {
     NSImage *native;
     NSBitmapImageRep *rep;
 
-    native = [[NSImage alloc] initWithSize:NSMakeSize(image->width, image->height)];
+    // the size is in points, so a scale above one shows the image at one pixel per device pixel
+    native = [[NSImage alloc] initWithSize:NSMakeSize(image->width / scale, image->height / scale)];
     if (native == nil) return false;
 
     for (int i = 0; i < count; i++) {
@@ -3681,7 +3682,7 @@ _glfwPlatformCreateCursor(_GLFWcursor *cursor, const GLFWimage *image, int xhot,
         [rep release];
     }
 
-    cursor->ns.object = [[NSCursor alloc] initWithImage:native hotSpot:NSMakePoint(xhot, yhot)];
+    cursor->ns.object = [[NSCursor alloc] initWithImage:native hotSpot:NSMakePoint(xhot / scale, yhot / scale)];
 
     [native release];
     if (cursor->ns.object == nil) return false;

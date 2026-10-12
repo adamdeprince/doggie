@@ -90,6 +90,11 @@ typedef struct {
     SelectionExtendMode extend_mode;
 } Selections;
 
+typedef struct {
+    uint8_t stack[16], count;
+    PointerImage images[16]; // for IMAGE_POINTER entries
+} PointerShapeStack;
+
 #define SAVEPOINTS_SZ 256
 
 typedef struct CharsetState {
@@ -233,9 +238,7 @@ typedef struct {
         index_type x, y;
         bool has_detected_url;
     } current_hyperlink_under_mouse;
-    struct {
-        uint8_t stack[16], count;
-    } main_pointer_shape_stack, alternate_pointer_shape_stack;
+    PointerShapeStack main_pointer_shape_stack, alternate_pointer_shape_stack;
     Parser *vt_parser;
     struct {
         monotonic_t expires_at;
@@ -326,7 +329,8 @@ void screen_cursor_forward(Screen *self, unsigned int count /*=1*/);
 void screen_cursor_down1(Screen *self, unsigned int count /*=1*/);
 void screen_cursor_up1(Screen *self, unsigned int count /*=1*/);
 void screen_cursor_to_line(Screen *screen, unsigned int line);
-MouseShape screen_pointer_shape(Screen *self);
+MouseShape screen_pointer_shape(Screen *self, PointerImage *image);
+bool parse_pointer_image(const char *name, PointerImage *ans);
 void screen_insert_lines(Screen *self, unsigned int count /*=1*/);
 void screen_delete_lines(Screen *self, unsigned int count /*=1*/);
 void screen_repeat_character(Screen *self, unsigned int count);

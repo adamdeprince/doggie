@@ -2288,6 +2288,33 @@ class TestScreen(BaseTest):
         t('=left_ptr', 'default')
         t('=fleur', 'move')
 
+        # image shapes, see docs/pointer-shapes.rst
+        from .graphics import send_command
+        self.ae(send('?image:1,image:7:3:4,image:0,image:1:,image:x,image:1:2:3:4,image:1:70000'), '1,1,0,0,0,0,0')
+        s.reset()
+        t('=image:7:3:4', '0')  # ignored while the image does not exist
+        send_command(s, 'a=T,f=24,i=7,s=1,v=1,q=2', b'abc')
+        self.ae(send('?__current__'), 'image:7:3:4')
+        send_command(s, 'a=d,d=I,i=7,q=2')
+        self.ae(send('?__current__'), '0')
+        t('=help', 'help')
+        t('>image:7', 'help')
+        send_command(s, 'a=T,f=24,i=7,s=1,v=1,q=2', b'abc')
+        self.ae(send('?__current__'), 'image:7:0:0')
+        t('>image:8:1', 'image:7:0:0')
+        t('<', 'image:7:0:0')
+        send_command(s, 'a=d,d=A,q=2')
+        self.ae(send('?__current__'), 'help')
+        t('<', 'help')  # the entry stays on the stack, skipped
+        t('<', '0')
+        send_command(s, 'a=T,f=24,i=7,s=1,v=1,q=2', b'abc')
+        t('=help', 'help')
+        for i in range(16):  # the stack holds 15, help then image 0 are evicted with their image slots
+            t(f'>image:7:{i}', f'image:7:{i}:0')
+        for i in reversed(range(1, 15)):
+            t('<', f'image:7:{i}:0')
+        t('<', '0')
+
     def test_color_profile(self):
         from kitty.fast_data_types import patch_color_profiles
 

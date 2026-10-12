@@ -2084,7 +2084,8 @@ _glfwPlatformGetNativeKeyForKey(uint32_t key) {
 }
 
 int
-_glfwPlatformCreateCursor(_GLFWcursor *cursor, const GLFWimage *image, int xhot, int yhot, int count UNUSED) {
+_glfwPlatformCreateCursor(_GLFWcursor *cursor, const GLFWimage *image, int xhot, int yhot, int count UNUSED, float scale UNUSED) {
+    // the buffer is attached at the window's scale by setCursorImage(), which also divides the hotspot by it
     cursor->wl.buffer = createShmBuffer(image, false, true);
     if (!cursor->wl.buffer) return false;
 

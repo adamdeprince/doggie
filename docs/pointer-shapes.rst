@@ -111,6 +111,47 @@ This feature is independent of mouse reporting. The changed pointer shapes apply
 regardless of whether the terminal program has enabled mouse reporting or not.
 
 
+Image shapes
+-------------------
+
+.. versionadded:: 0.50.0
+
+A program can use an image it has sent with the :doc:`graphics-protocol` as the
+pointer, for example a drawing program showing the size and color of the
+current brush under the pen. Anywhere a shape name is accepted, the name::
+
+    image:<image id>:<hotspot x>:<hotspot y>
+
+refers to the image transmitted with that ``i=`` id in the same window. The
+hotspot is the pixel of the image that sits under the pointer position, with
+the origin at the top left corner; one or both coordinates may be left out and
+default to zero. For example, a 2 pixel wide outline of a circle with a 48
+pixel diameter, sent as image ``9``, centered on the pointer::
+
+    <OSC> 22 ; image:9:24:24 <ESC>\
+
+The image is shown with one image pixel per device pixel, exactly as the
+graphics protocol displays an image placed without scaling, so a brush preview
+drawn at the size the brush has on the canvas lines up with it. The window and
+cell sizes reported by ``CSI 14 t`` and ``CSI 16 t`` are in the same pixels.
+The current frame of an animated image is used, changes to the frames of the
+image are reflected on the pointer.
+
+The name is only a reference to the image. If no image with that id exists
+when the shape is set, or the image is deleted later, the entry is ignored and
+the pointer falls back to the shape below it on the stack, or to the default
+shape, until an image with that id is transmitted again. Deleting the image
+therefore does not pop the stack. The reply to ``?__current__`` is the image
+name, with both hotspot coordinates, when an image shape is in effect. The
+query form ``?image:1:2:3`` answers ``1`` when the terminal supports image
+shapes, regardless of whether image ``1`` exists.
+
+An image larger than the platform allows for a pointer, which happens on X11
+for big images, is ignored as if it did not exist. A multiplexer or a relay
+such as mosh passes the name through unchanged, the terminal at the far end
+resolves the id among the images of that window.
+
+
 .. _pointer_shape_names:
 
 Pointer shape names

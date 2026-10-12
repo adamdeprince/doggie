@@ -691,7 +691,7 @@ void _glfwPlatformSetCursorPos(_GLFWwindow *window, double xpos, double ypos);
 void _glfwPlatformSetCursorMode(_GLFWwindow *window, int mode);
 void _glfwPlatformSetRawMouseMotion(_GLFWwindow *window, bool enabled);
 bool _glfwPlatformRawMouseMotionSupported(void);
-int _glfwPlatformCreateCursor(_GLFWcursor *cursor, const GLFWimage *image, int xhot, int yhot, int count);
+int _glfwPlatformCreateCursor(_GLFWcursor *cursor, const GLFWimage *image, int xhot, int yhot, int count, float scale);
 int _glfwPlatformCreateStandardCursor(_GLFWcursor *cursor, GLFWCursorShape shape);
 void _glfwPlatformDestroyCursor(_GLFWcursor *cursor);
 void _glfwPlatformSetCursor(_GLFWwindow *window, _GLFWcursor *cursor);

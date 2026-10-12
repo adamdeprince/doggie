@@ -2481,6 +2481,42 @@ cfd_free(CoalescedFrameData *p) {
     p->buf = NULL;
 }
 
+// Whether an image with the client id exists; *image and *frame change whenever its pixels do.
+bool
+grman_image_version(GraphicsManager *self, uint32_t client_id, id_type *image, uint32_t *frame) {
+    Image *img = client_id ? img_by_client_id(self, client_id) : NULL;
+    if (!img) return false;
+    Frame *f = current_frame(img);
+    *image = img->internal_id;
+    *frame = f ? f->id : 0;
+    return true;
+}
+
+// The current frame of the image with the client id as RGBA, or NULL. Used for the mouse pointer.
+uint8_t *
+grman_image_rgba(GraphicsManager *self, uint32_t client_id, uint32_t *width, uint32_t *height) {
+    Image *img = client_id ? img_by_client_id(self, client_id) : NULL;
+    Frame *f = img && img->root_frame_data_loaded ? current_frame(img) : NULL;
+    if (!f) return NULL;
+    RAII_CoalescedFrameData(cfd, get_coalesced_frame_data(self, img, f));
+    if (!cfd.buf) {
+        if (PyErr_Occurred()) PyErr_Print();
+        return NULL;
+    }
+    *width = img->width;
+    *height = img->height;
+    uint8_t *ans = cfd.buf;
+    if (cfd.is_opaque) {
+        const size_t num = (size_t)img->width * img->height;
+        if (!(ans = malloc(num * 4))) return NULL;
+        for (size_t i = 0; i < num; i++) {
+            memcpy(ans + 4 * i, cfd.buf + 3 * i, 3);
+            ans[4 * i + 3] = 255;
+        }
+    } else cfd.buf = NULL;
+    return ans;
+}
+
 static void
 handle_compose_command(GraphicsManager *self, bool *is_dirty, const GraphicsCommand *g, Image *img) {
     if (img->vector) {

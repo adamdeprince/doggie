@@ -424,7 +424,7 @@ void
 _glfwPlatformSetCursorMode(_GLFWwindow *window UNUSED, int mode UNUSED) {}
 
 int
-_glfwPlatformCreateCursor(_GLFWcursor *cursor UNUSED, const GLFWimage *image UNUSED, int xhot UNUSED, int yhot UNUSED, int count UNUSED) {
+_glfwPlatformCreateCursor(_GLFWcursor *cursor UNUSED, const GLFWimage *image UNUSED, int xhot UNUSED, int yhot UNUSED, int count UNUSED, float scale UNUSED) {
     return true;
 }
 
