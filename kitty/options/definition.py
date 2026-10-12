@@ -3422,6 +3422,28 @@ Sub-menus can be created by adding more levels separated by the :code:`::` chara
 """,
 )
 
+opt(
+    'display_info',
+    '',
+    option_type='str',
+    ctype='!display_info',
+    long_text="""
+Properties of the display that the operating system cannot report, used to
+answer programs that ask with the :doc:`display protocol </display-protocol>`.
+A space separated list of :code:`key=value` pairs that override what kitty
+detects, for example on an e-ink display::
+
+    display_info kind=eink color=gray bits=4
+
+The keys are :code:`kind` (:code:`lcd`, :code:`oled`, :code:`eink` or
+:code:`unknown`), :code:`color` (:code:`rgb`, :code:`gray` or :code:`mono`),
+:code:`bits` (bits per color channel), :code:`gamut` (:code:`srgb`,
+:code:`p3`, :code:`rec2020` or :code:`unknown`), :code:`headroom`,
+:code:`scale`, :code:`period` (refresh period in microseconds) and
+:code:`ppi`.
+""",
+)
+
 
 egr()  # }}}
 

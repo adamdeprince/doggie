@@ -989,6 +989,9 @@ class Parser:
     def disable_ligatures(self, val: str, ans: dict[str, typing.Any]) -> None:
         ans['disable_ligatures'] = disable_ligatures(val)
 
+    def display_info(self, val: str, ans: dict[str, typing.Any]) -> None:
+        ans['display_info'] = str(val)
+
     def drag_threshold(self, val: str, ans: dict[str, typing.Any]) -> None:
         ans['drag_threshold'] = positive_int(val)
 

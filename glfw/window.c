@@ -627,6 +627,16 @@ glfwGetWindowContentScale(GLFWwindow *handle, float *xscale, float *yscale) {
     _glfwPlatformGetWindowContentScale(window, xscale, yscale);
 }
 
+GLFWAPI void
+glfwGetWindowDisplayInfo(GLFWwindow *handle, GLFWdisplayinfo *info) {
+    _GLFWwindow *window = (_GLFWwindow *)handle;
+    assert(window != NULL);
+
+    memset(info, 0, sizeof(*info));
+    _GLFW_REQUIRE_INIT();
+    _glfwPlatformGetWindowDisplayInfo(window, info);
+}
+
 GLFWAPI monotonic_t
 glfwGetDoubleClickInterval(GLFWwindow *handle) {
     _GLFWwindow *window = (_GLFWwindow *)handle;

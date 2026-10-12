@@ -586,6 +586,10 @@ dispatch_osc(PS *self, uint8_t *buf, size_t limit, bool is_extended_osc) {
                 screen_caps_query(self->screen, (const char *)buf + i + 5, limit - i - 5);
                 break;
             }
+            if (limit - i > 8 && memcmp(buf + i, "display;", 8) == 0) {
+                screen_display_protocol(self->screen, (const char *)buf + i + 8, limit - i - 8);
+                break;
+            }
             /* fallthrough */
         case 9:
         case 99:

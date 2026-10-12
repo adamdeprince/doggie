@@ -3188,6 +3188,38 @@ should_os_window_be_rendered(OSWindow *w) {
     return is_os_window_potentially_visible(w) && glfwAreSwapsAllowed(w->handle);
 }
 
+static const char *display_kinds[] = {"unknown", "lcd", "oled", "eink"}, *display_colors[] = {"rgb", "gray", "mono"}, *display_gamuts[] = {"unknown", "srgb", "p3", "rec2020"};
+
+static const char *
+display_name(const char **names, size_t count, const char *val, const char *fallback) {
+    for (size_t i = 0; i < count; i++) if (!strcmp(names[i], val)) return names[i];
+    return fallback;
+}
+
+void
+os_window_display_info(OSWindow *w, DisplayInfo *d) {
+    // The display the window is on, see docs/display-protocol.rst
+    GLFWdisplayinfo g = {0};
+    char buf[256], *saveptr = NULL;
+    if (w && w->handle) glfwGetWindowDisplayInfo(w->handle, &g);
+    *d = (DisplayInfo){.kind = display_kinds[g.kind], .color = display_colors[g.color], .gamut = display_gamuts[g.gamut], .bits = g.bits, .period_us = g.period_us, .headroom = 1.f, .scale = g.scale, .ppi = g.ppi};
+    // Overrides for what the OS cannot tell us
+    if (!OPT(display_info) || snprintf(buf, sizeof(buf), "%s", OPT(display_info)) >= (int)sizeof(buf)) return;
+    for (char *tok = strtok_r(buf, " ", &saveptr); tok; tok = strtok_r(NULL, " ", &saveptr)) {
+        char *val = strchr(tok, '=');
+        if (!val) continue;
+        *val++ = 0;
+        if (!strcmp(tok, "kind")) d->kind = display_name(display_kinds, arraysz(display_kinds), val, d->kind);
+        else if (!strcmp(tok, "color")) d->color = display_name(display_colors, arraysz(display_colors), val, d->color);
+        else if (!strcmp(tok, "gamut")) d->gamut = display_name(display_gamuts, arraysz(display_gamuts), val, d->gamut);
+        else if (!strcmp(tok, "bits")) d->bits = atoi(val);
+        else if (!strcmp(tok, "headroom")) d->headroom = (float)atof(val);
+        else if (!strcmp(tok, "scale")) d->scale = (float)atof(val);
+        else if (!strcmp(tok, "period")) d->period_us = atoi(val);
+        else if (!strcmp(tok, "ppi")) d->ppi = (float)atof(val);
+    }
+}
+
 static PyObject *
 primary_monitor_size(PYNOARG) {
     GLFWmonitor *monitor = glfwGetPrimaryMonitor();

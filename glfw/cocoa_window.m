@@ -3088,6 +3088,27 @@ _glfwPlatformGetWindowContentScale(_GLFWwindow *window, float *xscale, float *ys
     if (yscale) *yscale = (float)(pixels.size.height / points.size.height);
 }
 
+void
+_glfwPlatformGetWindowDisplayInfo(_GLFWwindow *window, GLFWdisplayinfo *info) {
+    NSScreen *screen = [window->ns.object screen];
+    if (!screen) screen = [NSScreen mainScreen];
+    if (!screen) return;
+    const CGDirectDisplayID display = [[screen deviceDescription][@"NSScreenNumber"] unsignedIntValue];
+    info->kind = CGDisplayIsBuiltin(display) ? GLFW_DISPLAY_KIND_LCD : GLFW_DISPLAY_KIND_UNKNOWN;
+    info->color = GLFW_DISPLAY_COLOR_RGB;
+    info->bits = (int)NSBitsPerSampleFromDepth([screen depth]);
+    if ([screen canRepresentDisplayGamut:NSDisplayGamutP3]) info->gamut = GLFW_DISPLAY_GAMUT_P3;
+    else if ([screen canRepresentDisplayGamut:NSDisplayGamutSRGB]) info->gamut = GLFW_DISPLAY_GAMUT_SRGB;
+    info->scale = (float)[window->ns.object backingScaleFactor];
+    if ([screen maximumFramesPerSecond] > 0) info->period_us = (unsigned)(1000000. / [screen maximumFramesPerSecond]);
+    const CGSize mm = CGDisplayScreenSize(display);
+    CGDisplayModeRef mode = CGDisplayCopyDisplayMode(display);
+    if (mode) {
+        if (mm.width > 0) info->ppi = (float)(CGDisplayModeGetPixelWidth(mode) * 25.4 / mm.width);
+        CGDisplayModeRelease(mode);
+    }
+}
+
 monotonic_t
 _glfwPlatformGetDoubleClickInterval(_GLFWwindow *window UNUSED) {
     return s_double_to_monotonic_t([NSEvent doubleClickInterval]);

@@ -251,6 +251,11 @@ window_logo_path(PyObject *src, Options *opts) {
     STR_SETTER(default_window_logo);
 }
 
+static inline void
+display_info(PyObject *src, Options *opts) {
+    STR_SETTER(display_info);
+}
+
 #undef STR_SETTER
 
 #define parse_animation(duration, name, start, end)                                                        \
@@ -761,5 +766,6 @@ free_allocs_in_options(Options *opts) {
     F(bell_theme);
     F(macos_ns_window_layer);
     F(default_window_logo);
+    F(display_info);
 #undef F
 }

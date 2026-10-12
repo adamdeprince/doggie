@@ -1132,6 +1132,33 @@ render_os_window(OSWindow *w, monotonic_t now, bool scan_for_animated_images) {
 }
 
 static void
+poll_display_info(OSWindow *os_window, monotonic_t now) {
+    // Windows that asked for display events are told when the display changes, see docs/display-protocol.rst
+    const monotonic_t interval = ms_to_monotonic_t(250ll);
+    bool wanted = false;
+    for (unsigned t = 0; t < os_window->num_tabs && !wanted; t++) {
+        Tab *tab = os_window->tabs + t;
+        for (unsigned i = 0; i < tab->num_windows && !wanted; i++) wanted = tab->windows[i].render_data.screen && tab->windows[i].render_data.screen->display_events;
+    }
+    if (!wanted) return;
+    if (now - os_window->display_info_at < interval) {
+        set_maximum_wait(interval - (now - os_window->display_info_at));
+        return;
+    }
+    DisplayInfo d, *o = &os_window->display_info;
+    os_window_display_info(os_window, &d);
+    const bool changed = os_window->display_info_at && (d.kind != o->kind || d.color != o->color || d.gamut != o->gamut || d.bits != o->bits || d.period_us != o->period_us || d.headroom != o->headroom || d.scale != o->scale || d.ppi != o->ppi);
+    *o = d;
+    os_window->display_info_at = now;
+    set_maximum_wait(interval);
+    if (!changed) return;
+    for (unsigned t = 0; t < os_window->num_tabs; t++) {
+        Tab *tab = os_window->tabs + t;
+        for (unsigned i = 0; i < tab->num_windows; i++) if (tab->windows[i].render_data.screen) screen_display_changed(tab->windows[i].render_data.screen, &d);
+    }
+}
+
+static void
 render(monotonic_t now, bool input_read) {
     EVDBG("input_read: %d, check_for_active_animated_images: %d\n", input_read, global_state.check_for_active_animated_images);
     static monotonic_t last_render_at = MONOTONIC_T_MIN;
@@ -1155,6 +1182,7 @@ render(monotonic_t now, bool input_read) {
             // since we didn't scan the window for animations, force a rescan on next wakeup/render frame
             if (scan_for_animated_images) global_state.check_for_active_animated_images = true;
         }
+        poll_display_info(w, now);
         if (w->keep_rendering_till_swap) {
             debug_rendering("Re-rendering window %llu on the %u attempt since swap did not happen\n", w->id, w->keep_rendering_till_swap);
             set_maximum_wait(OPT(repaint_delay));

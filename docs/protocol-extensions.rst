@@ -32,6 +32,7 @@ please do so by opening issues in the `GitHub bug tracker
    hdr-protocol
    cell-alpha-protocol
    capabilities-protocol
+   display-protocol
    dnd-protocol
    multiple-cursors-protocol
    file-transfer-protocol

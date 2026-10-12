@@ -214,6 +214,7 @@ do_screen_reset(Screen *self, bool is_hard_reset) {
     self->extra_cursors.dirty = true;
     self->main_pointer_shape_stack.count = 0;
     self->alternate_pointer_shape_stack.count = 0;
+    self->display_events = false;
     if (is_hard_reset && self->linebuf == self->alt_linebuf) screen_toggle_screen_buffer(self, true, true);
     if (screen_is_overlay_active(self)) {
         deactivate_overlay_line(self);
@@ -1788,6 +1789,61 @@ write_escape_code_to_child(Screen *self, unsigned char which, const char *data) 
 static void
 send_visibility_report(Screen *self) {
     write_escape_code_to_child(self, ESC_CSI, self->visibility_state != 2 ? "?999;1n" : "?999;2n");
+}
+
+static void
+send_display_report(Screen *self, const char *op, int id, const DisplayInfo *d) {
+    char buf[256];
+    int n = snprintf(buf, sizeof(buf), "777;display;v=1:op=%s", op);
+    if (id >= 0) n += snprintf(buf + n, sizeof(buf) - n, ":id=%d:mode=%d", id, self->display_events);
+    snprintf(buf + n, sizeof(buf) - n, ":kind=%s:color=%s:bits=%d:gamut=%s:headroom=%g:scale=%g:period=%u:ppi=%g", d->kind, d->color, d->bits, d->gamut, d->headroom, d->scale, d->period_us, d->ppi);
+    write_escape_code_to_child(self, ESC_OSC, buf);
+}
+
+void
+screen_display_protocol(Screen *self, const char *data, size_t sz) {
+    char buf[128], reply[64], *saveptr = NULL;
+    const char *op = "";
+    int v = 0, mode = -1, id = -1;
+    if (sz >= sizeof(buf)) return;
+    memcpy(buf, data, sz);
+    buf[sz] = 0;
+    for (char *tok = strtok_r(buf, ":", &saveptr); tok; tok = strtok_r(NULL, ":", &saveptr)) {
+        char *val = strchr(tok, '=');
+        if (!val) return;
+        *val++ = 0;
+        if (!strcmp(tok, "v")) v = atoi(val);
+        else if (!strcmp(tok, "op")) op = val;
+        else if (!strcmp(tok, "mode")) mode = atoi(val);
+        else if (!strcmp(tok, "id")) id = atoi(val);
+    }
+    if (v != 1) return;
+    if (!strcmp(op, "query") && id >= 0) {
+        DisplayInfo d;
+        os_window_display_info(os_window_for_kitty_window(self->window_id), &d);
+        send_display_report(self, "cap", id, &d);
+    } else if (!strcmp(op, "mode")) {
+        if (mode < 0) {  // a read
+            snprintf(reply, sizeof(reply), "777;display;v=1:op=mode:mode=%d", self->display_events);
+            write_escape_code_to_child(self, ESC_OSC, reply);
+            return;
+        }
+        self->display_events = mode != 0;
+        if (self->display_events) {
+            // turning the mode on reports the current display, so a program needs no query,
+            // and later events are changes relative to this report
+            DisplayInfo d;
+            OSWindow *os_window = os_window_for_kitty_window(self->window_id);
+            os_window_display_info(os_window, &d);
+            if (os_window) os_window->display_info = d, os_window->display_info_at = monotonic();
+            send_display_report(self, "event", -1, &d);
+        }
+    }
+}
+
+void
+screen_display_changed(Screen *self, const DisplayInfo *d) {
+    if (self->display_events) send_display_report(self, "event", -1, d);
 }
 
 void

@@ -2560,6 +2560,33 @@ _glfwPlatformGetWindowContentScale(_GLFWwindow *window UNUSED, float *xscale, fl
     if (yscale) *yscale = _glfw.x11.contentScaleY;
 }
 
+void
+_glfwPlatformGetWindowDisplayInfo(_GLFWwindow *window, GLFWdisplayinfo *info) {
+    // The monitor the window overlaps most
+    int wx, wy, ww, wh, best_overlap = -1;
+    GLFWvidmode mode, best = {0};
+    _GLFWmonitor *best_monitor = NULL;
+    info->color = GLFW_DISPLAY_COLOR_RGB;
+    info->bits = 8;
+    info->scale = _glfw.x11.contentScaleX;
+    _glfwPlatformGetWindowPos(window, &wx, &wy);
+    _glfwPlatformGetWindowSize(window, &ww, &wh);
+    for (int i = 0; i < _glfw.monitorCount; i++) {
+        int mx, my;
+        if (!_glfwPlatformGetVideoMode(_glfw.monitors[i], &mode)) continue;
+        _glfwPlatformGetMonitorPos(_glfw.monitors[i], &mx, &my);
+        int overlap = MAX(0, MIN(wx + ww, mx + mode.width) - MAX(wx, mx)) * MAX(0, MIN(wy + wh, my + mode.height) - MAX(wy, my));
+        if (overlap > best_overlap) {
+            best_overlap = overlap;
+            best = mode;
+            best_monitor = _glfw.monitors[i];
+        }
+    }
+    if (!best_monitor) return;
+    if (best.refreshRate > 0) info->period_us = 1000000u / (unsigned)best.refreshRate;
+    if (best_monitor->widthMM > 0) info->ppi = best.width * 25.4f / best_monitor->widthMM;
+}
+
 monotonic_t
 _glfwPlatformGetDoubleClickInterval(_GLFWwindow *window UNUSED) {
     return ms_to_monotonic_t(500ll);
