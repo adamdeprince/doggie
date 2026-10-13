@@ -893,7 +893,7 @@ class TestScreen(BaseTest):
         s = self.create_screen()
         c = s.callbacks
         parse_bytes(s, b'\x1b]777;caps;v=1:op=query:id=7\x1b\\')
-        self.ae(c.wtcbuf, b'\x1b]777;caps;v=1:op=cap:id=7:caps=1:ext=caps.1:media=d,f,t,s:format=24,32,100\x1b\\')
+        self.ae(c.wtcbuf, b'\x1b]777;caps;v=1:op=cap:id=7:caps=3:ext=caps.1:media=d,f,t,s:format=24,32,100\x1b\\')
         c.clear()
         parse_bytes(s, b'\x1b]777;caps;v=2:op=query:id=7\x1b\\')
         parse_bytes(s, b'\x1b]777;caps;v=1:op=query\x1b\\')
@@ -901,6 +901,22 @@ class TestScreen(BaseTest):
         parse_bytes(s, b'\x1b]777;caps;garbage\x1b\\')
         self.ae(c.wtcbuf, b'')
         self.ae(str(s.line(0)), '')
+
+    def test_caps_reset(self):
+        # The request and a shell prompt both turn the extension modes off. No
+        # extension with a mode is present here, so all that can be seen is
+        # that neither answers, draws or disturbs the listing
+        s = self.create_screen()
+        c = s.callbacks
+        parse_bytes(s, b'\x1b]777;caps;v=1:op=reset\x1b\\')
+        parse_bytes(s, b'\x1b]777;caps;v=1:op=reset:id=7\x1b\\')
+        parse_bytes(s, b'\x1b]777;caps;v=2:op=reset\x1b\\')
+        parse_bytes(s, b'\x1b]133;A\x1b\\')
+        parse_bytes(s, b'\x1b]133;A;k=s\x1b\\')
+        self.ae(c.wtcbuf, b'')
+        self.ae(str(s.line(0)), '')
+        parse_bytes(s, b'\x1b]777;caps;v=1:op=query:id=8\x1b\\')
+        self.ae(c.wtcbuf, b'\x1b]777;caps;v=1:op=cap:id=8:caps=3:ext=caps.1:media=d,f,t,s:format=24,32,100\x1b\\')
 
     def test_cursor_hidden(self):
         s = self.create_screen()
