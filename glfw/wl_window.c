@@ -1803,6 +1803,12 @@ _glfwPlatformGetDoubleClickInterval(_GLFWwindow *window UNUSED) {
     return ms_to_monotonic_t(500ll);
 }
 
+unsigned
+_glfwPlatformGetPointerInputClasses(void) {
+    // Tools and pads need the compositor to have the tablet protocol. A touchscreen is reported through the core protocol
+    return (_glfw.wl.tablet_manager ? GLFW_POINTER_INPUT_TOOLS | GLFW_POINTER_INPUT_PADS : 0) | GLFW_POINTER_INPUT_TOUCHSCREEN | GLFW_POINTER_INPUT_TOUCH_SHAPE;
+}
+
 void
 _glfwPlatformGetKeyboardRepeatDelay(monotonic_t *delay, monotonic_t *interval) {
     if (delay) *delay = _glfw.wl.keyboardRepeatDelay;

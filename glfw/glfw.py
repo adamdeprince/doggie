@@ -110,6 +110,7 @@ def generate_wrappers(glfw_header: str) -> None:
     void glfwWaylandRedrawCSDWindowTitle(GLFWwindow *handle)
     bool glfwWaylandIsWindowFullyCreated(GLFWwindow *handle)
     bool glfwWaylandBeep(GLFWwindow *handle)
+    bool glfwWaylandSetTabletPadLabel(GLFWwindow *handle, uint64_t device, int control, unsigned index, const char *text)
     pid_t glfwWaylandCompositorPID(void)
     double glfwGetWaylandCurrentMonitorFractionalScale(void)
     void glfwConfigureMomentumScroller(double friction, double min_velocity, double max_velocity, unsigned timer_interval)

@@ -242,6 +242,11 @@ _glfwPlatformGetDoubleClickInterval(_GLFWwindow *window UNUSED) {
     return ms_to_monotonic_t(500ll);
 }
 
+unsigned
+_glfwPlatformGetPointerInputClasses(void) {
+    return 0;
+}
+
 void
 _glfwPlatformGetKeyboardRepeatDelay(monotonic_t *delay, monotonic_t *interval) {
     if (delay) *delay = ms_to_monotonic_t(500ll);

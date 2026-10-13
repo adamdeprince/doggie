@@ -2661,6 +2661,14 @@ _glfwPlatformGetDoubleClickInterval(_GLFWwindow *window UNUSED) {
     return ms_to_monotonic_t(500ll);
 }
 
+unsigned
+_glfwPlatformGetPointerInputClasses(void) {
+    // Both come through XInput 2, tools as devices of their own and fingers with the touch events of its version 2.2
+    if (!_glfw.x11.xi.available) return 0;
+    const bool has_touch = _glfw.x11.xi.major > 2 || (_glfw.x11.xi.major == 2 && _glfw.x11.xi.minor >= 2);
+    return GLFW_POINTER_INPUT_TOOLS | (has_touch ? GLFW_POINTER_INPUT_TOUCHSCREEN : 0);
+}
+
 void
 _glfwPlatformGetKeyboardRepeatDelay(monotonic_t *delay, monotonic_t *interval) {
     XkbDescPtr xkb = XkbAllocKeyboard();
