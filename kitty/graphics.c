@@ -28,6 +28,7 @@ PyTypeObject GraphicsManager_Type;
 #define DEFAULT_STORAGE_LIMIT 320u * (1024u * 1024u)
 #define REPORT_ERROR(...) \
     { log_error(__VA_ARGS__); }
+#define MAX_DATA_SZ (4u * 100000000u)
 #define RAII_CoalescedFrameData(name, initializer) __attribute__((cleanup(cfd_free))) CoalescedFrameData name = initializer
 
 // caching {{{
@@ -168,6 +169,8 @@ texture_id_for_img(Image *img) {
 static void
 free_image_resources(GraphicsManager *self, Image *img) {
     clear_texture_ref(&img->texture);
+    vector_doc_free(img->vector);
+    img->vector = NULL;
     if (self->disk_cache) {
         ImageAndFrame key = {.image_id = img->internal_id, .frame_id = img->root_frame.id};
         if (!remove_from_cache(self, key) && PyErr_Occurred()) PyErr_Print();
@@ -296,6 +299,7 @@ grman_pause_rendering(GraphicsManager *self, GraphicsManager *dest) {
         memset(&clone->refs_by_internal_id, 0, sizeof(clone->refs_by_internal_id));
         vt_init(&clone->refs_by_internal_id);
         clone->extra_frames = NULL;
+        clone->vector = NULL;  // the texture is shared, the document stays with the live manager
         iter_refs(img) {
             ImageRef *cr = malloc(sizeof(ImageRef));
             if (cr) {
@@ -498,6 +502,41 @@ err:
     return ok;
 }
 
+// Inflates data of unknown size, for text formats
+static bool
+inflate_zlib_unbounded(LoadData *load_data, uint8_t *buf, size_t bufsz) {
+    bool ok = false;
+    z_stream z = {.avail_in = bufsz, .next_in = (Bytef *)buf};
+    size_t cap = MAX(4 * bufsz, (size_t)4096), used = 0;
+    uint8_t *decompressed = malloc(cap);
+    if (decompressed == NULL) fatal("Out of memory allocating decompression buffer");
+    int ret;
+    if ((ret = inflateInit(&z)) != Z_OK) ABRT(ENOMEM, "Failed to initialize inflate with error: %s", zlib_strerror(ret));
+    do {
+        if (used == cap) {
+            if (cap >= MAX_DATA_SZ) ABRT(EFBIG, "Too much data");
+            cap = MIN(2 * cap, (size_t)MAX_DATA_SZ);
+            uint8_t *n = realloc(decompressed, cap);
+            if (n == NULL) fatal("Out of memory allocating decompression buffer");
+            decompressed = n;
+        }
+        z.avail_out = cap - used;
+        z.next_out = decompressed + used;
+        ret = inflate(&z, Z_NO_FLUSH);
+        used = cap - z.avail_out;
+    } while (ret == Z_OK);
+    if (ret != Z_STREAM_END) ABRT(EINVAL, "Failed to inflate image data with error: %s", zlib_strerror(ret));
+    free_load_data(load_data);
+    load_data->buf_capacity = cap;
+    load_data->buf = decompressed;
+    load_data->buf_used = used;
+    ok = true;
+err:
+    inflateEnd(&z);
+    if (!ok) free(decompressed);
+    return ok;
+}
+
 static void
 png_error_handler(png_read_data *d UNUSED, const char *code, const char *msg) {
     set_command_failed_response(code, "%s", msg);
@@ -691,8 +730,7 @@ get_free_client_id(const GraphicsManager *self) {
         return NULL;                                                    \
     }
 
-#define MAX_DATA_SZ (4u * 100000000u)
-enum FORMATS { RGB = 24, RGBA = 32, PNG = 100 };
+enum FORMATS { RGB = 24, RGBA = 32, PNG = 100, VECTOR = 200 };
 
 static bool
 is_file_transmission(const unsigned char transmission_type) {
@@ -776,7 +814,7 @@ load_image_data(
     switch (transmission_type) {
         case 'd': // direct
             if (load_data->buf_capacity - load_data->buf_used < g->payload_sz) {
-                if (load_data->buf_used + g->payload_sz > MAX_DATA_SZ || data_fmt != PNG) ABRT("EFBIG", "Too much data");
+                if (load_data->buf_used + g->payload_sz > MAX_DATA_SZ || (data_fmt != PNG && data_fmt != VECTOR)) ABRT("EFBIG", "Too much data");
                 load_data->buf_capacity = MAX(MIN(2 * load_data->buf_capacity, MAX_DATA_SZ), load_data->buf_used + g->payload_sz);
                 load_data->buf = realloc(load_data->buf, load_data->buf_capacity);
                 if (load_data->buf == NULL) {
@@ -801,7 +839,7 @@ load_image_data(
             // When the data needs further processing the entire (possibly
             // compressed) payload is needed, otherwise reading more than the
             // expected number of bytes is pointless.
-            const size_t max_to_read = (g->compressed || data_fmt == PNG) ? MAX_DATA_SZ : load_data->data_sz;
+            const size_t max_to_read = (g->compressed || data_fmt == PNG || data_fmt == VECTOR) ? MAX_DATA_SZ : load_data->data_sz;
             bool was_opened = false;
             const bool ok = load_image_data_from_file(self, g, transmission_type, fname, max_to_read, &was_opened);
             // Client created temporary files and shared memory objects that
@@ -839,6 +877,23 @@ load_image_data(
 
 static Image *
 process_image_data(GraphicsManager *self, Image *img, const GraphicsCommand *g, const uint32_t data_fmt) {
+    if (data_fmt == VECTOR) {  // text records of a size known only once loaded
+        LoadData *ld = &self->currently_loading;
+        switch (g->compressed) {
+            case 'z':
+                if (!inflate_zlib_unbounded(ld, ld->buf, ld->buf_used)) {
+                    ld->loading_completed_successfully = false;
+                    return NULL;
+                }
+                break;
+            case 0: break;
+            default: ABRT("EINVAL", "Unknown image compression: %c", g->compressed);
+        }
+        ld->data = ld->buf;
+        ld->data_sz = ld->buf_used;
+        ld->loading_completed_successfully = true;
+        return img;
+    }
     bool needs_processing = g->compressed || data_fmt == PNG;
     if (needs_processing) {
         uint8_t *buf;
@@ -893,6 +948,7 @@ initialize_load_data(
     self->currently_loading.height = g->data_height;
     switch (data_fmt) {
         case PNG:
+        case VECTOR:
             if (g->data_sz > MAX_DATA_SZ) ABRT("EINVAL", "PNG data size too large");
             self->currently_loading.is_4byte_aligned = true;
             self->currently_loading.is_opaque = false;
@@ -993,6 +1049,29 @@ handle_add_command(GraphicsManager *self, const GraphicsCommand *g, const uint8_
     self->currently_loading.loading_for = (const ImageAndFrame){0};
     img = process_image_data(self, img, g, fmt);
     if (!img) return NULL;
+    if (fmt == VECTOR) {
+        LoadData *ld = &self->currently_loading;
+        if (!ld->width || !ld->height) ABRT("EINVAL", "Zero width/height not allowed");
+        VectorDoc *doc = vector_doc_new(ld->width, ld->height);
+        if (!doc) ABRT("ENOMEM", "Out of memory");
+        const char *err = vector_doc_apply(doc, ld->data, ld->data_sz);
+        if (err) {
+            vector_doc_free(doc);
+            ABRT("EINVAL", "%s", err);
+        }
+        img->width = ld->width;
+        img->height = ld->height;
+        img->root_frame = (const Frame){
+            .id = ++img->frame_id_counter, .is_4byte_aligned = true, .width = img->width, .height = img->height, .transient = (g->usage_hints & GRAPHICS_USAGE_HINT_TRANSIENT) != 0};
+        if (is_query) vector_doc_free(doc);
+        else {
+            img->vector = doc;
+            img->used_storage = vector_doc_size(doc);
+            self->used_storage += img->used_storage;
+        }
+        img->root_frame_data_loaded = true;
+        return img;
+    }
     size_t required_sz = (size_t)(self->currently_loading.is_opaque ? 3 : 4) * self->currently_loading.width * self->currently_loading.height;
     if (self->currently_loading.data_sz != required_sz)
         ABRT(
@@ -1099,6 +1178,8 @@ update_dest_rect(ImageRef *ref, uint32_t num_cols, uint32_t num_rows, CellPixelS
     ref->effective_num_rows = num_rows;
     ref->effective_num_cols = num_cols;
 }
+
+static void update_vector_texture(GraphicsManager *self, Image *img, double width, double height);
 
 static ImageRef *
 create_ref(Image *img, ImageRef *clone_from) {
@@ -1519,6 +1600,8 @@ grman_update_layers(
         Image *img = imgitr.data->val;
         bool was_drawn = img->is_drawn, ref_removed = false;
         img->is_drawn = false;
+        double vector_width = 0, vector_height = 0;  // the largest size the image is shown at
+        const size_t first_render_item = self->render_data.count;
 
         for (ref_map_itr refitr = vt_first(&img->refs_by_internal_id); !vt_is_end(refitr);) {
             ImageRef *ref = refitr.data->val;
@@ -1561,6 +1644,12 @@ grman_update_layers(
                 refitr = vt_next(refitr);
                 continue;
             } // not visible
+            if (img->vector) {
+                double w = ((double)r.right - r.left) / screen_width * screen_width_px * img->width / ref->src_width;
+                double h = ((double)r.top - r.bottom) / screen_height * screen_height_px * img->height / ref->src_height;
+                vector_width = MAX(vector_width, w);
+                vector_height = MAX(vector_height, h);
+            }
 
             if (ref->z_index < ((int32_t)INT32_MIN / 2)) self->num_of_below_refs++;
             else if (ref->z_index < 0) self->num_of_negative_refs++;
@@ -1581,6 +1670,10 @@ grman_update_layers(
         if (ref_removed && !vt_size(&img->refs_by_internal_id)) {
             imgitr = remove_image_itr(self, imgitr);
             continue;
+        }
+        if (img->vector && img->is_drawn) {
+            update_vector_texture(self, img, vector_width, vector_height);
+            for (size_t k = first_render_item; k < self->render_data.count; k++) self->render_data.item[k].texture_id = texture_id_for_img(img);
         }
         if (img->is_drawn && !was_drawn && img->animation_state != ANIMATION_STOPPED && img->extra_framecnt && img->animation_duration) {
             self->has_images_needing_animation = true;
@@ -1815,6 +1908,70 @@ get_coalesced_frame_data(GraphicsManager *self, Image *img, const Frame *f) {
     return get_coalesced_frame_data_impl(self, img, f, 0);
 }
 
+// Vector images {{{
+
+static bool
+vector_lookup(void *ctx, uint32_t image_id, bool with_pixels, VectorImageData *out) {
+    GraphicsManager *self = ctx;
+    Image *img = img_by_client_id(self, image_id);
+    if (!img || img->vector || !img->root_frame_data_loaded) return false;
+    out->width = img->width;
+    out->height = img->height;
+    if (!with_pixels) return true;
+    CoalescedFrameData cfd = get_coalesced_frame_data(self, img, &img->root_frame);
+    if (!cfd.buf) return false;
+    out->data = cfd.buf;
+    out->is_opaque = cfd.is_opaque;
+    return true;
+}
+
+static uint8_t *
+render_vector_image(GraphicsManager *self, Image *img, unsigned width, unsigned height) {
+    return vector_doc_render(img->vector, width, height, vector_lookup, self);
+}
+
+// Rasterizes what has to be drawn again of a vector image shown at width x
+// height: all of it when there are no pixels of that size to patch, otherwise
+// the part the records applied since the last time changed. Returns the pixels
+// of rect, or NULL when nothing changed or on failure.
+static uint8_t *
+render_vector_damage(GraphicsManager *self, Image *img, unsigned width, unsigned height, bool all, VectorRect *rect) {
+    *rect = (VectorRect){0, 0, width, height};
+    if (!all && !vector_doc_damage(img->vector, width, height, rect)) {
+        vector_doc_clear_damage(img->vector);  // it was all off the image
+        return NULL;
+    }
+    uint8_t *ans = vector_doc_render_rect(img->vector, width, height, *rect, vector_lookup, self);
+    if (ans) vector_doc_clear_damage(img->vector);
+    return ans;
+}
+
+#define MAX_VECTOR_PIXELS (16u * 1024u * 1024u)
+
+// Brings the texture of a vector image up to date, at the size the image is
+// shown at. A change of that size draws all of it, a change to the document
+// only the rectangle that change reaches.
+static void
+update_vector_texture(GraphicsManager *self, Image *img, double width, double height) {
+    if (!self->window_id || width < 1 || height < 1) return;
+    double scale = sqrt(MAX_VECTOR_PIXELS / (width * height));
+    if (scale < 1) width *= scale, height *= scale;
+    uint32_t w = (uint32_t)lround(width), h = (uint32_t)lround(height);
+    const bool has_pixels = img->texture && img->texture->id && w == img->vector_tex_width && h == img->vector_tex_height;
+    VectorRect rect;
+    uint8_t *data = render_vector_damage(self, img, w, h, !has_pixels, &rect);
+    if (!data) return;
+    if (img->texture) {
+        if (rect.width == w && rect.height == h) send_image_to_gpu(&img->texture->id, data, w, h, false, true, true, REPEAT_CLAMP);
+        else update_image_on_gpu(img->texture->id, data, rect.x, rect.y, rect.width, rect.height);
+    }
+    free(data);
+    img->vector_tex_width = w;
+    img->vector_tex_height = h;
+}
+
+// }}}
+
 static void
 update_current_frame(GraphicsManager *self, Image *img, const CoalescedFrameData *data) {
     bool needs_load = data == NULL;
@@ -1860,6 +2017,7 @@ frame_chain_is_transient(Image *img, const Frame *frame) {
 
 static Image *
 handle_animation_frame_load_command(GraphicsManager *self, GraphicsCommand *g, Image *img, const uint8_t *payload, bool *is_dirty) {
+    if (img->vector) ABRT("EINVAL", "Animation frames are not supported for vector images");
     uint32_t fmt = g->format ? g->format : RGBA;
     unsigned char tt = g->transmission_type ? g->transmission_type : 'd';
     const bool is_chunked_continuation = tt == 'd' && self->currently_loading.loading_for.image_id == img->internal_id;
@@ -2016,6 +2174,40 @@ handle_animation_frame_load_command(GraphicsManager *self, GraphicsCommand *g, I
     return img;
 }
 
+// Applies the records of an a=e command to an existing vector image
+static Image *
+handle_vector_edit_command(GraphicsManager *self, GraphicsCommand *g, Image *img, const uint8_t *payload, bool *is_dirty) {
+    unsigned char tt = g->transmission_type ? g->transmission_type : 'd';
+    const bool is_chunked_continuation = tt == 'd' && self->currently_loading.loading_for.image_id == img->internal_id;
+    if (is_chunked_continuation) {
+        self->currently_loading.start_command.more = g->more;
+        self->currently_loading.start_command.payload_sz = g->payload_sz;
+        g = &self->currently_loading.start_command;
+        tt = g->transmission_type ? g->transmission_type : 'd';
+    }
+    if (!img->vector) ABRT("EINVAL", "Not a vector image");
+    if (!is_chunked_continuation) {
+        self->currently_loading.loading_for = (const ImageAndFrame){0};
+        if (!initialize_load_data(self, g, img, tt, VECTOR, 0)) return NULL;
+    }
+    LoadData *load_data = &self->currently_loading;
+    img = load_image_data(self, img, g, tt, VECTOR, payload);
+    if (!img || !load_data->loading_completed_successfully) return NULL;
+    self->currently_loading.loading_for = (const ImageAndFrame){0};
+    img = process_image_data(self, img, g, VECTOR);
+    if (!img) return NULL;
+    const size_t before = vector_doc_size(img->vector);
+    const char *err = vector_doc_apply(img->vector, load_data->data, load_data->data_sz);
+    // the records before one that could not be applied stay applied, so the image changed either way
+    img->used_storage = vector_doc_size(img->vector);
+    self->used_storage = self->used_storage - MIN(self->used_storage, before) + img->used_storage;
+    img->atime = monotonic();
+    *is_dirty = true;
+    set_layers_dirty(self);
+    if (err) ABRT("EINVAL", "%s", err);
+    return img;
+}
+
 #undef ABRT
 
 static Image *
@@ -2159,6 +2351,10 @@ cfd_free(CoalescedFrameData *p) {
 
 static void
 handle_compose_command(GraphicsManager *self, bool *is_dirty, const GraphicsCommand *g, Image *img) {
+    if (img->vector) {
+        set_command_failed_response("EINVAL", "Composition is not supported for vector images");
+        return;
+    }
     Frame *src_frame = frame_for_number(img, g->frame_number);
     if (!src_frame) {
         set_command_failed_response("ENOENT", "No source frame number %u exists in image id: %u\n", g->frame_number, img->client_id);
@@ -2642,11 +2838,11 @@ grman_handle_command(GraphicsManager *self, const GraphicsCommand *g, const uint
     }
 
     unsigned char action = g->action;
-    if (!action && self->currently_loading.loading_for.image_id && self->currently_loading.start_command.action == 'f') {
+    if (!action && self->currently_loading.loading_for.image_id && (self->currently_loading.start_command.action == 'f' || self->currently_loading.start_command.action == 'e')) {
         // A continuation chunk carries no action key, so when the chunked
-        // load was started by an a=f command, route it to the frame load
+        // load was started by an a=f or a=e command, route it to that
         // handler rather than the add handler
-        action = 'f';
+        action = self->currently_loading.start_command.action;
     }
     switch (action) {
         case 0:
@@ -2706,6 +2902,32 @@ grman_handle_command(GraphicsManager *self, const GraphicsCommand *g, const uint
                 } else if (ag.action == 'a') {
                     handle_animation_control_command(self, is_dirty, &ag, img);
                 }
+            }
+            break;
+        }
+        case 'e': {
+            if (!g->id && !g->image_number && !self->currently_loading.loading_for.image_id) {
+                REPORT_ERROR("Vector edit command without image id or number");
+                break;
+            }
+            Image *img;
+            if (self->currently_loading.loading_for.image_id) img = img_by_internal_id(self, self->currently_loading.loading_for.image_id);
+            else img = g->id ? img_by_client_id(self, g->id) : img_by_client_number(self, g->image_number);
+            if (!img) {
+                set_command_failed_response("ENOENT", "Vector edit command refers to non-existent image with id: %u and number: %u", g->id, g->image_number);
+                ret = finish_command_response(g, false);
+            } else {
+                GraphicsCommand eg = *g;
+                eg.action = 'e';
+                if (!eg.id && !eg.image_number) {  // continuation chunk, the response must identify the image from the start command
+                    eg.id = self->currently_loading.start_command.id;
+                    eg.image_number = self->currently_loading.start_command.image_number;
+                }
+                img = handle_vector_edit_command(self, &eg, img, payload, is_dirty);
+                if (!self->currently_loading.loading_for.image_id) free_load_data(&self->currently_loading);
+                if (g->quiet) eg.quiet = g->quiet;
+                else eg.quiet = self->currently_loading.start_command.quiet;
+                ret = finish_command_response(&eg, img != NULL);
             }
             break;
         }
@@ -2771,7 +2993,9 @@ image_as_dict(GraphicsManager *self, Image *img) {
             return NULL;
         }
     }
-    CoalescedFrameData cfd = get_coalesced_frame_data(self, img, &img->root_frame);
+    CoalescedFrameData cfd = {.is_4byte_aligned = true};
+    if (img->vector) cfd.buf = render_vector_image(self, img, img->width, img->height);
+    else cfd = get_coalesced_frame_data(self, img, &img->root_frame);
     if (!cfd.buf) {
         PyErr_SetString(PyExc_RuntimeError, "Failed to get data for root frame");
         return NULL;
@@ -2780,7 +3004,7 @@ image_as_dict(GraphicsManager *self, Image *img) {
         "{sI sI sI sI sI sI sI "
         "sO sI sO "
         "sI sI sI "
-        "sI sy# sN}",
+        "sI sy# sN sI}",
         "texture_id",
         texture_id_for_img(img),
         U(client_id),
@@ -2806,7 +3030,9 @@ image_as_dict(GraphicsManager *self, Image *img) {
         cfd.buf,
         (Py_ssize_t)((cfd.is_opaque ? 3 : 4) * img->width * img->height),
         "extra_frames",
-        frames);
+        frames,
+        "vector_elements",
+        (unsigned int)(img->vector ? vector_doc_element_count(img->vector) : 0));
     free(cfd.buf);
     return ans;
 #undef B
@@ -2906,10 +3132,67 @@ W(update_layers) {
     return ans;
 }
 
+static Image *
+vector_image_for_tests(GraphicsManager *self, unsigned long client_id) {
+    Image *img = img_by_client_id(self, client_id);
+    if (!img || !img->vector) {
+        PyErr_SetString(PyExc_KeyError, "No vector image with that id");
+        return NULL;
+    }
+    return img;
+}
+
+// For tests: a vector image rasterized from nothing at the given size
+W(render_vector_image) {
+    unsigned long id;
+    unsigned int width, height;
+    PA("kII", &id, &width, &height);
+    Image *img = vector_image_for_tests(self, id);
+    if (!img) return NULL;
+    uint8_t *data = render_vector_image(self, img, width, height);
+    if (!data) {
+        PyErr_SetString(PyExc_RuntimeError, "Failed to rasterize the vector image");
+        return NULL;
+    }
+    PyObject *ans = PyBytes_FromStringAndSize((const char *)data, (Py_ssize_t)width * height * 4);
+    free(data);
+    return ans;
+}
+
+// For tests: what update_vector_texture() does, with a bytearray standing in
+// for the texture. Returns the rectangle that was drawn again, None when
+// there was nothing to draw.
+W(update_vector_pixels) {
+    unsigned long id;
+    unsigned int width, height;
+    PyObject *pixels;
+    PA("kIIO!", &id, &width, &height, &PyByteArray_Type, &pixels);
+    Image *img = vector_image_for_tests(self, id);
+    if (!img) return NULL;
+    const Py_ssize_t sz = (Py_ssize_t)width * height * 4;
+    const bool has_pixels = PyByteArray_GET_SIZE(pixels) == sz;
+    VectorRect rect;
+    uint8_t *data = render_vector_damage(self, img, width, height, !has_pixels, &rect);
+    if (!data) Py_RETURN_NONE;
+    if (!has_pixels && PyByteArray_Resize(pixels, sz) != 0) {
+        free(data);
+        return NULL;
+    }
+    uint8_t *dest = (uint8_t *)PyByteArray_AS_STRING(pixels) + ((size_t)rect.y * width + rect.x) * 4;
+    for (unsigned y = 0; y < rect.height; y++) memcpy(dest + (size_t)y * width * 4, data + (size_t)y * rect.width * 4, (size_t)rect.width * 4);
+    free(data);
+    return Py_BuildValue("IIII", rect.x, rect.y, rect.width, rect.height);
+}
+
 #define M(x, va) {#x, (PyCFunction)py##x, va, ""}
 
 static PyMethodDef methods[] = {
-    M(image_for_client_id, METH_O), M(image_for_client_number, METH_O), M(update_layers, METH_VARARGS), {NULL} /* Sentinel */
+    M(image_for_client_id, METH_O),
+    M(image_for_client_number, METH_O),
+    M(update_layers, METH_VARARGS),
+    M(render_vector_image, METH_VARARGS),
+    M(update_vector_pixels, METH_VARARGS),
+    {NULL} /* Sentinel */
 };
 
 static PyObject *
