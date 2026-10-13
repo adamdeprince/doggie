@@ -381,6 +381,22 @@ pollForEvents(EventLoopData *eld, monotonic_t timeout, watch_callback_func displ
     return read_ok;
 }
 
+// Converts the millisecond time of an input event to monotonic() time. The base
+// of these times is unspecified and they wrap, so only the age of the event is
+// used, which is measured against CLOCK_MONOTONIC, the clock compositors and X
+// servers use
+monotonic_t
+event_time_to_monotonic(uint32_t time) {
+    const monotonic_t now = monotonic();
+    struct timespec ts;
+    if (clock_gettime(CLOCK_MONOTONIC, &ts) != 0) return now;
+    const uint32_t now_ms = (uint32_t)((uint64_t)ts.tv_sec * 1000u + (uint64_t)ts.tv_nsec / 1000000u);
+    const uint32_t age_ms = now_ms - time;
+    // An implausible age means the event was stamped with some other clock
+    if (age_ms > 1000) return now;
+    return now - ms_to_monotonic_t(age_ms);
+}
+
 // Duplicate a UTF-8 encoded string
 // but cut it so that it has at most max_length bytes plus the null byte.
 // This does not take combining characters into account.

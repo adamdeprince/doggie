@@ -1868,7 +1868,7 @@ tablet_event(const GLFWTabletEvent *ev) {
         .pid = ev->product_id,
         .x = pointer_coord(osw->mouse_x - g->left),
         .y = pointer_coord(osw->mouse_y - g->top),
-        .t = monotonic_t_to_ms(monotonic()),
+        .t = monotonic_t_to_ms(ev->timestamp),
         .buttons = ev->buttons,
         .mods = pointer_mods(ev->keyboard_modifiers),
         .tool = ev->tool,
