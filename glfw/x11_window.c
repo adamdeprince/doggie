@@ -476,11 +476,12 @@ updateSmoothScrolling(_GLFWwindow *window) {
 
     // Tablet tools are followed through their own devices, buttons included
     for (unsigned i = 0; i < _glfw.x11.xi.num_tablet_devices; i++) {
-        unsigned char tmask[XIMaskLen(XI_Motion)] = {0};
+        unsigned char tmask[XIMaskLen(XI_PropertyEvent)] = {0};
         XIEventMask tem = {.deviceid = _glfw.x11.xi.tablet_devices[i].deviceid, .mask_len = sizeof(tmask), .mask = tmask};
         XISetMask(tmask, XI_Motion);
         XISetMask(tmask, XI_ButtonPress);
         XISetMask(tmask, XI_ButtonRelease);
+        XISetMask(tmask, XI_PropertyEvent);  // the mapping of the tablet to the screen is a property
         XISelectEvents(_glfw.x11.display, window->x11.handle, &tem, 1);
     }
 
@@ -1532,6 +1533,22 @@ handle_xi_tablet_event(_GLFWwindow *window, XITabletDevice *d, XIDeviceEvent *de
         .name = d->name[0] ? d->name : NULL,
     };
 #undef norm
+    if (d->has_unmap) {
+        // The server takes a position to the range 0 to 1 by the number of
+        // values an axis has, puts it through its matrix and takes it back
+        const double span_x = d->x.max - d->x.min, span_y = d->y.max - d->y.min;
+        const double u = (d->x.value - d->x.min) / (span_x + 1), v = (d->y.value - d->y.min) / (span_y + 1), *m = d->unmap;
+        const double w = m[6] * u + m[7] * v + m[8];
+        if (w != 0) {
+            ev.axes |= GLFW_TABLET_POSITION;
+            ev.tablet_x = MIN(MAX((m[0] * u + m[1] * v + m[2]) / w * (span_x + 1) / span_x, 0), 1);
+            ev.tablet_y = MIN(MAX((m[3] * u + m[4] * v + m[5]) / w * (span_y + 1) / span_y, 0), 1);
+        }
+    }
+    if (d->x.resolution > 0 && d->y.resolution > 0) {
+        ev.tablet_width = (d->x.max - d->x.min) * 1000. / d->x.resolution;
+        ev.tablet_height = (d->y.max - d->y.min) * 1000. / d->y.resolution;
+    }
     d->window_id = window->id;
     if (!_glfwInputTablet(window, &ev)) return false;
     _glfw.x11.xi.last_tablet_time = de->time;
@@ -2060,6 +2077,16 @@ processEvent(XEvent *event) {
                 // The fingers on a touchscreen
                 else if (event->xcookie.evtype == XI_TouchBegin || event->xcookie.evtype == XI_TouchUpdate || event->xcookie.evtype == XI_TouchEnd) {
                     handle_xi_touch_event((XIDeviceEvent *)event->xcookie.data);
+                }
+                // The mapping of a tablet to the screen was changed
+                else if (event->xcookie.evtype == XI_PropertyEvent) {
+                    const XIPropertyEvent *pe = (XIPropertyEvent *)event->xcookie.data;
+                    XITabletDevice *td = pe->property == _glfw.x11.xi.COORDINATE_TRANSFORMATION_MATRIX ? tablet_device_for_id(pe->deviceid) : NULL;
+                    if (td) {
+                        _glfwGrabErrorHandlerX11();
+                        read_xi_tablet_mapping(td);
+                        _glfwReleaseErrorHandlerX11();
+                    }
                 }
                 // Handle XI_HierarchyChanged for device hotplug
                 else if (event->xcookie.evtype == XI_HierarchyChanged) {

@@ -37,8 +37,11 @@ typedef enum PointerMode {
 // A tablet pointer protocol event, see docs/tablet-protocol.rst
 typedef struct PointerReport {
     int kind, phase, contact, x, y, mods, tool, p, tx, ty, twist, tangent, z, dist, wheel, wclicks, src, major, minor, angle, w, h;
-    int stage;  // of the force on a touchpad, only meaningful with has_stage
+    int rx, ry;  // where a tool is on the surface of its tablet, with bit 256 of valid
+    int grip;    // how hard the barrel of a tool is held, with bit 512 of valid
+    int stage;   // of the force on a touchpad, only meaningful with has_stage
     bool has_stage;
+    bool conf, has_conf;  // whether the system takes a finger to be meant, only meaningful with has_conf
     unsigned buttons, valid;
     uint64_t device;
     unsigned long long t;
@@ -52,15 +55,34 @@ typedef struct PointerDevice {
     unsigned axes, vid, pid;
     uint64_t device, serial, hwid;
     const char *name;  // UTF-8, NULL or empty when unknown
+    // The tablet a tool is on or a pad belongs to, numbered from one among
+    // those attached and zero when the system does not say which it is
+    uint64_t tablet;
+    // For a tool: the size of the active surface of its tablet in 1/256 of a
+    // millimetre, zero when unknown, and whether that surface is a display,
+    // which is 1 when it is, -1 when it is not and 0 when unknown
+    unsigned w, h;
+    int direct;
+    // For a tool: its charge in percent, and the color (0xRRGGBB), the line
+    // width in 1/256 of a millimetre and the line style that are stored in it.
+    // Each is known only with its has_ flag, the style when it is not zero
+    unsigned bat, pcolor, pwidth, pstyle;
+    bool has_bat, has_pcolor, has_pwidth;
     // For a pad: what it has, the number of modes of each of its groups, and
     // the mode each group is in, which is NULL when that is not known
     unsigned num_buttons, num_rings, num_strips, num_dials, num_groups;
     const unsigned *num_modes, *modes;
+    // For a pad: the group each of its buttons, rings, strips and dials is in,
+    // -1 for one that is in no group. NULL when that is not known
+    const int *button_groups, *ring_groups, *strip_groups, *dial_groups;
 } PointerDevice;
 
 // Something done with a tool that is not a button held down
 typedef struct PointerAction {
-    int action, state, x, y, mods;  // state is 1 when the action began, 0 when it ended and -1 when it does not last
+    // state is 1 when the action began, 0 when it ended, 2 while it goes on
+    // and -1 when it does not last
+    int action, state, x, y, mods;
+    int dx, dy;  // how far a tool moved through the air, reported with state 2
     uint64_t device;
     unsigned long long t;
     unsigned tu;

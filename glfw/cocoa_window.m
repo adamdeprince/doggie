@@ -548,6 +548,8 @@ handleTabletEvent(_GLFWwindow *window, NSEvent *event) {
             t->hardware_id = [event uniqueID];
             t->vendor_id = (unsigned)[event vendorID];
             t->product_id = (unsigned)[event tabletID];
+            // The index of the tablet among those connected, from zero
+            t->tablet = (uint64_t)[event systemTabletID] + 1;
             switch ([event pointingDeviceType]) {
                 case NSPointingDeviceTypePen: t->tool = GLFW_TABLET_TOOL_PEN; break;
                 case NSPointingDeviceTypeEraser: t->tool = GLFW_TABLET_TOOL_ERASER; break;
@@ -619,6 +621,7 @@ handleTabletEvent(_GLFWwindow *window, NSEvent *event) {
         .hardware_id = t ? t->hardware_id : 0,
         .vendor_id = t ? t->vendor_id : 0,
         .product_id = t ? t->product_id : 0,
+        .tablet = t ? t->tablet : 0,
     };
     const bool consumed = _glfwInputTablet(window, &ev);
     // The system merges the points of a tool that arrive faster than they are

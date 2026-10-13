@@ -203,6 +203,7 @@ typedef struct _GLFWTabletToolNS {
     unsigned long device_id;
     unsigned capabilities, vendor_id, product_id;
     unsigned long long serial, hardware_id;
+    uint64_t tablet;  // one more than the index the system gives the tablet
     GLFWTabletTool tool;
 } _GLFWTabletToolNS;
 

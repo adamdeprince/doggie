@@ -429,6 +429,8 @@ typedef enum GLFWTabletAxis {
     GLFW_TABLET_Z = 16,
     GLFW_TABLET_DISTANCE = 32,
     GLFW_TABLET_WHEEL = 64,
+    // Where the tool is on the surface of its tablet, as tablet_x and tablet_y
+    GLFW_TABLET_POSITION = 256,
 } GLFWTabletAxis;
 
 // The buttons held on a tool, as bits of GLFWTabletEvent.buttons
@@ -458,6 +460,14 @@ typedef struct GLFWTabletEvent {
     double tangent;                       // -1 to 1, the airbrush wheel
     double z;                             // device units
     int wheel_clicks;
+    // Where the tool is on the active surface of its tablet, 0 to 1 from the
+    // top left corner, when axes has GLFW_TABLET_POSITION. The size of that
+    // surface in millimetres, zero when the system does not say
+    double tablet_x, tablet_y, tablet_width, tablet_height;
+    // The tablet the tool is on, numbered from one among those attached. The
+    // number stays with the tablet for as long as it is attached and the pads
+    // of the tablet carry it too. Zero when the system does not say
+    uint64_t tablet;
     // device identifies the tool while it is in proximity. The rest are zero
     // when the system does not report them
     uint64_t device, serial, hardware_id;
@@ -498,6 +508,8 @@ typedef enum GLFWTabletPadEventType {
     GLFW_TABLET_PAD_DIAL = 6,
     // A group of controls of the pad changed its mode
     GLFW_TABLET_PAD_MODE = 7,
+    // What the pad has, or the groups its controls are in, changed
+    GLFW_TABLET_PAD_CHANGED = 8,
 } GLFWTabletPadEventType;
 
 typedef struct GLFWTabletPadEvent {
@@ -516,6 +528,12 @@ typedef struct GLFWTabletPadEvent {
     // The mode each group is in, NULL when the system has not said yet. Valid
     // only during the callback
     const unsigned *modes;
+    // The group each button, ring, strip and dial is in, -1 for a control that
+    // is in no group. NULL when the system does not say. Valid only during the
+    // callback
+    const int *button_groups, *ring_groups, *strip_groups, *dial_groups;
+    // The tablet the pad belongs to, as GLFWTabletEvent.tablet
+    uint64_t tablet;
     // The name and ids of the tablet the pad belongs to, NULL and zero when the
     // system does not report them. The name is valid only during the callback
     const char *name;

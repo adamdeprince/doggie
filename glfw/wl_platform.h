@@ -403,6 +403,7 @@ typedef struct _GLFWWaylandTabletPad {
     // Of the tablet the pad is attached to, known once it has the focus
     char tablet_name[128];
     unsigned vendor_id, product_id;
+    uint64_t tablet;
 } _GLFWWaylandTabletPad;
 
 // Wayland-specific global data
