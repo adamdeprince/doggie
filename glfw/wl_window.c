@@ -708,6 +708,7 @@ create_surface(_GLFWwindow *window, const _GLFWwndconfig *wndconfig) {
         }
     }
     window->wl.window_fully_created = !window->wl.expect_scale_from_compositor;
+    _glfwWaylandColorManagementCreate(window);
     if ((_glfw.wl.ext_background_effect_manager_v1 || _glfw.wl.org_kde_kwin_blur_manager) && wndconfig->blur_radius > 0)
         _glfwPlatformSetWindowBlur(window, wndconfig->blur_radius);
 
@@ -1602,6 +1603,7 @@ _glfwPlatformDestroyWindow(_GLFWwindow *window) {
 
     if (window->wl.wp_fractional_scale_v1) wp_fractional_scale_v1_destroy(window->wl.wp_fractional_scale_v1);
     if (window->wl.wp_viewport) wp_viewport_destroy(window->wl.wp_viewport);
+    _glfwWaylandColorManagementDestroy(window);
     if (window->wl.org_kde_kwin_blur) org_kde_kwin_blur_release(window->wl.org_kde_kwin_blur);
     if (window->wl.ext_background_effect_surface_v1) ext_background_effect_surface_v1_destroy(window->wl.ext_background_effect_surface_v1);
 

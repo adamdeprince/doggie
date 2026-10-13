@@ -242,6 +242,12 @@ load_glfw(const char* path) {
     *(void **) (&glfwSetWindowBlur_impl) = dlsym(handle, "glfwSetWindowBlur");
     if (glfwSetWindowBlur_impl == NULL) fail("Failed to load glfw function glfwSetWindowBlur with error: %s", dlerror());
 
+    *(void **) (&glfwGetWindowPreferredColorDescription_impl) = dlsym(handle, "glfwGetWindowPreferredColorDescription");
+    if (glfwGetWindowPreferredColorDescription_impl == NULL) fail("Failed to load glfw function glfwGetWindowPreferredColorDescription with error: %s", dlerror());
+
+    *(void **) (&glfwSetWindowColorDescription_impl) = dlsym(handle, "glfwSetWindowColorDescription");
+    if (glfwSetWindowColorDescription_impl == NULL) fail("Failed to load glfw function glfwSetWindowColorDescription with error: %s", dlerror());
+
     *(void **) (&glfwSetWindowUserPointer_impl) = dlsym(handle, "glfwSetWindowUserPointer");
     if (glfwSetWindowUserPointer_impl == NULL) fail("Failed to load glfw function glfwSetWindowUserPointer with error: %s", dlerror());
 

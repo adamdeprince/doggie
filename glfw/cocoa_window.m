@@ -4011,6 +4011,19 @@ _glfwPlatformSetWindowBlur(_GLFWwindow *window, int radius) {
     return orig;
 }
 
+// The color space of a window is chosen with the GLFW_COCOA_COLOR_SPACE window
+// hint, and AppKit does not describe a display in these terms
+
+bool
+_glfwPlatformGetWindowPreferredColorDescription(_GLFWwindow *window UNUSED, GLFWcolordescription *desc UNUSED) {
+    return false;
+}
+
+bool
+_glfwPlatformSetWindowColorDescription(_GLFWwindow *window UNUSED, const GLFWcolordescription *desc, GLFWcolorintent intent UNUSED) {
+    return desc == NULL;
+}
+
 
 //////////////////////////////////////////////////////////////////////////
 //////                        GLFW native API                       //////
