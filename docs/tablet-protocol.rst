@@ -34,12 +34,12 @@ of ``query``, ``cap``, ``mode``, ``device``, ``label`` and ``event``. A frame
 with any other version is ignored.
 
 The protocol grows without a new version. A program ignores a frame whose
-``op`` it does not know, a report whose ``kind`` it does not know and any
-field it does not know, and treats a ``tool`` value it does not know as
-``0``. A new kind of report is sent only to a program that asked for it with
-a mode bit of its own, so a program is never sent what it was not written
-for. Only a change in the meaning of something that exists needs a new
-version.
+``op`` it does not know, a report whose ``kind`` it does not know, and any
+field and any bit of ``valid`` it does not know, and treats a ``tool`` value
+it does not know as ``0``. A new kind of report is sent only to a program
+that asked for it with a mode bit of its own, so a program is never sent
+what it was not written for. Only a change in the meaning of something that
+exists needs a new version.
 
 Discovery
 -------------
@@ -152,6 +152,14 @@ other fields are present when the system provides them:
 ``vid``, ``pid`` The vendor and product ids of the tablet, unsigned 32 bit
                  integers
 ``bat``          The charge of the battery of the tool, ``0`` to ``100``
+``tablet``       Which of the tablets that are attached the tool is on, a number
+                 from ``1``, see `Tablets`_
+``w``, ``h``     The size of the active surface of that tablet in 1/256
+                 millimeter
+``direct``       ``1`` when that surface is a display, ``0`` when it is not
+``pcolor``,      The color, line width and line style that are stored in the tool
+``pwidth``,      itself, see `Settings stored in a pen`_
+``pstyle``
 ================ ==================================================================
 
 ``serial``, ``hwid``, ``vid`` and ``pid`` are the hardware identifiers, and
@@ -163,11 +171,102 @@ need to know whose pen it is.
 
 The description is sent again when the tool comes back after leaving
 proximity, when it moves over another window, and when the program changes
-the mode while the tool is in proximity. A program must not depend on
+the mode while the tool is in proximity. It is also sent again whenever
+something it says is no longer so while the tool is in use: the battery
+runs down, the user picks another color on the pen, the system learns more
+of the tool than it knew at first. A description replaces the one before it
+as a whole, so a field it leaves out is no longer known, and it changes
+nothing about a stroke that is open. A program must not depend on
 getting one: a terminal that knows nothing about a tool beyond its reports
 need not describe it. A pad is described in the same way, with ``kind=3``
 and fields of its own, see `Pads`_. The device of a finger report is not
 described.
+
+Tablets
+~~~~~~~~~~
+
+More than one tablet can be attached at once, and a pen can be carried from
+one to the other. ``tablet`` says which of them a tool is on: a number from
+``1`` that the terminal gives each tablet, that stays with the tablet for as
+long as it is attached, and that every tool on the tablet and every pad that
+belongs to it carries, so a program can tell that these keys and that pen
+are parts of one device. It is absent, or ``0``, when the system does not
+say which tablet a tool is on. It is a count and not a hardware identifier:
+it says nothing of the tablet that outlasts its being plugged in, so it
+needs no mode bit.
+
+``w`` and ``h`` are the width and height of the active surface of the
+tablet, the area in which it tracks a tool, and are present together or not
+at all. ``direct`` says whether that surface is a display. On a display the
+tool points at what it draws and ``x,y`` are all a program needs. On a
+tablet that is not one, the hand moves in one place and the mark appears in
+another, where the system has put the pointer after a mapping of its own,
+and a program that wants to map the tablet to its canvas itself, or to know
+how far the hand really moved, needs the place on the tablet. That is
+``rx`` and ``ry`` in the reports of the tool, with ``valid`` bit ``256``:
+``0`` to ``65535`` across and down the active surface from its top left
+corner. With ``w`` and ``h`` they are a position in millimeters. ``x,y``
+are reported all the same, and are where the system put the pointer.
+
+The pointer input of Windows has all of these: every pointer names the
+device it comes from, and the device says whether it is a pen built into a
+display or one on a tablet of its own, the rectangle of its surface in
+hundredths of a millimeter, and where on it the pen is. So has the kernel
+of Linux, whose devices give the range and the resolution of their position
+and say whether they are a display. What a terminal gets depends on what
+stands between it and those. The ``tablet-v2`` protocol of Wayland says
+which tablet a tool and a pad are on and no more. X11 has the position and
+its range, with a resolution where the driver states one, and no tablet
+that tools belong to. AppKit numbers the tablets, and gives a position in
+units of the tablet whose range it does not tell.
+
+Settings stored in a pen
+~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Some pens keep a color, a line width and a line style in the pen itself,
+set with a switch on it or written to it by a program, so that a pen picked
+up at another device draws there as it did at the last. They are the
+*Preferred Color*, *Preferred Line Width* and *Preferred Line Style* of the
+HID usage tables for digitizers, which the pens of the Universal Stylus
+Initiative implement. A terminal that has them puts them into the
+description of the tool:
+
+================ ==================================================================
+``pcolor``       The color, six hexadecimal digits ``RRGGBB`` in sRGB
+``pwidth``       The width of the line in 1/256 millimeter; ``0`` is the thinnest
+                 line there is, one physical pixel at any magnification
+``pstyle``       ``1`` ink, as of a ballpoint, a gel or a fountain pen, ``2``
+                 pencil, ``3`` highlighter with a flat tip, ``4`` marker with a
+                 chisel tip, ``5`` round brush
+================ ==================================================================
+
+HID gives the color in one of two forms. A value of 24 bits is red, green
+and blue of eight bits each, in that order, and is passed on as it is; the
+usage tables do not say what color space it is in, and it is taken for
+sRGB, which is the space of the other form. A value of 8 bits is an index
+into the named colors of CSS in alphabetical order, with *gray* spelled one
+way only: ``0`` AliceBlue to ``140`` YellowGreen, as Appendix A of the HID
+Usage Tables 1.7 lists them. The terminal sends the color the name stands
+for, so index ``7``, Black, is ``pcolor=000000`` and index ``9``, Blue, is
+``pcolor=0000ff``. Index ``255``, an index the appendix reserves, and the
+*No Preferred Color* flag beside a value of 24 bits each mean that the pen
+has no color, and ``pcolor`` is left out.
+
+The width comes in the units the pen declares for it. The usage tables
+recommend steps of a tenth of a millimeter and leave the pen free to
+declare others, so a terminal converts from what the report descriptor
+gives as the physical range and unit of the value, and leaves ``pwidth``
+out when the descriptor gives none. The line styles *Ink*, *Pencil*,
+*Highlighter*, *Chisel Marker* and *Brush* are ``1`` to ``5``; *No
+Preference* is no style, and ``pstyle`` is left out.
+
+These are what the pen would like and not orders, and a program is free to
+draw otherwise. HID also says of each whether the pen lets it be changed,
+which matters only to something that writes to the pen and is not passed
+on. A pen whose setting changes while it is in use is described again.
+Only the reports of the pen itself carry these settings, so a terminal has
+them where it reads the digitizer directly; the tablet interfaces of
+Windows, macOS, Wayland and X11 do not pass them on.
 
 Reports
 -----------
@@ -217,6 +316,9 @@ default to zero, except ``tool``, which defaults to ``1``:
                  the screen; absent otherwise
 ``stage``        For a finger on a touchpad that measures force, how hard the
                  pad is pressed, see `Fingers`_
+``conf``         For a finger, ``1`` when the system takes the contact to be
+                 meant and ``0`` when it takes it for an accident, such as a
+                 palm; absent when the system does not judge, see `Fingers`_
 ``w``, ``h``     For a finger on a touchpad, the size of the pad in 1/256
                  millimeter when the system knows it, so a program can turn
                  positions into distances or map the pad onto its canvas with
@@ -238,14 +340,33 @@ terminal must not make a measurement up. The measurements, with their
                               65535
 ``z``                   16    Height in device units, −1000000 to 1000000
 ``dist``                32    Distance from the tablet, 0 to 65535
-``wheel``, ``wclicks``  64    Rotation of the wheel on a mouse or lens tool since
-                              the last report, in hundredths of a degree and in
-                              clicks
+``wheel``, ``wclicks``  64    Rotation of the wheel on the tool since the last
+                              report, in hundredths of a degree and in clicks. A
+                              mouse or a lens has one, and so may any other tool
 ``major``, ``minor``,   128   The shape of a finger or a totem on the screen: the
 ``angle``                     axes of the ellipse of the contact in 1/256 of a
                               physical pixel and its orientation in hundredths of
                               a degree, clockwise from the vertical
+``rx``, ``ry``          256   Where the tool is on the active surface of its
+                              tablet, 0 to 65535 from the top left corner, see
+                              `Tablets`_
+``grip``                512   How hard the barrel of the tool is held, 0 to 65535
 ======================= ===== ====================================================
+
+A wheel is reported for whatever tool has one, not only for the two that
+always do: ``tablet-v2`` and libinput make it a capability of the tool,
+whatever its type. AppKit and XInput have no wheel in what they report of a
+tool.
+
+``grip`` is the force of the hand on the barrel of a pen that measures it,
+the *Barrel Pressure* of the HID usage tables. It is a measurement like
+``p``, comes with every report of the tool, and can thicken a line or open a
+nozzle as steadily as the hand tightens. The squeeze of `Tool actions`_ is
+something else: what a system makes of that force when it crosses a
+threshold, which happens once and has no size. A pen can give either, both
+or neither. As with the settings stored in a pen, only the reports of the
+pen itself carry ``grip``, and the tablet interfaces of Windows, macOS,
+Wayland and X11 do not pass it on.
 
 Fingers
 ~~~~~~~~~~
@@ -275,6 +396,27 @@ changes the fingers are reported again as a ``move`` that did not move.
 click and ``2`` for a click pressed harder, and ``p`` runs from 0 to 65535
 within each stage, so it drops back when the stage goes up.
 
+Not everything that touches a screen is meant to. A palm resting on the
+glass, or the side of the hand that holds a pen, is a contact too, and some
+systems judge which a contact is from its size, its shape and where the pen
+is. Where the system does, a finger report carries ``conf``: ``1`` for a
+contact it takes to be meant and ``0`` for one it takes to be an accident.
+The judgement can change while the contact is down, as when a palm comes
+down edge first and looks like a finger for a moment, so a program reads
+``conf`` in every report, and one that had begun to draw for a contact that
+turns out not to be meant takes that back. A contact that is not meant is a
+contact all the same. It is reported until it lifts or is cancelled, the
+terminal hides nothing, and what to do with it is the program's choice: one
+program ignores it, another lets the palm rest and smudge. ``conf`` is
+absent when the system does not judge, which says nothing either way.
+
+Windows gives the judgement as the confidence flag of a pointer, and the HID
+usage tables have it as *Touch Valid* in the report of a contact, where a
+terminal that reads the digitizer finds it. Android judges too, and says so
+late: it cancels the one finger it has come to take for a palm, which is a
+``cancel`` of that contact with ``conf=0``. macOS, Wayland and X11 do not
+say.
+
 Tool actions
 ~~~~~~~~~~~~~~~
 
@@ -290,9 +432,16 @@ mode bit ``16`` is on they are reported with ``kind=4``::
 ``t``, ``tu``    The time of the action, as in the other reports
 ``action``       ``1`` a double tap on the barrel, ``2`` a squeeze, ``3`` a
                  click of the button on the end of the tool, ``4`` a double
-                 click of that button, ``5`` that button pressed and held
+                 click of that button, ``5`` that button pressed and held,
+                 ``6`` the tool was put into its holder, ``7`` it was taken
+                 out of it, ``8`` the tool is moved through the air with its
+                 button held
 ``state``        For an action that lasts, as a squeeze does, ``1`` when it
-                 begins and ``0`` when it ends; absent for the others
+                 begins and ``0`` when it ends, and for action ``8`` also
+                 ``2`` for each report in between; absent for the others
+``dx``, ``dy``   With ``state=2``, how far the tool has moved through the air
+                 since the last report of the action, −32767 to 32767,
+                 positive to the right and down
 ``x``, ``y``     The position of the pointer, as in a tool report
 ``mods``         As in a tool report
 ================ ==================================================================
@@ -303,6 +452,24 @@ goes to the window that has a stroke of the tool captured, and otherwise to
 the window under the pointer. What an action does is the program's choice; a
 double tap usually switches between the pen and the eraser. A program
 ignores an ``action`` it does not know.
+
+A pen that has a holder in the device, a slot or a magnet that also charges
+it, tells the system when it is put in and taken out, which is a good moment
+to put a palette away or bring it up. Windows tells applications of both.
+Neither action lasts, and ``x,y`` is where the pointer happens to be.
+
+A pen with a radio and a motion sensor can be waved like a wand: while its
+button is held away from the screen it reports how it moves, as the S Pen
+of the Samsung models that pair it over Bluetooth does. That is action
+``8``: ``state=1`` when the button goes down, any number of reports with
+``state=2`` that each carry ``dx`` and ``dy``, and ``state=0`` when it comes
+up. The two are what the sensor in the pen makes of the motion and have no
+unit, so only their signs and their proportions mean anything, and a
+terminal that is given fractions scales them to whole numbers by one factor
+throughout. A program adds them up to move a cursor or reads a flick from
+their run. The pen is
+not over the tablet while this happens, so there are no tool reports and
+``x,y`` stays where the pointer was.
 
 Pads
 ~~~~~~~
@@ -364,9 +531,32 @@ window that has pad reports on, the terminal describes the pad::
                  of the groups
 ``mode``         The mode each group is in, in the same form, present when the
                  terminal knows it at that moment
+``bgroups``,     The group each key, ring, strip and dial is in, see below
+``rgroups``,
+``sgroups``,
+``dgroups``
+``tablet``       The tablet the pad belongs to, the number the tools on that
+                 tablet carry, see `Tablets`_
 ``name``         The name of the tablet the pad belongs to, as for a tool
 ``vid``, ``pid`` The ids of that tablet, sent only while mode bit ``8`` is on
 ================ ==================================================================
+
+A mode is the mode of a group, so a program that shows what a control does
+has to know which group the control is in. ``bgroups`` says it for the keys,
+``rgroups`` for the rings, ``sgroups`` for the strips and ``dgroups`` for
+the dials: the number of the group of each control of that kind, in the
+order of their numbers and separated by commas, with ``-`` for a control
+that is in no group, as a key is that the system keeps for switching modes.
+``bgroups=0,0,0,-,1,1`` is three keys in group 0, one in none and two in
+group 1. A list has an entry for every control of its kind. It is absent
+when the pad has no control of that kind and when the system does not say,
+and with a pad of a single group there is nothing to be in doubt about.
+The system may take a key out of its group for a use of its own, or give it
+back, while the pad is in use, and the pad is then described again, as a
+tool is when what was said of it changes. The groups come from libinput,
+which Wayland compositors pass on through ``tablet-v2``: each group lists
+its keys and announces its rings, strips and dials. Nothing else that
+silkie reads has them.
 
 A pad holds nothing open except its keys. When the mode is changed, the
 terminal is reset, the keyboard focus goes to another window or the pad goes
@@ -470,9 +660,16 @@ and cancels contacts when panes move or resize. It keeps the mode of each
 pane and asks the terminal for the union of them. It keeps the last
 description of each tool in proximity and sends it to a pane before that
 pane's first report of the tool, without the hardware identifiers unless
-that pane asked for them. A tool action goes to the pane that has a stroke
+that pane asked for them. When the terminal describes a device again, the
+multiplexer keeps the new description in place of the old one and sends it
+on to the pane the device is reporting to. ``rx``, ``ry``, ``grip`` and
+``conf`` are forwarded unchanged, none of them being a place on the screen.
+``tablet`` is the terminal's number and is forwarded unchanged; a relay
+that brings the tablets of several terminals together gives them numbers of
+its own, so that two tablets never share one and a pad keeps the number of
+the tools of its tablet. A tool action goes to the pane that has a stroke
 of the tool, and otherwise to the pane under the pointer, with ``x,y``
-translated as for a contact. Corrections follow the report they correct to
+translated as for a contact and ``dx,dy`` unchanged. Corrections follow the report they correct to
 its pane, and ``seq`` is forwarded unchanged. Pad reports go unchanged to
 the pane that has the focus, after the description of the pad, and when the
 focus moves to another pane the keys that are down are reported released to
@@ -488,7 +685,9 @@ Implementations
 
 * silkie, this fork of kitty: tools on macOS, Wayland and X11; fingers on
   the touchpad on macOS and on touchscreens on Wayland, with contact shape,
-  and on X11, without; pads on Wayland; tool actions on macOS. ``kitty --debug-input`` logs the
+  and on X11, without; pads on Wayland, with the groups of their controls;
+  tool actions on macOS; the number of the tablet on macOS and Wayland; the
+  place of a tool on its tablet on X11. ``kitty --debug-input`` logs the
   tablet, pad and touch events it sees.
 * Inkline, Goblin Skiff and GoblinView carry a codec for an earlier draft of
   this protocol and are being brought up to this specification.
@@ -504,6 +703,15 @@ predictions, so it does not take bit ``32``, and it reports no totems and no
 battery charge. ``tu`` is sent on macOS only: Wayland and X11 stamp tablet
 and touch events in whole milliseconds.
 
+Of what a tablet says of itself silkie sends what the window system gives
+it, which the notes below go through: ``tablet`` on macOS and Wayland, the
+groups of the controls of a pad on Wayland, and ``rx`` and ``ry``, with
+``w`` and ``h`` under some drivers, on X11. It can write every field of this
+page, and its tests do, but nothing it reads has ``direct``, ``conf``,
+``grip``, ``pcolor``, ``pwidth``, ``pstyle``, or the actions ``6`` to ``8``,
+so it never sends them. It describes a tool or a pad again when what it said
+of it has changed, which at present only a pad on Wayland does.
+
 * On macOS, tablet data arrives with the mouse events of the tablet driver.
   Tilt is scaled from the driver's fraction of maximum tilt assuming 60
   degrees, as Wacom tablets report, and ``z`` is the driver's absolute Z.
@@ -511,7 +719,11 @@ and touch events in whole milliseconds.
   is turned off, so every sample the tablet sends is reported. AppKit tells
   a pen, an eraser and a puck apart; the airbrush and the lens cursor of a
   Wacom tablet are recognised from the driver's own code for the tool. No
-  name is known for the device frame. The one tool action is the double tap
+  name is known for the device frame. ``tablet`` is one more than the index
+  AppKit gives the tablet among those connected. AppKit also gives where the
+  tool is in units of the tablet, but neither the range of those units nor
+  the size of the tablet, so there is no ``rx``, ``ry``, ``w`` or ``h``. The
+  one tool action is the double tap
   on an Apple Pencil paired with an iPad that the Mac uses as a display, and
   the system does not say which tool it came from, so ``device`` is ``0``
   unless a single tool is in proximity.
@@ -543,6 +755,14 @@ and touch events in whole milliseconds.
   a label is passed to the compositor as the feedback for that control. The
   ``name`` and ids of a pad are those of the tablet it is attached to.
   ``caps`` claims tools and pads only on a compositor that has the protocol.
+  ``tablet`` numbers the tablets of the seat in the order the compositor
+  announced them: a tool has the number of the tablet it came into proximity
+  over, a pad that of the tablet it was given the focus with. The group of a
+  key is the group that lists it, and the group of a ring, a strip or a dial
+  the one that announced it. When a compositor lists the keys of a group
+  again while the pad has the focus, the pad is described again. The
+  protocol has neither the size of a tablet, nor where on it a tool is, nor
+  whether it is a display, though the compositor knows all three.
   Pads have been tried against a stand-in for the compositor that sends what
   wlroots sends, not with a tablet.
 * On X11, tools come through XInput 2 devices whose names include the tool
@@ -552,11 +772,21 @@ and touch events in whole milliseconds.
   axis. The position of a tool is made from the position its own device
   reports, scaled to the screen as the server does it, because the server
   puts the position of the pointer before an event into that event, which
-  is where the tool was one report earlier. The X server does not report a
+  is where the tool was one report earlier. That position is also where
+  ``rx`` and ``ry`` come from. The server puts it through the matrix by which
+  the user maps the tablet to the screen or to one monitor, so silkie reads
+  that matrix, again whenever it is changed, and undoes it; a matrix that
+  cannot be undone leaves ``rx`` and ``ry`` out. ``w`` and ``h`` are the
+  range of the position divided by the resolution the driver states for it,
+  and are left out when it states none, which is so with the libinput
+  driver; no driver that states one was at hand, so the sizes are untried.
+  X has no tablet that tools belong to, each tool being a device of its own,
+  so there is no ``tablet``. The X server does not report a
   tool leaving proximity, so phase
   ``5`` arrives only when the device goes away. Xwayland's tablet devices
   are recognised too, but under GNOME no motion reached them in testing; use
-  the Wayland backend there. Fingers on a touchscreen come through the touch
+  the Wayland backend there. Nothing of a tablet is reported for them:
+  their position is one on the desktop and their resolution is made up. Fingers on a touchscreen come through the touch
   events of XInput 2.2, and ``caps`` claims them when the server has that
   version. X reports each finger in an event of its own, so every finger
   report is followed by a frame report of its own and fingers that moved
