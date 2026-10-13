@@ -1005,6 +1005,21 @@ damage_appended(VectorDoc *d, Elem *e, size_t ncmds, size_t npts, PathCursor bef
     else damage_elem(d, e);
 }
 
+// Takes a point of the image, in its user units, into the coordinate system of
+// a group, the one the geometry of the elements in that group is given in.
+// False when there is no such group or its transforms cannot be undone.
+bool
+vector_doc_point_to_group(const VectorDoc *d, uint32_t group, double *x, double *y) {
+    Mat m = d->root.has_t ? d->root.t : identity, inv;
+    if (group) {
+        const Elem *g = lookup(d, group);
+        if (!g || g->type != 'g' || elem_matrix(d, g, &m) != 1) return false;
+    }
+    if (!mat_invert(m, &inv)) return false;
+    apply(inv, *x, *y, x, y);
+    return isfinite(*x) && isfinite(*y);
+}
+
 // }}}
 
 // Record parsing {{{
@@ -1167,6 +1182,13 @@ parse_color(const char *s, const char *end, Paint *p) {
     p->type = PAINT_SOLID;
     p->r = v[0], p->g = v[1], p->b = v[2], p->a = v[3];
     return true;
+}
+
+// Whether s is a color that paints something, written as records write one
+bool
+vector_color_paints(const char *s, size_t len) {
+    Paint p;
+    return parse_color(s, s + len, &p) && p.type != PAINT_NONE;
 }
 
 static bool

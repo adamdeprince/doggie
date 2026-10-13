@@ -44,3 +44,8 @@ uint8_t *vector_doc_render_rect(VectorDoc *doc, unsigned width, unsigned height,
 // be bounded and for a document that has never had its damage cleared.
 bool vector_doc_damage(const VectorDoc *doc, unsigned width, unsigned height, VectorRect *rect);
 void vector_doc_clear_damage(VectorDoc *doc);
+// Takes a point from the user units of the image into the coordinate system of a group, 0 being the root
+// group. False when the group does not exist or its transforms cannot be inverted.
+bool vector_doc_point_to_group(const VectorDoc *doc, uint32_t group, double *x, double *y);
+// Whether the len bytes at s are a color, in the syntax of the records, other than none
+bool vector_color_paints(const char *s, size_t len);
