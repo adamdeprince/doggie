@@ -120,6 +120,10 @@ Sequences
 ``pads``         The three pads are plugged in while the terminal runs, then every
                  key, the ring with a finger lift, a mode switch, keys held while the
                  pad leaves, the strip, the dial
+``padgroups``    A pad of the second tablet with two groups of controls and a key in
+                 neither: which tablet it belongs to, which group each control is in,
+                 and its description again when the compositor takes a key out of a
+                 group
 ================ ====================================================================
 
 ``pads`` is last because a tree that destroys pads as they are announced does
@@ -221,7 +225,11 @@ Ubuntu).
 ================ ====================================================================
 ``stylus``,      A pen, or its eraser, hovers, draws a diagonal with rising pressure
 ``eraser``       and lifts. The driver's tablet device has pressure and no tilt, and
-                 kitty takes the tool from the device's name
+                 kitty takes the tool from the device's name. Each report says
+                 where on the tablet the pen is
+``mapped``       The tablet is mapped to the middle half of the screen with
+                 ``xinput`` while the terminal runs: the pointer goes where the
+                 server puts it and the place on the tablet is still the tablet's
 ``buttons``      The side buttons of a pen and the back and forward buttons
 ``touch``        A touchscreen through XInput 2.2: one finger, then two
 ``gestures``     The gestures of XInput 2.4: pinches and a swipe

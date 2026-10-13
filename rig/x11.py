@@ -17,6 +17,7 @@ import argparse
 import os
 import socket
 import struct
+import subprocess
 import sys
 import time
 from collections.abc import Callable
@@ -102,6 +103,7 @@ class Rig(Expectations):
         self.expectations = open(expect, 'w', buffering=1) if expect else None
         self.width, self.height = width, height
         self.centred = 0
+        self.display = ''
         self.devices = {name: Device(os.path.join(sockets, name)) for name in ('stylus', 'eraser', 'touchscreen', 'touchpad', 'mouse')}
 
     def at(self, x: float, y: float) -> dict[str, float]:
@@ -125,6 +127,12 @@ def setup(rig: Rig) -> None:
     time.sleep(0.3)
 
 
+def on_tablet(rig: Rig, x: float, y: float, left: float = 0, width: float = 1) -> dict[str, int]:
+    """Where on its tablet a tool is when the pointer is at a pixel, as the tablet pointer protocol reports it: the
+    tablet is mapped to the part of the screen that starts at left and is width wide, both fractions of the screen"""
+    return {'rx': min(65535, round((x / rig.width - left) / width * (AXIS_MAX + 1))), 'ry': min(65535, round(y * (AXIS_MAX + 1) / rig.height))}
+
+
 def stroke(rig: Rig, tool: str = 'stylus') -> None:
     "A pen comes into proximity, hovers, draws a diagonal with rising pressure, lifts and leaves"
     d = rig.devices[tool]
@@ -133,7 +141,9 @@ def stroke(rig: Rig, tool: str = 'stylus') -> None:
 
     def sample(note: str, phase: int, buttons: int, force: int) -> None:
         d.motion(**rig.at(x, y), pressure=force)
-        rig.expect('tablet-pointer', f'{tool}: {note}', kind=1, phase=phase, x=px(x), y=px(y), buttons=buttons, tool=number, p=pressure(force))
+        rig.expect(
+            'tablet-pointer', f'{tool}: {note}', kind=1, phase=phase, x=px(x), y=px(y), buttons=buttons, tool=number, p=pressure(force), **on_tablet(rig, x, y)
+        )
         time.sleep(0.008)
 
     d.proximity(True, **rig.at(x, y), pressure=0)
@@ -150,6 +160,36 @@ def stroke(rig: Rig, tool: str = 'stylus') -> None:
     rig.expect('tablet-pointer', f'{tool}: tip up', kind=1, phase=3, x=px(x), y=px(y), buttons=0, tool=number)
     # the X server tells XInput 2 clients nothing of a tool leaving, see docs/tablet-protocol.rst
     d.proximity(False, **rig.at(x, y), pressure=0)
+    time.sleep(0.1)
+
+
+def mapped(rig: Rig, tool: str = 'stylus') -> None:
+    """The tablet is mapped to the middle half of the screen, as a user does who has two monitors, while the
+    terminal runs. The pointer goes where the server puts it and the place on the tablet is still the tablet's"""
+    if not rig.display:
+        raise SystemExit('the mapped sequence needs --display, to set the mapping with xinput')
+    d = rig.devices[tool]
+    name = f'Rig Wacom Intuos5 touch M Pen {tool}'
+    left, width = 0.25, 0.5
+
+    def map_to(*matrix: float) -> None:
+        subprocess.run(
+            ['xinput', 'set-prop', name, 'Coordinate Transformation Matrix', *map(str, matrix)], env={**os.environ, 'DISPLAY': rig.display}, check=True
+        )
+        time.sleep(0.1)
+
+    map_to(width, 0, left, 0, 1, 0, 0, 0, 1)
+    try:
+        d.proximity(True, x=0, y=0, pressure=0)
+        for i, (fx, fy) in enumerate(((0.0, 0.25), (0.25, 0.5), (0.5, 0.5), (0.9, 0.75))):
+            # the tool is at this fraction of the tablet, and the pointer at what the mapping makes of it
+            x, y = (left + fx * width) * rig.width, fy * rig.height
+            d.motion(x=fx * (AXIS_MAX + 1), y=fy * (AXIS_MAX + 1), pressure=0)
+            rig.expect('tablet-pointer', f'{tool}: mapped, point {i}', kind=1, phase=0, x=px(x), y=px(y), **on_tablet(rig, x, y, left, width))
+            time.sleep(0.02)
+        d.proximity(False, x=0, y=0, pressure=0)
+    finally:
+        map_to(1, 0, 0, 0, 1, 0, 0, 0, 1)
     time.sleep(0.1)
 
 
@@ -268,6 +308,7 @@ def mouse(rig: Rig) -> None:
 SEQUENCES: dict[str, Callable[[Rig], None]] = {
     'stylus': lambda rig: stroke(rig, 'stylus'),
     'eraser': lambda rig: stroke(rig, 'eraser'),
+    'mapped': mapped,
     'buttons': buttons,
     'touch': touch,
     'gestures': gestures,
@@ -282,10 +323,12 @@ def main() -> None:
     p.add_argument('--expect', help='Where to write what the program in the terminal should receive')
     p.add_argument('--wait', help='A file that appears when the program in the terminal is ready')
     p.add_argument('--size', default='1280x800', help='The size of the screen and of the window that fills it')
+    p.add_argument('--display', default='', help='The X display, for the sequences that change a setting of the server')
     p.add_argument('sequences', nargs='*', help=f'What to play, all by default: {", ".join(SEQUENCES)}')
     args = p.parse_args()
     width, height = map(int, args.size.split('x'))
     rig = Rig(args.sockets, args.expect, width, height)
+    rig.display = args.display
     end = time.monotonic() + 30
     while args.wait and not os.path.exists(args.wait):
         if time.monotonic() > end:

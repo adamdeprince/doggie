@@ -17,6 +17,7 @@ import argparse
 import json
 import os
 import socket
+import struct
 import sys
 import time
 from collections.abc import Callable
@@ -47,6 +48,13 @@ DEVICES: dict[str, dict[str, Any]] = {
     'tablet:cintiq': {'name': 'Wacom Cintiq Pro 16 Pen', 'vid': 0x56A, 'pid': 0x350, 'bustype': 3, 'paths': ['/dev/input/event94']},
     'tool:propen': {'type': 'pen', 'serial': 297797542, 'hwid': 0x823, 'caps': ['pressure', 'distance', 'tilt']},
 }
+# A pad of no particular make whose controls are in two groups, with one key that is in neither
+PAD_TWO: dict[str, Any] = {
+    'buttons': 6, 'paths': ['/dev/input/event95'],
+    'groups': [{'buttons': [0, 1, 2], 'rings': 1, 'modes': 3}, {'buttons': [4, 5], 'strips': 1, 'modes': 2}],
+}
+# The tablets get numbers in the order they are plugged in, which is the order they have above
+TABLET_NUMBERS = {'intuos5': 1, 'cintiq': 2}
 TOOL_NUMBERS = {'pen': 1, 'eraser': 2, 'brush': 3, 'pencil': 4, 'airbrush': 5, 'mouse': 6, 'lens': 7}
 VALID_BITS = {'pressure': 1, 'tilt': 2, 'rotation': 4, 'slider': 8, 'distance': 32, 'wheel': 64}
 
@@ -176,6 +184,7 @@ def tool_stroke(rig: Rig, tool: str = 'pen', tablet: str = 'intuos5') -> None:
         rig.expect('tablet-pointer', f'{tool}: {note}', phase=phase, buttons=buttons, **fields)
         time.sleep(0.008)
 
+    rig.expect('tablet-pointer:device', f'{tool}: is described', kind=1, tool=tool_number(tool), axes=tool_valid(tool), tablet=TABLET_NUMBERS[tablet])
     sample('enters proximity', 0, 0, ['proximity_in', '$serial', f'tablet:{tablet}', '$surface'], distance=40000)
     for i in range(3):
         x, y = x + 10, y + 5
@@ -377,11 +386,11 @@ def pads(rig: Rig) -> None:
     def enters(name: str, mode: int = 0, **description: Any) -> None:
         "The pad gets the focus, and the compositor says what mode its group is in, as wlroots and Mutter do after every enter"
         rig.play(f'pad:{name}', ['enter', '$serial', 'tablet:intuos5', '$surface'])
-        rig.expect('tablet-pointer:device', f'{name}: is described', kind=3, groups=1, **description)
+        rig.expect('tablet-pointer:device', f'{name}: is described', kind=3, groups=1, tablet=TABLET_NUMBERS['intuos5'], **description)
         time.sleep(0.02)
         pad(name, f'its group is in mode {mode}', ['mode_switch', '$time', '$serial', mode], to=f'group:{name}:0', group=0, mode=mode)
 
-    enters('intuos5', mode=2, buttons=9, rings=1, strips=0, dials=0, modes=4)
+    enters('intuos5', mode=2, buttons=9, rings=1, strips=0, dials=0, modes=4, bgroups='0,0,0,0,0,0,0,0,0', rgroups=0)
     for b in range(9):
         pad('intuos5', f'key {b} down', ['button', '$time', b, 1], button=b, state=1)
         pad('intuos5', f'key {b} up', ['button', '$time', b, 0], button=b, state=0)
@@ -403,7 +412,7 @@ def pads(rig: Rig) -> None:
     time.sleep(0.02)
 
     strip = 'strip:intuos3:0:0'
-    enters('intuos3', buttons=4, rings=0, strips=1, dials=0, modes=1)
+    enters('intuos3', buttons=4, rings=0, strips=1, dials=0, modes=1, bgroups='0,0,0,0', sgroups=0)
     for pos in (0, 16384, 32768, 65535):
         pad('intuos3', f'strip at {pos}', ['source', FINGER], ['position', pos], ['frame', '$time'], to=strip, strip=0, pos=pos, src=1)
     pad('intuos3', 'finger off the strip', ['source', FINGER], ['stop'], ['frame', '$time'], to=strip, strip=0, stop=1, src=1)
@@ -411,7 +420,7 @@ def pads(rig: Rig) -> None:
 
     dial = 'dial:huion:0:0'
     has_dial = dial in named  # version 1 of tablet-v2 has no dials, the pad is then just its key
-    enters('huion', buttons=1, rings=0, strips=0, dials=1 if has_dial else 0, modes=1)
+    enters('huion', buttons=1, rings=0, strips=0, dials=1 if has_dial else 0, modes=1, bgroups=0, **({'dgroups': 0} if has_dial else {}))
     for delta, what in ((120, 'one click'), (-240, 'two clicks back'), (30, 'a quarter of a click')):
         if has_dial:
             pad('huion', f'dial {what}', ['delta', delta], ['frame', '$time'], to=dial, dial=0, delta=delta)
@@ -420,6 +429,40 @@ def pads(rig: Rig) -> None:
     pad('huion', 'key down', ['button', '$time', 0, 1], button=0, state=1)
     pad('huion', 'key up', ['button', '$time', 0, 0], button=0, state=0)
     pad('huion', 'leaves', ['leave', '$serial', '$surface'])
+    time.sleep(0.1)
+
+
+def pad_groups(rig: Rig) -> None:
+    """A pad of the second tablet whose controls are in two groups: three keys and a ring in one, two keys and a
+    strip in the other, and a key in neither, as one that the compositor keeps for itself is. The pad says which
+    tablet it belongs to and which group each control is in, and when the compositor takes a key out of its
+    group while the pad is in use, the pad is described again"""
+    rig.command(op='add', device='pad:two', **PAD_TWO)
+    time.sleep(0.2)
+    rig.alive()
+    described = dict(kind=3, tablet=TABLET_NUMBERS['cintiq'], buttons=6, rings=1, strips=1, dials=0, groups=2, modes='3,2', rgroups=0, sgroups=1)
+
+    def pad(note: str, *events: list[Any], to: str = 'pad:two', **fields: Any) -> None:
+        rig.play(to, *events)
+        rig.expect('tablet-pointer', f'two: {note}', kind=3, **fields)
+        time.sleep(0.02)
+
+    rig.play('pad:two', ['enter', '$serial', 'tablet:cintiq', '$surface'])
+    rig.expect('tablet-pointer:device', 'two: is described', bgroups='0,0,0,-,1,1', **described)
+    time.sleep(0.02)
+    pad('the first group is in mode 2', ['mode_switch', '$time', '$serial', 2], to='group:two:0', group=0, mode=2)
+    pad('the second group is in mode 1', ['mode_switch', '$time', '$serial', 1], to='group:two:1', group=1, mode=1)
+    pad('a key of the second group', ['button', '$time', 4, 1], ['button', '$time', 4, 0], button=4, state=1)
+    rig.expect('tablet-pointer', 'two: that key up', kind=3, button=4, state=0)
+    pad('the ring of the first group', ['source', FINGER], ['angle', 90], ['frame', '$time'], to='ring:two:0:0', ring=0, angle=9000, src=1)
+    pad('the strip of the second group', ['source', FINGER], ['position', 32768], ['frame', '$time'], to='strip:two:1:0', strip=0, pos=32768, src=1)
+    # the compositor takes key 2 for itself, and says so by listing the keys of the group again
+    rig.play('group:two:0', ['buttons', struct.pack('=2I', 0, 1).hex()])
+    rig.expect('tablet-pointer:device', 'two: is described again when a key leaves its group', bgroups='0,0,-,-,1,1', mode='2,1', **described)
+    time.sleep(0.02)
+    pad('a key of the first group afterwards', ['button', '$time', 0, 1], ['button', '$time', 0, 0], button=0, state=1)
+    rig.expect('tablet-pointer', 'two: that key up', kind=3, button=0, state=0)
+    rig.play('pad:two', ['leave', '$serial', '$surface'])
     time.sleep(0.1)
 
 
@@ -630,6 +673,7 @@ SEQUENCES: dict[str, Callable[[Rig], None]] = {
     'scroll': scroll,
     'handover': handover,
     'pads': pads,
+    'padgroups': pad_groups,
 }
 
 
