@@ -75,8 +75,10 @@ program does not wait for the bit: a report has a shape when its ``valid``
 says so. What goes beyond tools and fingers, the last four, is sent only
 when asked for with the mode. ``mode`` is the current state of the
 mode described below. ``w,h`` are the size of the cell area in pixels (1 to
-65535) and ``cw,ch`` the cell size (1 to 4096). A program queries again
-after a resize. A terminal that does not support the protocol ignores the
+65535) and ``cw,ch`` the cell size (1 to 4096). Pixels, here and in the
+reports, are physical pixels: those of the framebuffer the terminal draws
+into, not the scaled units of the window system, so a position is as fine as
+the display is. A program queries again after a resize. A terminal that does not support the protocol ignores the
 query, so a program must time out and fall back to mouse reporting. A query
 does not change the mode.
 
@@ -198,11 +200,11 @@ default to zero, except ``tool``, which defaults to ``1``:
 ``contact``      Identifies one contact of a device, stable for its lifetime.
                  A pen is normally contact ``0``, fingers get the system's
                  touch ids, which it may reuse once a finger has lifted
-``x``, ``y``     Position in 1/256 pixel, signed, zero based, relative to the
-                 top left of the cell area, within ±1073741823; for a finger
-                 on a touchpad (``src=1``) the position on the pad instead,
-                 ``0`` to ``65535`` on each axis with the origin at its top
-                 left
+``x``, ``y``     Position in 1/256 of a physical pixel, signed, zero based,
+                 relative to the top left of the cell area, within
+                 ±1073741823; for a finger on a touchpad (``src=1``) the
+                 position on the pad instead, ``0`` to ``65535`` on each axis
+                 with the origin at its top left
 ``buttons``      Held buttons: tip or left ``1``, barrel or right ``2``, second
                  barrel or middle ``4``, back ``8``, forward ``16``, third
                  barrel ``32``. A finger has ``1`` while it is down
@@ -243,9 +245,9 @@ terminal must not make a measurement up. The measurements, with their
                               the last report, in hundredths of a degree and in
                               clicks
 ``major``, ``minor``,   128   The shape of a finger or a totem on the screen: the
-``angle``                     axes of the ellipse of the contact in 1/256 pixel
-                              and its orientation in hundredths of a degree,
-                              clockwise from the vertical
+``angle``                     axes of the ellipse of the contact in 1/256 of a
+                              physical pixel and its orientation in hundredths of
+                              a degree, clockwise from the vertical
 ======================= ===== ====================================================
 
 Fingers
