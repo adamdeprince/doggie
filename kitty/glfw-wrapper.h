@@ -1839,6 +1839,75 @@ typedef struct GLFWgammaramp {
     unsigned int size;
 } GLFWgammaramp;
 
+/*! @brief A color description: how pixel values relate to light.
+ *
+ *  Used both for what the display a window is on can show, see
+ *  @ref glfwGetWindowPreferredColorDescription, and for what the pixels a
+ *  window draws mean, see @ref glfwSetWindowColorDescription.
+ *
+ *  @ingroup window
+ */
+typedef enum {
+    /*! Not one of the named sets, see the chromaticities.
+     */
+    GLFW_COLOR_PRIMARIES_UNKNOWN,
+    GLFW_COLOR_PRIMARIES_SRGB,
+    GLFW_COLOR_PRIMARIES_DISPLAY_P3,
+    GLFW_COLOR_PRIMARIES_BT2020,
+    GLFW_COLOR_PRIMARIES_DCI_P3,
+    GLFW_COLOR_PRIMARIES_ADOBE_RGB,
+} GLFWcolorprimaries;
+typedef enum {
+    GLFW_COLOR_TRANSFER_UNKNOWN,
+    GLFW_COLOR_TRANSFER_GAMMA22,
+    /*! The two piece curve of IEC 61966-2-1.
+     */
+    GLFW_COLOR_TRANSFER_SRGB,
+    GLFW_COLOR_TRANSFER_BT1886,
+    /*! A pure power curve, with the exponent in transfer_exponent.
+     */
+    GLFW_COLOR_TRANSFER_POWER,
+    /*! Linear, defined below zero and above one as well.
+     */
+    GLFW_COLOR_TRANSFER_EXT_LINEAR,
+    GLFW_COLOR_TRANSFER_PQ,
+    GLFW_COLOR_TRANSFER_HLG,
+} GLFWcolortransfer;
+typedef enum {
+    GLFW_COLOR_INTENT_PERCEPTUAL,
+    GLFW_COLOR_INTENT_RELATIVE,
+    GLFW_COLOR_INTENT_SATURATION,
+    GLFW_COLOR_INTENT_ABSOLUTE,
+    GLFW_COLOR_INTENT_RELATIVE_BPC,
+} GLFWcolorintent;
+typedef struct GLFWcolordescription {
+    GLFWcolorprimaries primaries;
+    GLFWcolortransfer transfer;
+    float transfer_exponent;
+    /*! CIE 1931 xy chromaticities of red, green, blue and white, in that
+     *  order: of the primaries the pixel values are encoded with, and of the
+     *  target, the colors that can actually be shown, which a description
+     *  without a target of its own shares with the encoding. All zero when
+     *  unknown.
+     */
+    float chromaticities[8], target_chromaticities[8];
+    /*! In cd/m², zero when not given: the darkest and brightest the encoding
+     *  reaches and where its reference white, the white of ordinary content,
+     *  lies, then the darkest and brightest the target can show.
+     */
+    float min_luminance, max_luminance, reference_luminance;
+    float target_min_luminance, target_max_luminance;
+    /*! The maximum content and frame-average light levels, in cd/m², zero
+     *  when not given.
+     */
+    float max_cll, max_fall;
+    /*! Only when setting: use the predefined Windows scRGB description, sRGB
+     *  primaries with a linear curve where 1.0 is 80 cd/m², and ignore every
+     *  other member.
+     */
+    bool windows_scrgb;
+} GLFWcolordescription;
+
 /*! @brief Image data.
  *
  *  This describes a single 2D image.  See the documentation for each related
@@ -2229,6 +2298,14 @@ GFW_EXTERN glfwSetWindowAttrib_func glfwSetWindowAttrib_impl;
 typedef int (*glfwSetWindowBlur_func)(GLFWwindow*, int);
 GFW_EXTERN glfwSetWindowBlur_func glfwSetWindowBlur_impl;
 #define glfwSetWindowBlur glfwSetWindowBlur_impl
+
+typedef bool (*glfwGetWindowPreferredColorDescription_func)(GLFWwindow*, GLFWcolordescription*);
+GFW_EXTERN glfwGetWindowPreferredColorDescription_func glfwGetWindowPreferredColorDescription_impl;
+#define glfwGetWindowPreferredColorDescription glfwGetWindowPreferredColorDescription_impl
+
+typedef bool (*glfwSetWindowColorDescription_func)(GLFWwindow*, const GLFWcolordescription*, GLFWcolorintent);
+GFW_EXTERN glfwSetWindowColorDescription_func glfwSetWindowColorDescription_impl;
+#define glfwSetWindowColorDescription glfwSetWindowColorDescription_impl
 
 typedef void (*glfwSetWindowUserPointer_func)(GLFWwindow*, void*);
 GFW_EXTERN glfwSetWindowUserPointer_func glfwSetWindowUserPointer_impl;
