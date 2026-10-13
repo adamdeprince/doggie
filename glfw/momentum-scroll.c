@@ -207,7 +207,8 @@ handle_scroll_event(_GLFWwindow *w, const GLFWScrollEvent *ev, bool stopped, boo
         return;
     }
     if (!is_finger_based || ev->offset_type != GLFW_SCROLL_OFFEST_HIGHRES || !glfw_is_momentum_scroll_enabled()) {
-        if (ev->x_offset != 0 || ev->y_offset != 0) _glfwInputScroll(w, ev);
+        // An event without a distance still matters when it says the fingers lifted
+        if (ev->x_offset != 0 || ev->y_offset != 0 || ev->scroll_phase != GLFW_NO_MOMENTUM_DATA) _glfwInputScroll(w, ev);
         return;
     }
     if (s.state == PHYSICAL_EVENT_IN_PROGRESS) {
@@ -240,8 +241,16 @@ handle_scroll_event(_GLFWwindow *w, const GLFWScrollEvent *ev, bool stopped, boo
     } else {
         s.state = stopped ? NONE : PHYSICAL_EVENT_IN_PROGRESS;
     }
-    if (s.state == MOMENTUM_IN_PROGRESS) start_momentum_scroll(now);
-    else _glfwInputScroll(w, ev);
+    if (s.state == MOMENTUM_IN_PROGRESS) {
+        if (ev->scroll_phase == GLFW_MOMENTUM_PHASE_ENDED) {
+            // The fingers lifting ends their gesture before the coasting begins. The
+            // distance of this event is already in the velocity of the coasting
+            GLFWScrollEvent ended = *ev;
+            ended.x_offset = ended.y_offset = ended.unscaled.x = ended.unscaled.y = 0;
+            _glfwInputScroll(w, &ended);
+        }
+        start_momentum_scroll(now);
+    } else _glfwInputScroll(w, ev);
 }
 
 void

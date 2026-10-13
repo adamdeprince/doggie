@@ -447,6 +447,16 @@ class TestMouse(BaseTest):
         # a trackpad: precise pixels, a finger gesture in progress, shift held
         self.assertTrue(report(0, -2.5, offset_type=2, phase=3, mods=1, x=33.4, y=12))
         self.ae(c.wtcbuf, b'\x1b]777;scroll;v=1:op=event:dx=0:dy=250:x=33:y=12:mods=1:src=1:phase=2\x1b\\')
+        # the fingers land, lift without a distance, and are cancelled
+        report(1.25, 0, offset_type=2, phase=1)
+        self.ae(c.wtcbuf, b'\x1b]777;scroll;v=1:op=event:dx=-125:dy=0:x=0:y=0:mods=0:src=1:phase=1\x1b\\')
+        self.assertTrue(report(0, 0, offset_type=2, phase=4))
+        self.ae(c.wtcbuf, b'\x1b]777;scroll;v=1:op=event:dx=0:dy=0:x=0:y=0:mods=0:src=1:phase=3\x1b\\')
+        report(0, 0, offset_type=2, phase=5)
+        self.ae(c.wtcbuf, b'\x1b]777;scroll;v=1:op=event:dx=0:dy=0:x=0:y=0:mods=0:src=1:phase=7\x1b\\')
+        # coasting takes precedence over the finger phase of the same event
+        report(0, 4, offset_type=2, momentum=1, phase=4)
+        self.ae(c.wtcbuf, b'\x1b]777;scroll;v=1:op=event:dx=0:dy=-400:x=0:y=0:mods=0:src=1:phase=4\x1b\\')
         # a wheel: one notch left converted to pixels, momentum ended
         report(120, 0, offset_type=1, momentum=4)
         self.ae(c.wtcbuf, b'\x1b]777;scroll;v=1:op=event:dx=-5000:dy=0:x=0:y=0:mods=0:src=0:phase=6\x1b\\')

@@ -218,6 +218,7 @@ typedef struct _GLFWwindowWayland {
         monotonic_t x_start_time, x_stop_time, y_stop_time, y_start_time;
     } pointer_curr_axis_info;
     GLFWOffsetType prev_frame_offset_type;
+    bool finger_scroll_active;  // fingers that scroll this window are on the touchpad, between their first axis event and the stop
 
     _GLFWcursor *currentCursor;
     double cursorPosX, cursorPosY, allCursorPosX, allCursorPosY;
