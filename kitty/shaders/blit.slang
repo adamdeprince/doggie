@@ -27,7 +27,11 @@ uniform Sampler2D image;
 float4
 fragment_main(float2 texcoord: TEXCOORD, uniform float encode_srgb, uniform uint output_gamut)
     : SV_Target {
+    // The one place the layers of a window become what its surface holds. They are linear sRGB, which in a window
+    // in a wide gamut reaches beyond zero and one, see gamut.slang. An HDR window has a linear float backbuffer: its
+    // values are brought to the primaries of the window and left linear. Any other window is sRGB encoded, after
+    // its values are brought to its primaries and clipped to them. For a window in sRGB neither step changes anything
     float4 color_premul = image.Sample(texcoord);
-    if (encode_srgb == 0.0f) return color_premul;  // linear float backbuffer of an HDR window
+    if (encode_srgb == 0.0f) return float4(linear_output_from_extended(color_premul.rgb, output_gamut), color_premul.a);
     return vec4_premul(linear2srgb(output_from_extended(color_premul.rgb / color_premul.a, output_gamut)), color_premul.a);
 }

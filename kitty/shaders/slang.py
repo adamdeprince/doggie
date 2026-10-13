@@ -1526,7 +1526,8 @@ def build_custom_shader_pipeline_ir(pipeline: Pipeline, cache_dir: str, invocati
     pipeline_parts: list[str] = []
     for g_idx, group in enumerate(pipeline['groups']):
         calls = '\n'.join(f'        color = {entry_point(g_idx, i)}(color, t, csd);' for i in range(len(group['shaders'])))
-        calls += '\n        if (convert_to_srgb) color = float4(linear2srgb(output_from_extended(color.rgb, wide_gamut)), color.a);'
+        calls += '\n        if (convert_to_srgb) color = float4(linear2srgb(output_from_extended(color.rgb, wide_gamut, true)), color.a);'
+        calls += '\n        else color = float4(output_from_extended(color.rgb, wide_gamut, false), color.a);'
         prefix = '} else ' if g_idx else ''
         pipeline_parts.append(f'    {prefix}if (group == {g_idx}) {{\n{calls}')
     pipeline_parts.append('    }')

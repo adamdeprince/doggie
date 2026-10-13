@@ -3118,8 +3118,10 @@ run_custom_end_shader(OSWindow *os_window, float sx, float sy, monotonic_t now) 
         glUniform1i(group_loc, (GLint)g);
         glUniform4f(viewport_loc, vp_x, vp_y, vp_w, vp_h);
         glUniform1f(anim_progress_loc, anim_progress);
+        // The last group writes what the surface of the window holds, as the blit does for a window without custom
+        // shaders: encoded, unless the window is an HDR one, and in the primaries of the window
         glUniform1i(convert_to_srgb_loc, is_last && !os_window->linear_output ? 1 : 0);
-        glUniform1ui(wide_gamut_loc, os_window->wide_gamut);
+        glUniform1ui(wide_gamut_loc, is_last ? os_window->wide_gamut : 0);
         // debug_rendering("Custom shader draw group %u: anim_progress=%.4f viewport=(%.2f,%.2f,%.2f,%.2f)\n", g, anim_progress, vp_x, vp_y, vp_w, vp_h);
         draw_quad(false, 0);
     }

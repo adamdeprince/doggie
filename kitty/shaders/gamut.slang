@@ -50,3 +50,13 @@ output_from_extended(float3 c, uint output_gamut) {
     if ((output_gamut & GAMUT_EXTENDED) == 0u) return c;
     return clamp(mul(xyz_to_gamut[output_gamut & 3u], mul(gamut_to_xyz[GAMUT_SRGB], c)), 0.f, 1.f);
 }
+
+// The same step for an HDR window, whose values stay linear and reach above
+// one, where there is no upper bound to clip to: only what lies outside the
+// gamut of the window, the values below zero, is clipped. The change of
+// primaries is linear, so this works on colors multiplied by alpha as well.
+public float3
+linear_output_from_extended(float3 c, uint output_gamut) {
+    if ((output_gamut & GAMUT_EXTENDED) == 0u) return c;
+    return max(mul(xyz_to_gamut[output_gamut & 3u], mul(gamut_to_xyz[GAMUT_SRGB], c)), 0.f);
+}

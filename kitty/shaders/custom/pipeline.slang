@@ -61,14 +61,16 @@ linear2srgb(float3 x) { // vector
 
 // A window in a wide gamut is drawn in linear sRGB that extends beyond zero
 // and one, see gamut.slang. Its colors are brought to the gamut of the window,
-// 1 for Display P3 and 2 for Rec. 2020, before they are encoded. Zero is any
-// other window, which is left as it is.
+// 1 for Display P3 and 2 for Rec. 2020, at the very end. They are clipped to
+// that gamut when they are about to be encoded. In an HDR window they stay
+// linear and reach above one, so there only the values below zero are clipped.
+// Zero is any other window, which is left as it is.
 float3
-output_from_extended(float3 c, uint wide_gamut) {
+output_from_extended(float3 c, uint wide_gamut, bool bounded) {
     if (wide_gamut == 1u) c = mul(float3x3(0.8224621, 0.1775380, 0.0000000, 0.0331941, 0.9668058, 0.0000000, 0.0170827, 0.0723974, 0.9105199), c);
     else if (wide_gamut == 2u) c = mul(float3x3(0.6274039, 0.3292830, 0.0433131, 0.0690973, 0.9195404, 0.0113623, 0.0163914, 0.0880133, 0.8955953), c);
     else return c;
-    return clamp(c, 0.f, 1.f);
+    return bounded ? clamp(c, 0.f, 1.f) : max(c, 0.f);
 }
 
 uniform Sampler2D backbuffer, a, b, persist;
