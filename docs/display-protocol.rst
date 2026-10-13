@@ -155,4 +155,5 @@ primaries of the display, and ``gamut`` is the widest of the three whose area
 in the CIE 1931 chromaticity diagram the display covers at least nine tenths
 of, ``srgb`` when it covers neither of the wider two. ``headroom`` is the
 headroom of the :doc:`hdr-protocol`, after the cap of :opt:`hdr_max_headroom`,
-so it is ``1`` unless :opt:`hdr` is enabled, which so far only macOS supports.
+so it is ``1`` unless :opt:`hdr` is enabled and the window is actually showing
+HDR, which that page says when to expect on macOS and on Wayland.
