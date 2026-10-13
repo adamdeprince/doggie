@@ -71,6 +71,7 @@ typedef VkBool32(APIENTRY *PFN_vkGetPhysicalDeviceWaylandPresentationSupportKHR)
 #include "wayland-xdg-system-bell-v1-client-protocol.h"
 #include "wayland-xdg-toplevel-tag-v1-client-protocol.h"
 #include "wayland-xdg-toplevel-drag-v1-client-protocol.h"
+#include "wayland-color-management-v1-client-protocol.h"
 #include "wayland-xdg-output-unstable-v1-client-protocol.h"
 #include "wayland-wlr-virtual-pointer-unstable-v1-client-protocol.h"
 #include "wayland-virtual-keyboard-unstable-v1-client-protocol.h"
@@ -192,6 +193,16 @@ typedef struct _GLFWwindowWayland {
     struct wp_viewport *wp_viewport;
     struct org_kde_kwin_blur *org_kde_kwin_blur;
     struct ext_background_effect_surface_v1 *ext_background_effect_surface_v1;
+    // Color management, see wl_color_management.c. The compositor's preferred
+    // description of the surface is read into reading and kept in preferred
+    struct {
+        struct wp_color_management_surface_feedback_v1 *feedback;
+        struct wp_color_management_surface_v1 *surface;
+        struct wp_image_description_v1 *pending;
+        struct wp_image_description_info_v1 *info;
+        GLFWcolordescription reading, preferred;
+        bool reading_has_target, has_preferred;
+    } color;
     bool has_blur, expect_scale_from_compositor, window_fully_created;
     struct {
         bool surface_configured, preferred_scale_received, fractional_scale_received;
@@ -386,6 +397,15 @@ typedef struct _GLFWlibraryWayland {
     struct org_kde_kwin_blur_manager *org_kde_kwin_blur_manager;
     struct ext_background_effect_manager_v1 *ext_background_effect_manager_v1;
     uint32_t ext_background_effect_capabilities;
+    // What the compositor's color manager offers, as bit sets numbered by the
+    // values of the protocol, complete once done is set
+    struct {
+        struct wp_color_manager_v1 *manager;
+        struct wl_event_queue *queue;
+        uint32_t version, compositor_version;
+        uint32_t intents, features, transfer_functions, primaries;
+        bool done;
+    } color;
     struct zwlr_layer_shell_v1 *zwlr_layer_shell_v1;
     uint32_t zwlr_layer_shell_v1_version;
     struct wp_single_pixel_buffer_manager_v1 *wp_single_pixel_buffer_manager_v1;
@@ -548,6 +568,10 @@ struct wl_cursor *_glfwLoadCursor(GLFWCursorShape, struct wl_cursor_theme *);
 void destroy_data_offer(_GLFWWaylandDataOffer *);
 const char *_glfwWaylandCompositorName(void);
 void _glfwWaylandConfirmDragSession(void);
+void _glfwWaylandBindColorManager(struct wl_registry *registry, uint32_t name, uint32_t version);
+void _glfwWaylandTerminateColorManager(void);
+void _glfwWaylandColorManagementCreate(_GLFWwindow *window);
+void _glfwWaylandColorManagementDestroy(_GLFWwindow *window);
 
 typedef struct wayland_cursor_shape {
     int which;
