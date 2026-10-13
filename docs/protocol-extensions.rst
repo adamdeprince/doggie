@@ -35,6 +35,7 @@ please do so by opening issues in the `GitHub bug tracker
    desktop-notifications
    pointer-shapes
    tablet-protocol
+   ink-protocol
    unscroll
    color-stack
    deccara
