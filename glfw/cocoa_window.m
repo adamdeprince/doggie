@@ -3009,6 +3009,12 @@ _glfwPlatformSetWindowHDRRange(_GLFWwindow *window UNUSED, float peak UNUSED) {
     return 1.f;
 }
 
+bool
+_glfwPlatformSetWindowHDRPrimaries(_GLFWwindow *window UNUSED, GLFWcolorprimaries primaries UNUSED) {
+    // The colorspace of the window is chosen when it is created
+    return false;
+}
+
 int
 _glfwPlatformCreateWindow(
     _GLFWwindow *window, const _GLFWwndconfig *wndconfig, const _GLFWctxconfig *ctxconfig, const _GLFWfbconfig *fbconfig, const GLFWLayerShellConfig *lsc) {

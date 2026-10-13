@@ -207,11 +207,17 @@ typedef struct _GLFWwindowWayland {
     // HDR, see the end of wl_window.c. wanted is the window hint, enabled says
     // the window has a floating point surface holding linear values. The
     // luminances are those the compositor was last told the values 0 and 1
-    // of the surface stand for, reference being that of SDR white
+    // of the surface stand for, reference being that of SDR white, and the
+    // primaries those it was told the values are in. peak is what the
+    // application last said its contents reach, and wanted_primaries the
+    // primaries it draws in
     struct {
         bool wanted, enabled, described;
-        float reference_luminance, max_luminance;
-        float refused_reference_luminance, refused_max_luminance;  // what the compositor would not accept, so as not to ask again
+        float peak, reference_luminance, max_luminance;
+        GLFWcolorprimaries wanted_primaries, primaries;
+        // what the compositor would not accept, so as not to ask again
+        float refused_reference_luminance, refused_max_luminance;
+        GLFWcolorprimaries refused_primaries;
     } hdr;
     bool has_blur, expect_scale_from_compositor, window_fully_created;
     struct {

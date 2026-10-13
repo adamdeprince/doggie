@@ -251,6 +251,9 @@ load_glfw(const char* path) {
     *(void **) (&glfwSetWindowHDRRange_impl) = dlsym(handle, "glfwSetWindowHDRRange");
     if (glfwSetWindowHDRRange_impl == NULL) fail("Failed to load glfw function glfwSetWindowHDRRange with error: %s", dlerror());
 
+    *(void **) (&glfwSetWindowHDRPrimaries_impl) = dlsym(handle, "glfwSetWindowHDRPrimaries");
+    if (glfwSetWindowHDRPrimaries_impl == NULL) fail("Failed to load glfw function glfwSetWindowHDRPrimaries with error: %s", dlerror());
+
     *(void **) (&glfwGetWindowPreferredColorDescription_impl) = dlsym(handle, "glfwGetWindowPreferredColorDescription");
     if (glfwGetWindowPreferredColorDescription_impl == NULL) fail("Failed to load glfw function glfwGetWindowPreferredColorDescription with error: %s", dlerror());
 

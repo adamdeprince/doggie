@@ -4373,3 +4373,8 @@ float
 _glfwPlatformSetWindowHDRRange(_GLFWwindow *window UNUSED, float peak UNUSED) {
     return 1.f;
 }
+
+bool
+_glfwPlatformSetWindowHDRPrimaries(_GLFWwindow *window UNUSED, GLFWcolorprimaries primaries UNUSED) {
+    return false;
+}

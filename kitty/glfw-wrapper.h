@@ -2527,6 +2527,10 @@ typedef float (*glfwSetWindowHDRRange_func)(GLFWwindow*, float);
 GFW_EXTERN glfwSetWindowHDRRange_func glfwSetWindowHDRRange_impl;
 #define glfwSetWindowHDRRange glfwSetWindowHDRRange_impl
 
+typedef bool (*glfwSetWindowHDRPrimaries_func)(GLFWwindow*, GLFWcolorprimaries);
+GFW_EXTERN glfwSetWindowHDRPrimaries_func glfwSetWindowHDRPrimaries_impl;
+#define glfwSetWindowHDRPrimaries glfwSetWindowHDRPrimaries_impl
+
 typedef bool (*glfwGetWindowPreferredColorDescription_func)(GLFWwindow*, GLFWcolordescription*);
 GFW_EXTERN glfwGetWindowPreferredColorDescription_func glfwGetWindowPreferredColorDescription_impl;
 #define glfwGetWindowPreferredColorDescription glfwGetWindowPreferredColorDescription_impl

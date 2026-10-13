@@ -1576,6 +1576,7 @@ _glfwPlatformCreateWindow(
     csd_initialize_metrics(window);
     window->wl.transparent = fbconfig->transparent;
     window->wl.hdr.wanted = wndconfig->wl.hdr;
+    window->wl.hdr.wanted_primaries = GLFW_COLOR_PRIMARIES_SRGB;
     strncpy(window->wl.appId, wndconfig->wl.appId, sizeof(window->wl.appId));
     window->swaps_disallowed = true;
 
@@ -3875,12 +3876,15 @@ _glfwPlatformStartDrag(_GLFWwindow *window, const GLFWimage *thumbnail) {
 
 // HDR {{{
 
-// An HDR window has a floating point surface that holds linear values in the
-// sRGB primaries. The compositor is told what luminances the values 0 and 1 of
-// the surface stand for, and it shows a value as the luminance in proportion.
-// SDR white is the reference white of that description, so when the contents
-// reach above SDR white the range has to reach as far, and SDR white lies at
-// a value below 1.
+// An HDR window has a floating point surface that holds linear values. The
+// compositor is told what luminances the values 0 and 1 of the surface stand
+// for, and it shows a value as the luminance in proportion. SDR white is the
+// reference white of that description, so when the contents reach above SDR
+// white the range has to reach as far, and SDR white lies at a value below 1.
+// The values are in the sRGB primaries unless the application draws in a wider
+// gamut and says so with glfwSetWindowHDRPrimaries(). A surface has a single
+// description, and for an HDR window this is where all of it is said: the
+// primaries, the curve and the luminances.
 
 static bool
 hdr_can_be_described(void) {
@@ -3891,9 +3895,12 @@ hdr_can_be_described(void) {
 }
 
 // Tells the compositor that the contents of the window reach peak times SDR
-// white. When it refuses, what it was told before stands
+// white, in the primaries the application draws in. When it refuses, what it
+// was told before stands
 static bool
 describe_hdr_window(_GLFWwindow *window, float peak) {
+    const GLFWcolorprimaries primaries = window->wl.hdr.wanted_primaries;
+    window->wl.hdr.peak = peak;
     // SDR white is shown at the reference white of the display, whatever number stands for it, as compositors
     // match the reference whites of what they show. The display's own number is used so that the luminances
     // told are near those shown
@@ -3901,10 +3908,14 @@ describe_hdr_window(_GLFWwindow *window, float peak) {
     const float reference = has_reference ? roundf(window->wl.color.preferred.reference_luminance) : 80.f;
     // Whole cd/m² is all the protocol carries, so the peak is rounded up to the next luminance that can be said
     const float max = MAX(reference, ceilf(MIN(MAX(1.f, peak), 1000.f) * reference - 0.001f));
-    if (window->wl.hdr.described && reference == window->wl.hdr.reference_luminance && max == window->wl.hdr.max_luminance) return true;
-    if (reference == window->wl.hdr.refused_reference_luminance && max == window->wl.hdr.refused_max_luminance) return false;
+    if (window->wl.hdr.described && reference == window->wl.hdr.reference_luminance && max == window->wl.hdr.max_luminance &&
+        primaries == window->wl.hdr.primaries)
+        return true;
+    if (reference == window->wl.hdr.refused_reference_luminance && max == window->wl.hdr.refused_max_luminance &&
+        primaries == window->wl.hdr.refused_primaries)
+        return false;
     const GLFWcolordescription d = {
-        .primaries = GLFW_COLOR_PRIMARIES_SRGB,
+        .primaries = primaries,
         .transfer = GLFW_COLOR_TRANSFER_EXT_LINEAR,
         .max_luminance = max,
         .reference_luminance = reference,
@@ -3912,11 +3923,13 @@ describe_hdr_window(_GLFWwindow *window, float peak) {
     if (!_glfwPlatformSetWindowColorDescription(window, &d, GLFW_COLOR_INTENT_PERCEPTUAL)) {
         window->wl.hdr.refused_reference_luminance = reference;
         window->wl.hdr.refused_max_luminance = max;
+        window->wl.hdr.refused_primaries = primaries;
         return false;
     }
     window->wl.hdr.described = true;
     window->wl.hdr.reference_luminance = reference;
     window->wl.hdr.max_luminance = max;
+    window->wl.hdr.primaries = primaries;
     return true;
 }
 
@@ -3939,5 +3952,19 @@ _glfwPlatformSetWindowHDRRange(_GLFWwindow *window, float peak) {
     if (!window->wl.hdr.enabled) return 1.f;
     describe_hdr_window(window, peak);
     return window->wl.hdr.reference_luminance / window->wl.hdr.max_luminance;
+}
+
+bool
+_glfwPlatformSetWindowHDRPrimaries(_GLFWwindow *window, GLFWcolorprimaries primaries) {
+    // A window without a floating point surface is not described here at all
+    if (!window->wl.hdr.enabled) return false;
+    if (primaries == window->wl.hdr.wanted_primaries) return true;
+    const GLFWcolorprimaries before = window->wl.hdr.wanted_primaries;
+    window->wl.hdr.wanted_primaries = primaries;
+    if (describe_hdr_window(window, window->wl.hdr.peak)) return true;
+    // The compositor does not take linear values in these primaries. What it was told before stands, and it is what
+    // the window has to go on being drawn in
+    window->wl.hdr.wanted_primaries = before;
+    return false;
 }
 // }}}

@@ -501,11 +501,19 @@ gamut_wanted_for_os_window(OSWindow *w) {
     return glfwGetWindowPreferredColorDescription(w->handle, &shown) ? widest_gamut_shown(&shown) : 0;
 }
 
-// How a window in a gamut is described to the compositor. A surface has a
-// single description, so this is the one place the primaries of a window are
-// chosen: whatever else has a say in the description, a window that shows
-// more than SDR white for instance, starts from what this returns for
-// OSWindow.wide_gamut and changes the curve and the luminances.
+// The primaries of a gamut of docs/wide-gamut-protocol.rst
+static GLFWcolorprimaries
+primaries_of_gamut(uint8_t gamut) {
+    static const GLFWcolorprimaries primaries[] = {
+        [0] = GLFW_COLOR_PRIMARIES_SRGB,
+        [GAMUT_DISPLAY_P3] = GLFW_COLOR_PRIMARIES_DISPLAY_P3,
+        [GAMUT_REC2020] = GLFW_COLOR_PRIMARIES_BT2020,
+    };
+    return primaries[gamut < arraysz(primaries) ? gamut : 0];
+}
+
+// How a window in a gamut is described to the compositor when it is not an
+// HDR window, whose description is another, see update_os_window_colorspace().
 //
 // What is drawn is sRGB encoded: linear values go through the two piece curve
 // of sRGB on their way to the window. That curve is how the colors were
@@ -521,18 +529,25 @@ gamut_wanted_for_os_window(OSWindow *w) {
 // saturated untagged color by a step in 255.
 static GLFWcolordescription
 color_description_for_gamut(uint8_t gamut) {
-    static const GLFWcolorprimaries primaries[] = {
-        [0] = GLFW_COLOR_PRIMARIES_SRGB,
-        [GAMUT_DISPLAY_P3] = GLFW_COLOR_PRIMARIES_DISPLAY_P3,
-        [GAMUT_REC2020] = GLFW_COLOR_PRIMARIES_BT2020,
-    };
-    return (GLFWcolordescription){.primaries = primaries[gamut < arraysz(primaries) ? gamut : 0], .transfer = GLFW_COLOR_TRANSFER_GAMMA22};
+    return (GLFWcolordescription){.primaries = primaries_of_gamut(gamut), .transfer = GLFW_COLOR_TRANSFER_GAMMA22};
 }
 
 // Tells the compositor that the window is in the wide gamut the user asked
 // for with wayland_colorspace, or that it no longer is, and returns whether
 // that changed, which changes how the window has to be drawn: see
 // GAMUT_EXTENDED in shaders/gamut.slang. Called before a frame is drawn.
+//
+// A surface has a single description, and which one a window has depends on
+// what the window is. An HDR window, one with a floating point surface that
+// holds linear values, is described by glfwSetWindowHDRRange() as linear,
+// with the luminances its contents reach, and all that is said from here is
+// the primaries of that description. Any other window is described here in
+// full, by its primaries and the curve its values are encoded with, and has
+// no description at all while it is sRGB. A window is the one or the other for
+// as long as it exists, so the two never describe the same surface. What the
+// window is drawn as follows what the compositor took: an HDR window whose
+// wide primaries are refused stays an HDR window in sRGB, a window without
+// HDR is wide if that is taken, and plain sRGB is what is left.
 bool
 update_os_window_colorspace(OSWindow *w) {
     if (!global_state.is_wayland || !w->handle) return false;
@@ -542,7 +557,10 @@ update_os_window_colorspace(OSWindow *w) {
     const uint8_t before = w->wide_gamut;
     w->wide_gamut = 0;
     w->refused_wide_gamut = 0;
-    if (wanted && wide_gamut_can_be_drawn()) {
+    if (w->linear_output) {
+        if (wanted && wide_gamut_can_be_drawn() && glfwSetWindowHDRPrimaries(w->handle, primaries_of_gamut(wanted))) w->wide_gamut = wanted;
+        else glfwSetWindowHDRPrimaries(w->handle, GLFW_COLOR_PRIMARIES_SRGB);
+    } else if (wanted && wide_gamut_can_be_drawn()) {
         GLFWcolordescription desc = color_description_for_gamut(wanted);
         bool accepted = glfwSetWindowColorDescription(w->handle, &desc, GLFW_COLOR_INTENT_PERCEPTUAL);
         if (!accepted) {
@@ -557,7 +575,7 @@ update_os_window_colorspace(OSWindow *w) {
         w->refused_wide_gamut = wanted;
         debug("The window %llu stays sRGB, the compositor does not take a description for gamut %u\n", w->id, wanted);
     }
-    if (before && !w->wide_gamut) glfwSetWindowColorDescription(w->handle, NULL, GLFW_COLOR_INTENT_PERCEPTUAL);
+    if (before && !w->wide_gamut && !w->linear_output) glfwSetWindowColorDescription(w->handle, NULL, GLFW_COLOR_INTENT_PERCEPTUAL);
     if (before != w->wide_gamut) debug("The window %llu is now drawn in gamut %u\n", w->id, w->wide_gamut);
     return before != w->wide_gamut;
 }

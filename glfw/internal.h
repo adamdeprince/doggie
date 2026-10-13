@@ -893,6 +893,7 @@ int _glfwPlatformSetWindowBlur(_GLFWwindow *handle, int value);
 float _glfwPlatformGetWindowHDRHeadroom(_GLFWwindow *window);
 void _glfwPlatformSetWindowHDRActive(_GLFWwindow *window, bool active);
 float _glfwPlatformSetWindowHDRRange(_GLFWwindow *window, float peak);
+bool _glfwPlatformSetWindowHDRPrimaries(_GLFWwindow *window, GLFWcolorprimaries primaries);
 bool _glfwPlatformGetWindowPreferredColorDescription(_GLFWwindow *window, GLFWcolordescription *desc);
 bool _glfwPlatformSetWindowColorDescription(_GLFWwindow *window, const GLFWcolordescription *desc, GLFWcolorintent intent);
 MonitorGeometry _glfwPlatformGetMonitorGeometry(_GLFWmonitor *monitor);

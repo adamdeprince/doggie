@@ -4387,6 +4387,29 @@ GLFWAPI void glfwSetWindowHDRActive(GLFWwindow *window, bool active);
  */
 GLFWAPI float glfwSetWindowHDRRange(GLFWwindow *window, float peak);
 
+/*! @brief Says which primaries the contents of an HDR window are in.
+ *
+ *  An HDR window on Wayland is described to the compositor as holding linear
+ *  values over the range set with @ref glfwSetWindowHDRRange. A surface has a
+ *  single such description, so a window that is HDR and also drawn in a gamut
+ *  wider than sRGB has that gamut in the same description, rather than one of
+ *  its own from @ref glfwSetWindowColorDescription. The primaries are sRGB
+ *  until they are set with this.
+ *
+ *  @param[in] window The window whose contents are described.
+ *  @param[in] primaries One of the named sets of primaries.
+ *  @return `true` if the window is an HDR window and the system took the
+ *  description with these primaries, in which case the window must draw
+ *  accordingly. `false` otherwise, with nothing changed: for a window that is
+ *  not HDR on Wayland, which is described with
+ *  @ref glfwSetWindowColorDescription instead, and always on macOS and X11.
+ *
+ *  @thread_safety This function must only be called from the main thread.
+ *
+ *  @ingroup window
+ */
+GLFWAPI bool glfwSetWindowHDRPrimaries(GLFWwindow *window, GLFWcolorprimaries primaries);
+
 /*! @brief Retrieves what the display a window is on can show.
  *
  *  This is the color description the system would like the window to draw

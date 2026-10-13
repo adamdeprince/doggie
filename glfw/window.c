@@ -871,6 +871,15 @@ glfwSetWindowHDRRange(GLFWwindow *handle, float peak) {
 }
 
 GLFWAPI bool
+glfwSetWindowHDRPrimaries(GLFWwindow *handle, GLFWcolorprimaries primaries) {
+    _GLFWwindow *window = (_GLFWwindow *)handle;
+    assert(window != NULL);
+
+    _GLFW_REQUIRE_INIT_OR_RETURN(false);
+    return _glfwPlatformSetWindowHDRPrimaries(window, primaries);
+}
+
+GLFWAPI bool
 glfwGetWindowPreferredColorDescription(GLFWwindow *handle, GLFWcolordescription *desc) {
     _GLFWwindow *window = (_GLFWwindow *)handle;
     assert(window != NULL);
