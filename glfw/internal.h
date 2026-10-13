@@ -490,6 +490,8 @@ struct _GLFWmonitor {
 
     // Physical dimensions in millimeters.
     int widthMM, heightMM;
+    // The size above was made up from an assumed 96 DPI, because the system gave none
+    bool physicalSizeAssumed;
 
     // The window whose video mode is current on this monitor
     _GLFWwindow *window;

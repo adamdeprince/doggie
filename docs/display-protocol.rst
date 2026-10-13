@@ -193,3 +193,8 @@ that framebuffer onto the panel, as a Wayland compositor does for a window it
 could only give a whole number scale. A pixel kitty draws is then not exactly
 a pixel of the panel, which no application can avoid, and on macOS ``ppi``
 counts the pixels kitty draws.
+
+``ppi`` is ``0`` for a display that does not say how large it is, as a
+virtual one in a remote session or a virtual machine does not. Window systems
+assume 96 or 72 to the inch for such a display, which is a guess and is not
+passed on.
