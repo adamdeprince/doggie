@@ -233,6 +233,8 @@ program gets what the system reports:
 * On macOS, tablet data arrives with the mouse events of the tablet driver.
   Tilt is scaled from the driver's fraction of maximum tilt assuming 60
   degrees, as Wacom tablets report, and ``z`` is the driver's absolute Z.
+  While a program takes a tool's reports, AppKit's merging of tablet points
+  is turned off, so every sample the tablet sends is reported.
   Fingers are the indirect touches of the trackpad, as AppKit reports them
   to the content view, so a finger resting on the pad is not reported; the
   pad size is the device size AppKit gives, taken to be in points at 72 to

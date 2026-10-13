@@ -543,6 +543,7 @@ handleTabletEvent(_GLFWwindow *window, NSEvent *event) {
             }
         } else {
             t->in_proximity = false;
+            [NSEvent setMouseCoalescingEnabled:YES];
             GLFWTabletEvent ev = {
                 .type = GLFW_TABLET_OUT,
                 .tool = t->tool,
@@ -585,7 +586,11 @@ handleTabletEvent(_GLFWwindow *window, NSEvent *event) {
         .vendor_id = t ? t->vendor_id : 0,
         .product_id = t ? t->product_id : 0,
     };
-    return _glfwInputTablet(window, &ev);
+    const bool consumed = _glfwInputTablet(window, &ev);
+    // The system merges the points of a tool that arrive faster than they are
+    // read into one. An application that takes the points wants all of them
+    if ([NSEvent isMouseCoalescingEnabled] == consumed) [NSEvent setMouseCoalescingEnabled:!consumed];
+    return consumed;
 }
 // }}}
 
