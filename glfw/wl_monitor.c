@@ -51,6 +51,7 @@ outputHandleGeometry(
     monitor->wl.y = y;
     monitor->widthMM = physicalWidth;
     monitor->heightMM = physicalHeight;
+    monitor->physicalSizeAssumed = false;
     monitor->wl.transform = transform;
 }
 

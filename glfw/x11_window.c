@@ -2958,7 +2958,7 @@ _glfwPlatformGetWindowDisplayInfo(_GLFWwindow *window, GLFWdisplayinfo *info) {
     }
     if (!best_monitor) return;
     if (best.refreshRate > 0) info->period_us = 1000000u / (unsigned)best.refreshRate;
-    if (best_monitor->widthMM > 0) info->ppi = best.width * 25.4f / best_monitor->widthMM;
+    if (best_monitor->widthMM > 0 && !best_monitor->physicalSizeAssumed) info->ppi = best.width * 25.4f / best_monitor->widthMM;
 }
 
 monotonic_t

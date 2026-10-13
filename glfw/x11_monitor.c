@@ -141,7 +141,8 @@ _glfwPollMonitorsX11(void) {
                 heightMM = oi->mm_height;
             }
 
-            if (widthMM <= 0 || heightMM <= 0) {
+            const bool size_assumed = widthMM <= 0 || heightMM <= 0;
+            if (size_assumed) {
                 // HACK: If RandR does not provide a physical size, assume the
                 //       X11 default 96 DPI and calculate from the CRTC viewport
                 // NOTE: These members are affected by rotation, unlike the mode
@@ -151,6 +152,7 @@ _glfwPollMonitorsX11(void) {
             }
 
             _GLFWmonitor *monitor = _glfwAllocMonitor(oi->name, widthMM, heightMM);
+            monitor->physicalSizeAssumed = size_assumed;
             monitor->x11.output = sr->outputs[i];
             monitor->x11.crtc = oi->crtc;
 

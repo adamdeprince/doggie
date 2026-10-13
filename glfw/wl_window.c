@@ -1908,7 +1908,7 @@ _glfwPlatformGetWindowDisplayInfo(_GLFWwindow *window, GLFWdisplayinfo *info) {
     if (!monitor || monitor->wl.currentMode < 0 || monitor->wl.currentMode >= monitor->modeCount) return;
     const GLFWvidmode *mode = monitor->modes + monitor->wl.currentMode;
     if (mode->refreshRate > 0) info->period_us = 1000000u / (unsigned)mode->refreshRate;
-    if (monitor->widthMM > 0) info->ppi = mode->width * 25.4f / monitor->widthMM;
+    if (monitor->widthMM > 0 && !monitor->physicalSizeAssumed) info->ppi = mode->width * 25.4f / monitor->widthMM;
 }
 
 monotonic_t

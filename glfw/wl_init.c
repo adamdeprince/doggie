@@ -1934,6 +1934,7 @@ _glfwPlatformInit(bool *supports_window_occlusion) {
             // If Wayland does not provide a physical size, assume the default 96 DPI
             monitor->widthMM = (int)(monitor->modes[monitor->wl.currentMode].width * 25.4f / 96.f);
             monitor->heightMM = (int)(monitor->modes[monitor->wl.currentMode].height * 25.4f / 96.f);
+            monitor->physicalSizeAssumed = true;
         }
     }
 
