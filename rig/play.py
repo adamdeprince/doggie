@@ -474,14 +474,14 @@ def gestures(rig: Rig) -> None:
     at = {'x': px(rig.width / 2), 'y': px(rig.height / 2)}
     point(rig, rig.width / 2, rig.height / 2)
     rig.play('pinch', ['begin', '$serial', '$time', '$surface', 2])
-    rig.expect('gesture', 'pinch begins', kind=1, phase=1, scale=0, total=1000, **at)
-    rig.expect('gesture', 'and the rotation that goes with it', kind=2, phase=1, angle=0, total=0, **at)
+    rig.expect('gesture', 'pinch begins', kind=1, phase=1, scale=0, total=1000, fingers=2, **at)
+    rig.expect('gesture', 'and the rotation that goes with it', kind=2, phase=1, angle=0, total=0, fingers=2, **at)
     total = 0.0
     for scale, turn in ((1.125, 5), (1.25, 5), (1.125, -2.5)):  # scales a 24.8 fixed point number holds exactly
         time.sleep(0.012)
         rig.play('pinch', ['update', '$time', 0, 0, scale, turn])
         total += turn
-        rig.expect('gesture', f'pinch to {scale}', kind=1, phase=2, total=round(scale * 1000))
+        rig.expect('gesture', f'pinch to {scale}', kind=1, phase=2, total=round(scale * 1000), fingers=2)
         rig.expect('gesture', f'turned by {turn} degrees', kind=2, phase=2, angle=round(turn * 100), total=round(total * 100))
     rig.play('pinch', ['end', '$serial', '$time', 0])
     rig.expect('gesture', 'pinch ends', kind=1, phase=3)
@@ -493,8 +493,8 @@ def gestures(rig: Rig) -> None:
         time.sleep(0.012)
         rig.play('swipe', ['update', '$time', -20, 2])
     rig.play('swipe', ['end', '$serial', '$time', 0])
-    rig.expect('gesture', 'a three finger swipe to the left begins', kind=3, phase=1, dx=-1, dy=0)
-    rig.expect('gesture', 'and ends', kind=3, phase=3, dx=-1, dy=0)
+    rig.expect('gesture', 'a three finger swipe to the left begins', kind=3, phase=1, dx=-1, dy=0, fingers=3)
+    rig.expect('gesture', 'and ends', kind=3, phase=3, dx=-1, dy=0, fingers=3)
     time.sleep(0.05)
 
     rig.play('pinch', ['begin', '$serial', '$time', '$surface', 2])
@@ -516,16 +516,23 @@ def gestures(rig: Rig) -> None:
             ['end', '$serial', '$time', 0],
         )
         want = {'dx': (dx > 0) - (dx < 0) if abs(dx) > abs(dy) else 0, 'dy': (dy > 0) - (dy < 0) if abs(dy) > abs(dx) else 0}
-        rig.expect('gesture', f'a swipe {where} begins', kind=3, phase=1, **want)
+        rig.expect('gesture', f'a swipe {where} begins', kind=3, phase=1, fingers=fingers, **want)
         rig.expect('gesture', 'and ends', kind=3, phase=3, **want)
         time.sleep(0.05)
     rig.play('swipe', ['begin', '$serial', '$time', '$surface', 3], ['update', '$time', -30, 0], ['end', '$serial', '$time', 1])
     time.sleep(0.05)  # a swipe the compositor took over is not a swipe
 
-    # A hold has no report in version 1 of the gesture protocol, a kind for it is being added
+    # fingers that come to rest and lift again, then fingers that rest and start to move, which cancels the hold
     rig.play('hold', ['begin', '$serial', '$time', '$surface', 2])
+    rig.expect('gesture', 'two fingers rest on the touchpad', kind=5, phase=1, fingers=2, **at)
     time.sleep(0.05)
     rig.play('hold', ['end', '$serial', '$time', 0])
+    rig.expect('gesture', 'and lift', kind=5, phase=3, fingers=2)
+    time.sleep(0.05)
+    rig.play('hold', ['begin', '$serial', '$time', '$surface', 3])
+    rig.expect('gesture', 'three fingers rest', kind=5, phase=1, fingers=3)
+    rig.play('hold', ['end', '$serial', '$time', 1])
+    rig.expect('gesture', 'and begin to move', kind=5, phase=4)
     time.sleep(0.1)
 
 
@@ -535,10 +542,11 @@ def scroll(rig: Rig) -> None:
     point(rig, rig.width / 2, rig.height / 2)
     for i in range(6):
         rig.play('pointer', ['axis_source', FINGER], ['axis', '$time', 0, 4.5], ['frame'])
-        # the first report of a gesture says so where the terminal can tell, and silkie cannot tell yet on Wayland
-        rig.expect('scroll', f'finger scroll {i}, four and a half pixels down', dx=0, dy=450, src=1, **at)
+        rig.expect('scroll', f'finger scroll {i}, four and a half pixels down', dx=0, dy=450, src=1, phase=2 if i else 1, **at)
         time.sleep(0.012)
     rig.play('pointer', ['axis_source', FINGER], ['axis_stop', '$time', 0], ['frame'])
+    rig.expect('scroll', 'the fingers lift', dx=0, dy=0, src=1, phase=3)
+    rig.expect('scroll', 'and the terminal starts to coast', src=1, phase=4)
     time.sleep(1.0)  # the terminal's own momentum runs out
     rig.mark(skip='scroll')
 

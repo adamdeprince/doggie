@@ -208,8 +208,8 @@ def gestures(rig: Rig) -> None:
     x, y = centre(rig)
     at = {'x': px(x), 'y': px(y)}
     d.pinch(PINCH_BEGIN, 2)
-    rig.expect('gesture', 'pinch begins', kind=1, phase=1, scale=0, total=1000, **at)
-    rig.expect('gesture', 'and the rotation that goes with it', kind=2, phase=1, angle=0, total=0, **at)
+    rig.expect('gesture', 'pinch begins', kind=1, phase=1, scale=0, total=1000, fingers=2, **at)
+    rig.expect('gesture', 'and the rotation that goes with it', kind=2, phase=1, angle=0, total=0, fingers=2, **at)
     total = 0.0
     for scale, turn in ((1.125, 5), (1.25, 5), (1.125, -2.5)):
         time.sleep(0.012)
@@ -232,8 +232,8 @@ def gestures(rig: Rig) -> None:
     for _ in range(4):
         d.swipe(SWIPE_UPDATE, 3, -20, 2)
     d.swipe(SWIPE_END, 3)
-    rig.expect('gesture', 'a three finger swipe to the left begins', kind=3, phase=1, dx=-1, dy=0)
-    rig.expect('gesture', 'and ends', kind=3, phase=3, dx=-1, dy=0)
+    rig.expect('gesture', 'a three finger swipe to the left begins', kind=3, phase=1, dx=-1, dy=0, fingers=3)
+    rig.expect('gesture', 'and ends', kind=3, phase=3, dx=-1, dy=0, fingers=3)
     time.sleep(0.1)
 
 
