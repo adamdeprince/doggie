@@ -3193,6 +3193,23 @@ take_screenshot_of_rectangular_region(OSWindow *os_window, Region region, unsign
     unsigned src_width = region.right - region.left;
     const bool is_float = backbuffer_is_float();
 
+    if (is_float && global_state.debug_rendering) {
+        // A screenshot holds nothing brighter than SDR white, so say what the frame it is taken of holds
+        const size_t count = (size_t)src_width * src_height * 4;
+        float *buf = malloc(count * sizeof(float));
+        if (buf) {
+            float peak = 0;
+            glPixelStorei(GL_PACK_ALIGNMENT, 1);
+            glReadPixels((GLint)region.left, (GLint)(vh - region.bottom), (GLsizei)src_width, (GLsizei)src_height, GL_RGBA, GL_FLOAT, buf);
+            glPixelStorei(GL_PACK_ALIGNMENT, 4);
+            for (size_t i = 0; i < count; i++) {
+                if (i % 4 != 3 && buf[i] > peak) peak = buf[i];
+            }
+            free(buf);
+            debug_rendering("Screenshot of a floating point frame, the brightest value in it is %g times SDR white\n", peak);
+        }
+    }
+
     if (no_scaling) {
         *thumb_w = src_width;
         *thumb_h = src_height;
