@@ -170,10 +170,32 @@ Rendering
 The terminal rasterizes the scene with antialiasing, with the same
 appearance on a gray or color display, whenever it is first shown, the scene
 changes, or the size it is shown at changes, with user units scaled so the
-intrinsic size fills the placement. Kitty rasterizes on the CPU, so a scene
-covering a large window at a high pixel density costs some milliseconds per
-change; a program that animates should keep what changes small. Scenes count
-toward the image storage quota by the size of their elements, not by pixels.
+intrinsic size fills the placement. Scenes count toward the image storage
+quota by the size of their elements, not by pixels.
+
+Kitty rasterizes on the CPU. Drawing all of a scene that covers a large window
+at a high pixel density takes tens to hundreds of milliseconds, which is what
+the first showing, a change of size and some patches cost. Most patches cost
+far less, because kitty works out the rectangle a patch can have changed and
+draws only that again, with a result that is the same, pixel for pixel, as
+drawing everything:
+
+* Appending to a pen stroke, or to a path that is stroked and has
+  ``fill=none``, draws the rectangle around the appended geometry and not
+  the one around the stroke. This is what live ink costs.
+* Adding, replacing or deleting a path, a use or a pen stroke draws the
+  rectangle around where the element was and where it now is. So does
+  appending to a filled path, since a fill is closed across the gap between
+  the ends of a subpath and more of it changes than was appended.
+* A ``g`` record, the root group's included, a symbol, a gradient or an image
+  record, a deletion of any of those, ``x g=``, ``x all`` and any change to a
+  path that a group is clipped by draw everything, as other elements depend on
+  them. Panning or zooming through the transform of the root group is in this
+  class.
+
+A program that animates should therefore keep what changes small and in
+elements of its own. Kitty keeps no rasterized copy of a scene other than the
+texture it is drawn from, so nothing but the elements counts toward the quota.
 
 Rendering a PDF
 ------------------
