@@ -101,6 +101,18 @@ pointerHandleEnter(void *data UNUSED, struct wl_pointer *pointer UNUSED, uint32_
     }
 }
 
+// Ends the scroll gesture of fingers whose stop will not arrive, because the
+// pointer they scroll with has left the window or gone away
+static void
+cancelFingerScroll(_GLFWwindow *window) {
+    if (!window->wl.finger_scroll_active) return;
+    window->wl.finger_scroll_active = false;
+    glfw_cancel_momentum_scroll();
+    const GLFWScrollEvent ev = {
+        .offset_type = GLFW_SCROLL_OFFEST_HIGHRES, .scroll_phase = GLFW_MOMENTUM_PHASE_CANCELED, .keyboard_modifiers = _glfw.wl.xkb.states.modifiers};
+    _glfwInputScroll(window, &ev);
+}
+
 static void
 pointerHandleLeave(void *data UNUSED, struct wl_pointer *pointer UNUSED, uint32_t serial, struct wl_surface *surface) {
     // The pointer never leaves the surface during an implicit grab, so a
@@ -115,6 +127,7 @@ pointerHandleLeave(void *data UNUSED, struct wl_pointer *pointer UNUSED, uint32_
     if (!window) return;
     _glfw.wl.serial = serial;
     _glfw.wl.pointerFocus = NULL;
+    cancelFingerScroll(window);
     if (window->wl.surface == surface) {
         window->wl.hovered = false;
         _glfwInputCursorEnter(window, false);
@@ -247,6 +260,16 @@ pointer_handle_frame(void *data UNUSED, struct wl_pointer *pointer UNUSED) {
     }
     bool stopped = info.y_stop_received || info.x_stop_received;
     if (!found && stopped) ev.offset_type = window->wl.prev_frame_offset_type;
+    // Fingers scrolling on a touchpad say so with every frame, and the
+    // compositor promises a stop when they lift, which makes a gesture of
+    // their frames: began, continues, ended
+    if (stopped) {
+        if (window->wl.finger_scroll_active) ev.scroll_phase = GLFW_MOMENTUM_PHASE_ENDED;
+        window->wl.finger_scroll_active = false;
+    } else if (found && info.source_type == WL_POINTER_AXIS_SOURCE_FINGER && ev.offset_type == GLFW_SCROLL_OFFEST_HIGHRES) {
+        ev.scroll_phase = window->wl.finger_scroll_active ? GLFW_MOMENTUM_PHASE_ACTIVE : GLFW_MOMENTUM_PHASE_BEGAN;
+        window->wl.finger_scroll_active = true;
+    }
     ev.unscaled.x *= -1;
     const double scale = ev.offset_type == GLFW_SCROLL_OFFEST_HIGHRES ? _glfwWaylandWindowScale(window) : 1;
     ev.x_offset = scale * ev.unscaled.x;
@@ -719,6 +742,7 @@ seatHandleCapabilities(void *data UNUSED, struct wl_seat *seat, enum wl_seat_cap
             zwp_pointer_gesture_hold_v1_destroy(_glfw.wl.pointer_gesture_hold);
             _glfw.wl.pointer_gesture_hold = NULL;
         }
+        for (_GLFWwindow *w = _glfw.windowListHead; w; w = w->next) cancelFingerScroll(w);
         wl_pointer_destroy(_glfw.wl.pointer);
         _glfw.wl.pointer = NULL;
         if (_glfw.wl.cursorAnimationTimer) toggleTimer(&_glfw.wl.eventLoopData, _glfw.wl.cursorAnimationTimer, 0);

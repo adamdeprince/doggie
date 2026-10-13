@@ -113,8 +113,16 @@ silkie reports what the window system gives it:
 * On macOS, pixel distances and all the phases above, from the trackpad
   events of AppKit. Distances are in the window's pixels, so they are
   doubled on a Retina display, matching ``x,y``.
-* On Wayland, pixel distances from ``wl_pointer`` axis events and the
-  coasting phases ``4`` to ``7`` from the terminal's own momentum scroller;
-  the finger phases ``1`` to ``3`` are not reported.
-* On X11, the same as Wayland, from XInput 2 smooth scrolling where
-  available, otherwise lines converted to pixels with ``src=0``.
+* On Wayland, pixel distances from ``wl_pointer`` axis events. The finger
+  phases ``1`` to ``3`` come from the axis source and the axis stop, which
+  the compositor sends when the fingers lift, on a seat of version 5 or
+  later. The coasting phases ``4`` to ``6`` come from the terminal's own
+  momentum scroller, so phase ``4`` follows phase ``3`` at once. Phase ``7``
+  is sent when the coasting is interrupted, by fingers coming back down for
+  example, or when the pointer leaves the window while the fingers are still
+  scrolling.
+* On X11, pixel distances from XInput 2 smooth scrolling where available,
+  otherwise lines converted to pixels with ``src=0``, and the coasting
+  phases ``4`` to ``7`` from the terminal's own momentum scroller. The X
+  server does not say when the fingers lift, which the scroller guesses
+  from a pause, so the finger phases ``1`` to ``3`` are not reported.

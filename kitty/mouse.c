@@ -1675,11 +1675,12 @@ send_scroll_report(PyObject *self UNUSED, PyObject *args, PyObject *kw) {
 void
 scroll_event(const GLFWScrollEvent *ev) {
     debug(
-        "\x1b[36mScroll\x1b[m type=%s x: %f y: %f momentum: %s modifiers: %s\n",
+        "\x1b[36mScroll\x1b[m type=%s x: %f y: %f momentum: %s fingers: %s modifiers: %s\n",
         scroll_offset_type(ev->offset_type),
         ev->x_offset,
         ev->y_offset,
         scroll_phase(ev->momentum_type),
+        scroll_phase(ev->scroll_phase),
         format_mods(ev->keyboard_modifiers));
     static id_type window_for_momentum_scroll = 0;
     static bool main_screen_for_momentum_scroll = false;
