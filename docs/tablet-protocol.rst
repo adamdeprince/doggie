@@ -63,7 +63,7 @@ answers::
 ``8``   The shape of a finger contact
 ``16``  Pads
 ``32``  Tool actions
-``64``  The hardware identifiers of tools
+``64``  The hardware identifiers of tools and pads
 ``128`` Estimated and predicted samples
 ======= ===================================================================
 
@@ -110,11 +110,11 @@ all. Bit ``4`` takes nothing away: what the system itself does with the
 controls of a pad, such as a shortcut the user has put on a key, goes on.
 
 The mode is local to the window, is reset by ``RIS``, and changing it
-cancels every active contact and lets go of every held key of a pad. Programs must turn it off when they exit,
-suspend or fail, and turn it back on when resumed. Multiplexers keep it with
-the rest of the terminal state, restore it on reconnect, and turn it off
-when detaching. There is no user setting that overrides the program's
-choice.
+cancels every active contact and lets go of every held key of a pad.
+Programs must turn it off when they exit, suspend or fail, and turn it back
+on when resumed. Multiplexers keep it with the rest of the terminal state,
+restore it on reconnect, and turn it off when detaching. There is no user
+setting that overrides the program's choice.
 
 A ``mode`` request without a ``mode`` field reads the state instead of
 changing it, and is answered with::
@@ -447,7 +447,10 @@ to the last lifting, all go to the window under the first finger, or for a
 touchpad to the window under the pointer when the first finger landed.
 ``hover`` reports follow a tool in proximity without a contact and are not
 captured. A tool leaving proximity cancels any stroke it had open, and then,
-when the system reports it, sends phase ``5``.
+when the system reports it, sends phase ``5``. That report goes to the
+window that was last told of the tool, wherever the tool was when it left:
+a pen whose stroke was dragged out of the window and ended there is over no
+window, and the program still has to learn that it is gone.
 
 The terminal cancels contacts, with ``buttons=0`` and ``p=0``, when the mode
 changes, the terminal is reset, the window's size in cells changes, the
@@ -529,7 +532,10 @@ and touch events in whole milliseconds.
   has had one. The pointer cursor
   follows a tool only on compositors with ``cursor-shape-v1``. GNOME applies
   its own stylus button mapping first (by default the lower button is the
-  middle button), sway passes the buttons through. Pads come through
+  middle button), sway passes the buttons through. A tool does not move the
+  pointer as far as silkie is concerned: a compositor can give tablets a
+  cursor of their own, so what is reported at the pointer, such as a scroll,
+  stays where the pointer was. Pads come through
   ``tablet-v2`` as well: keys, rings, strips and modes from its first
   version and dials from its second, which the compositor has to offer, and
   a label is passed to the compositor as the feedback for that control. The
@@ -541,7 +547,11 @@ and touch events in whole milliseconds.
   type, as the libinput and wacom drivers name them; that name is the
   ``name`` of the device frame, and the ids of the tablet are not known.
   ``tangent`` carries the device's wheel axis and ``twist`` its rotary Z
-  axis. The X server does not report a tool leaving proximity, so phase
+  axis. The position of a tool is made from the position its own device
+  reports, scaled to the screen as the server does it, because the server
+  puts the position of the pointer before an event into that event, which
+  is where the tool was one report earlier. The X server does not report a
+  tool leaving proximity, so phase
   ``5`` arrives only when the device goes away. Xwayland's tablet devices
   are recognised too, but under GNOME no motion reached them in testing; use
   the Wayland backend there. Fingers on a touchscreen come through the touch
