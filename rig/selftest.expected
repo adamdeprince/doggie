@@ -211,6 +211,7 @@ pad path /dev/input/event93
 pad buttons 1
 pad done
 pad enter
+group mode_switch 2
 pad button 0 1
 pad button 0 0
 pad button 1 1
@@ -244,13 +245,19 @@ ring frame
 ring source 1
 ring angle 355.00
 ring frame
+ring source 1
 ring stop
 ring frame
 group mode_switch 1
 pad button 0 1
 pad button 0 0
+pad button 3 1
+pad button 5 1
 pad leave
+pad button 3 0
+pad button 5 0
 pad enter
+group mode_switch 0
 strip source 1
 strip position 0
 strip frame
@@ -263,15 +270,20 @@ strip frame
 strip source 1
 strip position 65535
 strip frame
+strip source 1
 strip stop
 strip frame
 pad leave
 pad enter
+group mode_switch 0
 dial delta 120
 dial frame
 dial delta -240
 dial frame
 dial delta 30
+dial frame
+dial delta 120
+dial delta 60
 dial frame
 pad button 0 1
 pad button 0 0
@@ -281,4 +293,4 @@ pad leave
       1 zwp_tablet_pad_dial_v2.set_feedback on dial:huion:0:0 ["brush size", N]
       1 zwp_tablet_pad_ring_v2.set_feedback on ring:intuos5:0:0 ["zoom", N]
       1 zwp_tablet_pad_v2.set_feedback on pad:huion [N, "undo", N]
-     10 zwp_tablet_pad_v2.set_feedback on pad:intuos5 [N, "undo", N]
+     12 zwp_tablet_pad_v2.set_feedback on pad:intuos5 [N, "undo", N]
