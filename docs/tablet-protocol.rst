@@ -55,7 +55,7 @@ answers::
 
 ``caps`` is a bit set of what the terminal can report:
 
-======= ==============================================================
+======= ===================================================================
 ``1``   Tools
 ``2``   Fingers on a touchscreen
 ``4``   Fingers on a touchpad
@@ -63,11 +63,13 @@ answers::
 ``16``  Reserved
 ``32``  Tool actions
 ``64``  The hardware identifiers of tools
-======= ==============================================================
+``128`` Estimated and predicted samples
+======= ===================================================================
 
 It describes the terminal on the system it runs on, not the hardware
-attached right now. ``mode`` is the current state of the mode described
-below. ``w,h`` are the size of the cell area in pixels (1 to
+attached right now. What goes beyond tools and fingers, the last three, is
+sent only when asked for with the mode. ``mode`` is the current state of the
+mode described below. ``w,h`` are the size of the cell area in pixels (1 to
 65535) and ``cw,ch`` the cell size (1 to 4096). A program queries again
 after a resize. A terminal that does not support the protocol ignores the
 query, so a program must time out and fall back to mouse reporting. A query
@@ -83,21 +85,23 @@ Reports are off by default and turned on per terminal window with::
 ``mode`` is a bit set of what the program wants, and ``0`` turns everything
 off:
 
-======= ==============================================================
+======= ===================================================================
 ``1``   Reports of tools
 ``2``   Reports of fingers
 ``4``   Reserved
 ``8``   The hardware identifiers of tools, see `Devices`_
 ``16``  Reports of tool actions, see `Tool actions`_
-======= ==============================================================
+``32``  Estimated and predicted samples, see `Estimates and predictions`_
+======= ===================================================================
 
 While bit ``1`` or ``2`` is on, that kind of input over the window is
 reported with this protocol instead of as mouse events, so with ``mode=1`` a
 pen draws while a finger still taps and scrolls as a mouse, and with
-``mode=3`` a tap is not a click and a drag does not select. A physical mouse, and the mouse and scroll events a touchpad produces
-by itself, continue to use whatever mouse reporting the program asked for.
-Programs that merely want pen input to act as a mouse need not use the
-protocol at all.
+``mode=3`` a tap is not a click and a drag does not select. A physical
+mouse, and the mouse and scroll events a touchpad produces by itself,
+continue to use whatever mouse reporting the program asked for. Programs
+that merely want pen input to act as a mouse need not use the protocol at
+all.
 
 The mode is local to the window, is reset by ``RIS``, and changing it
 cancels every active contact. Programs must turn it off when they exit,
@@ -139,6 +143,7 @@ other fields are present when the system provides them:
                  Wacom tablets it tells the model of the pen
 ``vid``, ``pid`` The vendor and product ids of the tablet, unsigned 32 bit
                  integers
+``bat``          The charge of the battery of the tool, ``0`` to ``100``
 ================ ==================================================================
 
 ``serial``, ``hwid``, ``vid`` and ``pid`` are the hardware identifiers, and
@@ -152,7 +157,8 @@ The description is sent again when the tool comes back after leaving
 proximity, when it moves over another window, and when the program changes
 the mode while the tool is in proximity. A program must not depend on
 getting one: a terminal that knows nothing about a tool beyond its reports
-need not describe it.
+need not describe it. Only tools are described; the device of a finger
+report is not.
 
 Reports
 -----------
@@ -169,7 +175,8 @@ default to zero, except ``tool``, which defaults to ``1``:
 ``kind``         ``1`` tool, ``2`` finger. ``4`` is a tool action, which has
                  fields of its own, see `Tool actions`_
 ``phase``        ``0`` hover, ``1`` down, ``2`` move, ``3`` up, ``4`` cancel,
-                 ``5`` the tool left proximity, ``6`` frame, see below
+                 ``5`` the tool left proximity, ``6`` frame, see `Fingers`_,
+                 ``7`` correction, see `Estimates and predictions`_
 ``device``       Identifies the tool or touch device for as long as it is in
                  proximity, a non-negative 31 bit integer, ``0`` when the
                  system does not tell devices apart
@@ -193,7 +200,8 @@ default to zero, except ``tool``, which defaults to ``1``:
                  barrel ``32``. A finger has ``1`` while it is down
 ``mods``         Shift ``1``, Alt ``2``, Control ``4``, Super ``8``
 ``tool``         ``0`` finger or unknown, ``1`` pen, ``2`` eraser, ``3`` brush,
-                 ``4`` pencil, ``5`` airbrush, ``6`` mouse, ``7`` lens
+                 ``4`` pencil, ``5`` airbrush, ``6`` mouse, ``7`` lens, ``8``
+                 totem, see `Totems`_
 ``valid``        The measurements the report carries, a bit set, see below
 ``src``          For a finger, ``1`` when it is on a touchpad rather than on
                  the screen; absent otherwise
@@ -223,10 +231,10 @@ terminal must not make a measurement up. The measurements, with their
 ``wheel``, ``wclicks``  64    Rotation of the wheel on a mouse or lens tool since
                               the last report, in hundredths of a degree and in
                               clicks
-``major``, ``minor``,   128   The shape of a finger on the screen: the axes of
-``angle``                     the ellipse of the contact in 1/256 pixel and its
-                              orientation in hundredths of a degree, clockwise
-                              from the vertical
+``major``, ``minor``,   128   The shape of a finger or a totem on the screen: the
+``angle``                     axes of the ellipse of the contact in 1/256 pixel
+                              and its orientation in hundredths of a degree,
+                              clockwise from the vertical
 ======================= ===== ====================================================
 
 Fingers
@@ -286,6 +294,51 @@ the window under the pointer. What an action does is the program's choice; a
 double tap usually switches between the pen and the eraser. A program
 ignores an ``action`` it does not know.
 
+Totems
+~~~~~~~~~
+
+A totem, ``tool=8``, is a dial or puck that stands on the screen and is
+tracked by it. It is reported as a tool: ``x,y`` is its centre, ``twist``
+how far it has been turned, and the contact shape, with ``valid`` bit
+``128``, the area of the screen it covers. Pressing it down is button ``1``,
+so a totem that is pressed and turned is a stroke whose ``twist`` changes.
+
+Estimates and predictions
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Some systems hand over a sample before all of it has been measured: the
+pressure of a pen can arrive by radio after the position of its tip, and
+until it does the system fills in an estimate. Some also predict, giving
+samples for where the tool is about to be, which a program draws to hide
+the delay to the screen and then replaces. A terminal that can pass these on
+does so only while mode bit ``32`` is on, with three more fields in the
+reports of tools and fingers:
+
+================ ==================================================================
+``seq``          A count of the samples of this device, an unsigned 32 bit
+                 integer that wraps, by which a later report names an earlier
+                 one
+``est``          The measurements in this report that are estimates, a bit set
+                 with the bits of ``valid``
+``pred``         ``1`` for a predicted sample; absent otherwise
+================ ==================================================================
+
+An estimate is put right by a correction: a report with ``phase=7`` and the
+``seq`` of the report it corrects, which repeats that report with the
+measured values. It is not a new point of the stroke. Its own ``est`` names
+what is still an estimate, and is absent once nothing is. A correction can
+come after the ``up`` of its stroke, and it may never come, in which case
+the estimate stands.
+
+A predicted sample is not part of the stroke. A program that draws it takes
+every predicted sample of a contact away again when the next report of that
+contact arrives that is not predicted. A predicted sample has no ``seq`` and
+is never corrected.
+
+Without bit ``32`` a terminal sends an estimate as an ordinary value and
+sends no corrections and no predictions, so a program that knows nothing of
+this draws what it is given.
+
 Lifecycle
 -------------
 
@@ -301,9 +354,10 @@ captured. A tool leaving proximity cancels any stroke it had open, and then,
 when the system reports it, sends phase ``5``.
 
 The terminal cancels contacts, with ``buttons=0`` and ``p=0``, when the mode
-changes, the terminal is reset, the window's size in cells changes, the system takes the
-fingers over for a gesture of its own, or the device goes away. After a
-cancel the rest of that stroke is not reported, not even its ``up``.
+changes, the terminal is reset, the window's size in cells changes, the
+system takes the fingers over for a gesture of its own, or the device goes
+away. After a cancel the rest of that stroke is not reported, not even its
+``up``.
 Programs must tolerate a lost ``hover``, a repeated cancel, and a fresh
 ``down`` for a contact they still have open, which replaces the earlier
 stroke.
@@ -317,7 +371,8 @@ description of each tool in proximity and sends it to a pane before that
 pane's first report of the tool, without the hardware identifiers unless
 that pane asked for them. A tool action goes to the pane that has a stroke
 of the tool, and otherwise to the pane under the pointer, with ``x,y``
-translated as for a contact. A multiplexer or relay that
+translated as for a contact. Corrections follow the report they correct to
+its pane, and ``seq`` is forwarded unchanged. A multiplexer or relay that
 detaches or loses its connection while contacts are live sends ``cancel``
 for each of them to the program, so a program never holds a dead contact,
 and a relay that reconnects forwards nothing it did not see: the fingers
@@ -337,7 +392,11 @@ Implementation notes for silkie
 ----------------------------------
 
 silkie reads tablets and touch devices through the window system, so a
-program gets what the system reports:
+program gets what the system reports. It keeps the mode bits ``1``, ``2``,
+``8`` and ``16``. None of the systems it runs on hands over estimates or
+predictions, so it does not take bit ``32``, and it reports no totems and no
+battery charge. ``tu`` is sent on macOS only: Wayland and X11 stamp tablet
+and touch events in whole milliseconds.
 
 * On macOS, tablet data arrives with the mouse events of the tablet driver.
   Tilt is scaled from the driver's fraction of maximum tilt assuming 60
@@ -368,9 +427,9 @@ program gets what the system reports:
   middle button), sway passes the buttons through.
 * On X11, tools come through XInput 2 devices whose names include the tool
   type, as the libinput and wacom drivers name them; that name is the
-  ``name`` of the device frame, and the tablet's ids are not known. ``tangent`` carries the
-  device's wheel axis and ``twist`` its rotary Z axis. The X server does not
-  report a tool leaving proximity, so phase ``5`` arrives only when the
-  device goes away. Xwayland's tablet devices are recognised too, but under
-  GNOME no motion reached them in testing; use the Wayland backend there.
-  Fingers are not reported on X11.
+  ``name`` of the device frame, and the ids of the tablet are not known.
+  ``tangent`` carries the device's wheel axis and ``twist`` its rotary Z
+  axis. The X server does not report a tool leaving proximity, so phase
+  ``5`` arrives only when the device goes away. Xwayland's tablet devices
+  are recognised too, but under GNOME no motion reached them in testing; use
+  the Wayland backend there. Fingers are not reported on X11.
