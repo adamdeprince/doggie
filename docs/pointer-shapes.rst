@@ -130,7 +130,7 @@ pixel diameter, sent as image ``9``, centered on the pointer::
 
     <OSC> 22 ; image:9:24:24 <ESC>\
 
-The image is shown with one image pixel per device pixel, exactly as the
+The image is shown with one image pixel per physical pixel, exactly as the
 graphics protocol displays an image placed without scaling, so a brush preview
 drawn at the size the brush has on the canvas lines up with it. The window and
 cell sizes reported by ``CSI 14 t`` and ``CSI 16 t`` are in the same pixels.
