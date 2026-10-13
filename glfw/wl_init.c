@@ -336,20 +336,10 @@ touch_record_time(uint32_t time) {
     touch.has_event_time = true;
 }
 
-// Converts the time of the last wl_touch event to monotonic() time. The base of
-// Wayland event times is unspecified and they wrap, so only the age of the event
-// is used, which is measured against CLOCK_MONOTONIC, the clock compositors use
+// The time of the last wl_touch event as monotonic() time
 static monotonic_t
 touch_event_timestamp(void) {
-    const monotonic_t now = monotonic();
-    if (!touch.has_event_time) return now;
-    struct timespec ts;
-    if (clock_gettime(CLOCK_MONOTONIC, &ts) != 0) return now;
-    const uint32_t now_ms = (uint32_t)((uint64_t)ts.tv_sec * 1000u + (uint64_t)ts.tv_nsec / 1000000u);
-    const uint32_t age_ms = now_ms - touch.last_event_time;
-    // An implausible age means the compositor uses some other clock
-    if (age_ms > 1000) return now;
-    return now - ms_to_monotonic_t(age_ms);
+    return touch.has_event_time ? event_time_to_monotonic(touch.last_event_time) : monotonic();
 }
 
 static bool
@@ -619,6 +609,7 @@ static void
 toolHandleRemoved(void *data, struct zwp_tablet_tool_v2 *t) {
     if (tt->window) {
         tt->ev.type = GLFW_TABLET_CANCEL;
+        tt->ev.timestamp = monotonic();
         _glfwInputTablet(tt->window, &tt->ev);
     }
     if (_glfw.wl.tablet_tool == tt) _glfw.wl.tablet_tool = NULL;
@@ -726,11 +717,12 @@ toolHandleButton(void *data, struct zwp_tablet_tool_v2 *t UNUSED, uint32_t seria
 }
 
 static void
-toolHandleFrame(void *data, struct zwp_tablet_tool_v2 *t UNUSED, uint32_t time UNUSED) {
+toolHandleFrame(void *data, struct zwp_tablet_tool_v2 *t UNUSED, uint32_t time) {
     _GLFWwindow *window = tt->window;
     if (!window) return;
     tt->ev.type = tt->left ? GLFW_TABLET_OUT : GLFW_TABLET_POINT;
     tt->ev.keyboard_modifiers = _glfw.wl.xkb.states.modifiers;
+    tt->ev.timestamp = event_time_to_monotonic(time);
     if (!_glfwInputTablet(window, &tt->ev)) {
         // Compositors send no pointer events for a tool once this protocol is
         // bound, so make them here

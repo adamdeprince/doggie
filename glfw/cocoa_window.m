@@ -490,6 +490,14 @@ translateFlags(NSUInteger flags) {
     return mods;
 }
 
+// The time the system generated an event, as monotonic() time. Event
+// timestamps and systemUptime are on the same clock
+static monotonic_t
+eventTimestamp(NSEvent *event) {
+    const double age = [[NSProcessInfo processInfo] systemUptime] - [event timestamp];
+    return monotonic() - s_double_to_monotonic_t(MAX(0, age));
+}
+
 // Tablet {{{
 // The capability mask bits in the proximity events of Wacom's driver
 #define TABLET_CAP_TILT 0x0180
@@ -535,7 +543,14 @@ handleTabletEvent(_GLFWwindow *window, NSEvent *event) {
             }
         } else {
             t->in_proximity = false;
-            GLFWTabletEvent ev = {.type = GLFW_TABLET_OUT, .tool = t->tool, .keyboard_modifiers = translateFlags([event modifierFlags]), .device = t->device_id};
+            [NSEvent setMouseCoalescingEnabled:YES];
+            GLFWTabletEvent ev = {
+                .type = GLFW_TABLET_OUT,
+                .tool = t->tool,
+                .keyboard_modifiers = translateFlags([event modifierFlags]),
+                .timestamp = eventTimestamp(event),
+                .device = t->device_id,
+            };
             _glfwInputTablet(window, &ev);
         }
         return false;
@@ -550,6 +565,7 @@ handleTabletEvent(_GLFWwindow *window, NSEvent *event) {
         .type = GLFW_TABLET_POINT,
         .tool = t ? t->tool : GLFW_TABLET_TOOL_PEN,
         .keyboard_modifiers = translateFlags([event modifierFlags]),
+        .timestamp = eventTimestamp(event),
         .buttons = (held & NSEventButtonMaskPenTip ? GLFW_TABLET_BUTTON_TIP : 0) | (held & NSEventButtonMaskPenLowerSide ? GLFW_TABLET_BUTTON_BARREL : 0) |
                    (held & NSEventButtonMaskPenUpperSide ? GLFW_TABLET_BUTTON_BARREL2 : 0),
         .axes = !caps ? (GLFW_TABLET_PRESSURE | GLFW_TABLET_TILT)
@@ -570,7 +586,11 @@ handleTabletEvent(_GLFWwindow *window, NSEvent *event) {
         .vendor_id = t ? t->vendor_id : 0,
         .product_id = t ? t->product_id : 0,
     };
-    return _glfwInputTablet(window, &ev);
+    const bool consumed = _glfwInputTablet(window, &ev);
+    // The system merges the points of a tool that arrive faster than they are
+    // read into one. An application that takes the points wants all of them
+    if ([NSEvent isMouseCoalescingEnabled] == consumed) [NSEvent setMouseCoalescingEnabled:!consumed];
+    return consumed;
 }
 // }}}
 
@@ -1647,12 +1667,10 @@ handleTouches(_GLFWwindow *window, NSView *view, NSEvent *event, GLFWTouchEventT
     }
     if (!n) return;
     if (type != GLFW_TOUCH_CANCEL) type = !down_before ? GLFW_TOUCH_BEGIN : (down_after ? GLFW_TOUCH_UPDATE : GLFW_TOUCH_END);
-    // Event timestamps and systemUptime are on the same clock
-    const double age = [[NSProcessInfo processInfo] systemUptime] - [event timestamp];
     GLFWTouchEvent ev = {
         .type = type,
         .keyboard_modifiers = translateFlags([event modifierFlags]),
-        .timestamp = monotonic() - s_double_to_monotonic_t(MAX(0, age)),
+        .timestamp = eventTimestamp(event),
         .num_points = n,
         .points = points,
         .indirect = true,

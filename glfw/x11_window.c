@@ -1459,6 +1459,7 @@ handle_xi_tablet_event(_GLFWwindow *window, XITabletDevice *d, XIDeviceEvent *de
         .type = GLFW_TABLET_POINT,
         .tool = d->tool,
         .keyboard_modifiers = translateState(de->mods.effective),
+        .timestamp = event_time_to_monotonic((uint32_t)de->time),
         // X buttons 1, 2 and 3 are the tip, BTN_STYLUS and BTN_STYLUS2
         .buttons = (buttons & 2 ? GLFW_TABLET_BUTTON_TIP : 0) | (buttons & 4 ? GLFW_TABLET_BUTTON_BARREL : 0) | (buttons & 8 ? GLFW_TABLET_BUTTON_BARREL2 : 0) |
                    (buttons & 256 ? GLFW_TABLET_BUTTON_BACK : 0) | (buttons & 512 ? GLFW_TABLET_BUTTON_FORWARD : 0),
@@ -1916,7 +1917,12 @@ processEvent(XEvent *event) {
                                 XITabletDevice *d = he->info[j].flags & (XISlaveRemoved | XIDeviceDisabled) ? tablet_device_for_id(he->info[j].deviceid) : NULL;
                                 _GLFWwindow *w = d ? _glfwWindowForId(d->window_id) : NULL;
                                 if (w) {
-                                    GLFWTabletEvent ev = {.type = GLFW_TABLET_OUT, .tool = d->tool, .device = (uint64_t)d->deviceid};
+                                    GLFWTabletEvent ev = {
+                                        .type = GLFW_TABLET_OUT,
+                                        .tool = d->tool,
+                                        .timestamp = event_time_to_monotonic((uint32_t)he->time),
+                                        .device = (uint64_t)d->deviceid,
+                                    };
                                     _glfwInputTablet(w, &ev);
                                 }
                             }

@@ -707,6 +707,10 @@ typedef struct GLFWTabletEvent {
     GLFWTabletEventType type;
     GLFWTabletTool tool;
     int keyboard_modifiers;
+    // When the system generated the event, on the same clock as monotonic(), as
+    // for GLFWTouchEvent. A stroke's speed is measured with this, not with the
+    // time of delivery
+    monotonic_t timestamp;
     unsigned buttons, axes;
     // In window content coordinates, the same as the cursor position
     double x, y;
