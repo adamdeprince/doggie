@@ -81,13 +81,13 @@ One frame per scroll event::
 All fields are required:
 
 ============ ====================================================================
-``dx, dy``   The distance the view should move, in hundredths of a pixel,
-             positive to the right and down, signed. A trackpad gives the
-             distance the system measured; a notched wheel gives its lines
-             converted with the terminal's cell size and scroll multiplier, so
-             a program applies one unit either way
-``x, y``     The pointer position in pixels, zero based, relative to the top
-             left of the cell area
+``dx, dy``   The distance the view should move, in hundredths of a physical
+             pixel, positive to the right and down, signed. A trackpad gives
+             the distance the system measured; a notched wheel gives its
+             lines converted with the terminal's cell size and scroll
+             multiplier, so a program applies one unit either way
+``x, y``     The pointer position in physical pixels, zero based, relative to
+             the top left of the cell area
 ``mods``     Shift ``1``, Alt ``2``, Control ``4``, Super ``8``
 ``src``      ``0`` a notched wheel, ``1`` a precise device such as a trackpad
 ``phase``    ``0`` none, ``1`` a finger gesture began, ``2`` it continues,
@@ -111,8 +111,8 @@ Implementation notes for silkie
 silkie reports what the window system gives it:
 
 * On macOS, pixel distances and all the phases above, from the trackpad
-  events of AppKit. Distances are in the window's pixels, so they are
-  doubled on a Retina display, matching ``x,y``.
+  events of AppKit. Distances are in physical pixels, as ``x,y`` are, so on
+  a Retina display they are twice what the system gives in its own units.
 * On Wayland, pixel distances from ``wl_pointer`` axis events. The finger
   phases ``1`` to ``3`` come from the axis source and the axis stop, which
   the compositor sends when the fingers lift, on a seat of version 5 or
