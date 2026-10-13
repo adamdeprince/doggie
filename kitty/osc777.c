@@ -35,7 +35,23 @@ append_list(char *reply, size_t cap, int n, const char *key, const char *const *
 // and at every shell prompt, so it must cost nothing when the modes are off.
 // An extension that has a mode adds its lines here.
 void
-screen_reset_extension_modes(Screen *self UNUSED) {
+screen_reset_extension_modes(Screen *self) {
+    // tablet-pointer
+    screen_pointer_cancel(self, 0);
+    self->pointer.mode = 0;
+    // gesture
+    screen_gesture_cancel(self);
+    self->gesture.version = 0;
+    // scroll
+    self->scroll_reports = 0;
+    // frame
+    self->frame_feedback.on = false;
+    self->frame_feedback.pending = false;
+    self->frame_feedback.seq = 0;
+    // latency
+    self->low_latency = false;
+    // display
+    self->display_events = false;
 }
 
 void

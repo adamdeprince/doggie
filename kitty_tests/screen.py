@@ -963,6 +963,37 @@ class TestScreen(BaseTest):
         self.ae(c.wtcbuf, b'')
         self.ae(str(s.line(0)), '')
 
+    def test_caps_reset(self):
+        # The request and a shell prompt both turn every extension mode off
+        s = self.create_screen()
+        c = s.callbacks
+        selectors = ('tablet-pointer', 'gesture', 'scroll', 'frame', 'latency', 'display')
+
+        def turn_on():
+            parse_bytes(s, b'\x1b]777;tablet-pointer;v=1:op=mode:mode=3\x1b\\')
+            for sel in selectors[1:]:
+                parse_bytes(s, f'\x1b]777;{sel};v=1:op=mode:mode=1\x1b\\'.encode())
+
+        def modes():
+            c.clear()
+            for sel in selectors:
+                parse_bytes(s, f'\x1b]777;{sel};v=1:op=mode\x1b\\'.encode())
+            return c.wtcbuf
+
+        all_off = b''.join(f'\x1b]777;{sel};v=1:op=mode:mode=0\x1b\\'.encode() for sel in selectors)
+        self.ae(modes(), all_off)
+        for reset in (b'\x1b]777;caps;v=1:op=reset\x1b\\', b'\x1b]133;A\x1b\\', b'\x1b]133;A;k=s\x1b\\'):
+            turn_on()
+            self.assertNotIn(b'mode=0', modes())
+            c.clear()
+            parse_bytes(s, reset)
+            self.ae(c.wtcbuf, b'')
+            self.ae(modes(), all_off)
+        # a request of another version does nothing
+        turn_on()
+        parse_bytes(s, b'\x1b]777;caps;v=2:op=reset\x1b\\')
+        self.assertNotIn(b'mode=0', modes())
+
     def test_display_protocol(self):
         s = self.create_screen()
         c = s.callbacks
