@@ -396,6 +396,7 @@ typedef struct _GLFWlibraryWayland {
     struct zwp_pointer_gesture_pinch_v1 *pointer_gesture_pinch;
     struct zwp_pointer_gesture_swipe_v1 *pointer_gesture_swipe;
     double pinch_scale, swipe_dx, swipe_dy;
+    uint32_t swipe_fingers;
     struct zxdg_output_manager_v1 *xdg_output_manager;
     struct zwlr_virtual_pointer_manager_v1 *virtual_pointer_manager;
     struct zwlr_virtual_pointer_v1 *virtual_pointer;

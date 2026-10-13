@@ -1908,6 +1908,14 @@ _glfwPlatformWindowBell(_GLFWwindow *window UNUSED) {
     return false;
 }
 
+unsigned
+_glfwPlatformSupportedGestures(void) {
+    // All of them come from the pointer gestures protocol, which is only bound at a version that has the hold
+    if (!_glfw.wl.pointer_gestures) return 0;
+    return _GLFW_GESTURE_BIT(GLFW_GESTURE_PINCH) | _GLFW_GESTURE_BIT(GLFW_GESTURE_ROTATE) | _GLFW_GESTURE_BIT(GLFW_GESTURE_SWIPE) |
+           _GLFW_GESTURE_BIT(GLFW_GESTURE_HOLD);
+}
+
 static void
 focus_window(GLFWwindow *window, const char *token, void *data UNUSED) {
     if (!window) return;

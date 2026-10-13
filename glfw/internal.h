@@ -742,6 +742,9 @@ void _glfwPlatformShowWindow(_GLFWwindow *window, bool move_to_active_screen);
 void _glfwPlatformHideWindow(_GLFWwindow *window);
 void _glfwPlatformRequestWindowAttention(_GLFWwindow *window);
 int _glfwPlatformWindowBell(_GLFWwindow *window);
+// The bit of a GLFWGestureKind in the value of glfwGetSupportedGestures()
+#define _GLFW_GESTURE_BIT(kind) (1u << ((kind) - 1))
+unsigned _glfwPlatformSupportedGestures(void);
 void _glfwPlatformFocusWindow(_GLFWwindow *window);
 void _glfwPlatformSetWindowMonitor(_GLFWwindow *window, _GLFWmonitor *monitor, int xpos, int ypos, int width, int height, int refreshRate);
 bool _glfwPlatformToggleFullscreen(_GLFWwindow *w, unsigned int flags);

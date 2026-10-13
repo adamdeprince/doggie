@@ -874,7 +874,9 @@ gesture_callback(GLFWwindow *w, const GLFWGestureEvent *ev) {
     osw->mouse_x = ev->x * osw->viewport_x_ratio;
     osw->mouse_y = ev->y * osw->viewport_y_ratio;
     const bool reported = is_window_ready_for_callbacks() && gesture_event(ev);
-    debug_input("\x1b[33mGesture\x1b[m kind: %d phase: %d x: %.1f y: %.1f delta: %.3f dx: %d dy: %d reported: %d\n", ev->kind, ev->phase, ev->x, ev->y, ev->delta, ev->dx, ev->dy, reported);
+    debug_input(
+        "\x1b[33mGesture\x1b[m kind: %d phase: %d x: %.1f y: %.1f delta: %.3f dx: %d dy: %d fingers: %u reported: %d\n",
+        ev->kind, ev->phase, ev->x, ev->y, ev->delta, ev->dx, ev->dy, ev->fingers, reported);
     if (reported) request_tick_callback();
     global_state.callback_os_window = NULL;
 }

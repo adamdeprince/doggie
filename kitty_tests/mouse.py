@@ -418,8 +418,6 @@ class TestMouse(BaseTest):
         self.ae(sel(), '')
 
     def test_gesture_protocol(self):
-        from kitty.constants import is_macos
-
         s = self.create_screen()
         c = s.callbacks
 
@@ -434,14 +432,15 @@ class TestMouse(BaseTest):
         def ev(fields):
             return f'\x1b]777;gesture;v=1:op=event:{fields}:x=256:y=512:'.encode()
 
+        # caps is what the window system delivers, and the tests have none
         send('v=1:op=query:id=42')
-        self.ae(c.wtcbuf, f'\x1b]777;gesture;v=1:op=cap:id=42:caps={15 if is_macos else 0}:mode=0\x1b\\'.encode())
+        self.ae(c.wtcbuf, b'\x1b]777;gesture;v=1:op=cap:id=42:caps=0:mode=0\x1b\\')
         self.assertFalse(report(1, 1))
         send('v=1:op=mode:mode=1')
         send('v=1:op=mode')
         self.ae(c.wtcbuf, b'\x1b]777;gesture;v=1:op=mode:mode=1\x1b\\')
         send('v=1:op=query:id=43')
-        self.ae(c.wtcbuf, f'\x1b]777;gesture;v=1:op=cap:id=43:caps={15 if is_macos else 0}:mode=1\x1b\\'.encode())
+        self.ae(c.wtcbuf, b'\x1b]777;gesture;v=1:op=cap:id=43:caps=0:mode=1\x1b\\')
         self.assertTrue(report(1, 1, mods=3))
         self.ae(c.wtcbuf, ev('kind=1:phase=1') + b'mods=3:scale=0:total=1000\x1b\\')
         report(1, 2, delta=0.5)
@@ -460,6 +459,42 @@ class TestMouse(BaseTest):
         self.ae(c.wtcbuf, ev('kind=3:phase=1') + b'mods=0:dx=1:dy=0\x1b\\')
         report(3, 3, dx=1)
         self.ae(c.wtcbuf, ev('kind=3:phase=3') + b'mods=0:dx=1:dy=0\x1b\\')
+        # The number of fingers is told when a gesture begins and is in every report of it
+        report(3, 1, dy=-1, fingers=3)
+        self.ae(c.wtcbuf, ev('kind=3:phase=1') + b'mods=0:dx=0:dy=-1:fingers=3\x1b\\')
+        report(3, 3, dy=-1)
+        self.ae(c.wtcbuf, ev('kind=3:phase=3') + b'mods=0:dx=0:dy=-1:fingers=3\x1b\\')
+        report(1, 1, fingers=2)
+        report(1, 2, delta=0.5)
+        self.ae(c.wtcbuf, ev('kind=1:phase=2') + b'mods=0:scale=500:total=1500:fingers=2\x1b\\')
+        report(1, 3)
+        self.ae(c.wtcbuf, ev('kind=1:phase=3') + b'mods=0:scale=0:total=1500:fingers=2\x1b\\')
+        report(1, 1)
+        self.ae(c.wtcbuf, ev('kind=1:phase=1') + b'mods=0:scale=0:total=1000\x1b\\')
+        # A hold has a mode bit of its own, so a program that asked for mode 1 never sees one
+        self.assertFalse(report(5, 1, fingers=4))
+        send('v=1:op=mode:mode=2')
+        self.ae(c.wtcbuf, ev('kind=1:phase=4') + b'mods=0:scale=0:total=1000\x1b\\')
+        send('v=1:op=mode')
+        self.ae(c.wtcbuf, b'\x1b]777;gesture;v=1:op=mode:mode=2\x1b\\')
+        self.assertFalse(report(1, 1))
+        self.assertTrue(report(5, 1, fingers=4))
+        self.ae(c.wtcbuf, ev('kind=5:phase=1') + b'mods=0:fingers=4\x1b\\')
+        report(5, 4)
+        self.ae(c.wtcbuf, ev('kind=5:phase=4') + b'mods=0:fingers=4\x1b\\')
+        self.assertFalse(report(5, 3))
+        send('v=1:op=mode:mode=3')
+        send('v=1:op=query:id=44')
+        self.ae(c.wtcbuf, b'\x1b]777;gesture;v=1:op=cap:id=44:caps=0:mode=3\x1b\\')
+        self.assertTrue(report(5, 1))
+        self.assertTrue(report(2, 1))
+        report(5, 3)
+        self.ae(c.wtcbuf, ev('kind=5:phase=3') + b'mods=0\x1b\\')
+        # Bits the terminal does not know are dropped, and a read says what is left
+        send('v=1:op=mode:mode=13')
+        self.ae(c.wtcbuf, ev('kind=2:phase=4') + b'mods=0:angle=0:total=0\x1b\\')
+        send('v=1:op=mode')
+        self.ae(c.wtcbuf, b'\x1b]777;gesture;v=1:op=mode:mode=1\x1b\\')
         report(4, 1)
         self.ae(c.wtcbuf, ev('kind=4:phase=1') + b'mods=0\x1b\\')
         c.clear()

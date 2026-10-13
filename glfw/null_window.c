@@ -349,6 +349,11 @@ _glfwPlatformWindowBell(_GLFWwindow *window UNUSED) {
     return false;
 }
 
+unsigned
+_glfwPlatformSupportedGestures(void) {
+    return 0;
+}
+
 void
 _glfwPlatformHideWindow(_GLFWwindow *window) {
     if (_glfw.null.focusedWindow == window) {

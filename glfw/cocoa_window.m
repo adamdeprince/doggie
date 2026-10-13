@@ -3232,6 +3232,12 @@ _glfwPlatformWindowBell(_GLFWwindow *window UNUSED) {
     return true;
 }
 
+unsigned
+_glfwPlatformSupportedGestures(void) {
+    return _GLFW_GESTURE_BIT(GLFW_GESTURE_PINCH) | _GLFW_GESTURE_BIT(GLFW_GESTURE_ROTATE) | _GLFW_GESTURE_BIT(GLFW_GESTURE_SWIPE) |
+           _GLFW_GESTURE_BIT(GLFW_GESTURE_SMART_ZOOM);
+}
+
 void
 _glfwPlatformFocusWindow(_GLFWwindow *window) {
     if (_glfwPlatformWindowIconified(window)) {

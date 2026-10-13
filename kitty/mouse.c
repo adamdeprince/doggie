@@ -1690,56 +1690,63 @@ scroll_event(const GLFWScrollEvent *ev) {
 // Gestures {{{
 // The trackpad gesture protocol, see docs/gesture-protocol.rst
 
-static id_type gesture_window_id;  // the window that captured the gestures in progress
+static id_type gesture_window_ids[GESTURE_HOLD + 1];  // the window that captured the gesture in progress, by GestureKind
+
+// The mode bit that asks for a kind of gesture: 1 for the kinds a window
+// system recognizes from moving fingers, 2 for the hold
+static unsigned
+gesture_mode_bit(int kind) {
+    return kind == GESTURE_HOLD ? 2 : 1;
+}
 
 static void
-write_gesture_report(Screen *screen, int kind, int phase, int x, int y, int mods, double delta, double total, int dx, int dy) {
+write_gesture_report(Screen *screen, int kind, int phase, int x, int y, int mods, double delta, double total, int dx, int dy, unsigned fingers) {
     char buf[256];
     int n = snprintf(buf, sizeof(buf), "777;gesture;v=1:op=event:kind=%d:phase=%d:x=%d:y=%d:mods=%d", kind, phase, x, y, mods);
     switch (kind) {
-        case GESTURE_PINCH: snprintf(buf + n, sizeof(buf) - n, ":scale=%d:total=%d", (int)round(delta * 1000), (int)round(total * 1000)); break;
-        case GESTURE_ROTATE: snprintf(buf + n, sizeof(buf) - n, ":angle=%d:total=%d", (int)round(delta * 100), (int)round(total * 100)); break;
-        case GESTURE_SWIPE: snprintf(buf + n, sizeof(buf) - n, ":dx=%d:dy=%d", dx, dy); break;
+        case GESTURE_PINCH: n += snprintf(buf + n, sizeof(buf) - n, ":scale=%d:total=%d", (int)round(delta * 1000), (int)round(total * 1000)); break;
+        case GESTURE_ROTATE: n += snprintf(buf + n, sizeof(buf) - n, ":angle=%d:total=%d", (int)round(delta * 100), (int)round(total * 100)); break;
+        case GESTURE_SWIPE: n += snprintf(buf + n, sizeof(buf) - n, ":dx=%d:dy=%d", dx, dy); break;
     }
+    if (fingers) snprintf(buf + n, sizeof(buf) - n, ":fingers=%u", fingers);
     write_escape_code_to_child(screen, ESC_OSC, buf);
 }
 
 bool
-screen_gesture_report(Screen *screen, int kind, int phase, int x, int y, int mods, double delta, int dx, int dy) {
-    if (!screen->gesture.version || kind < GESTURE_PINCH || kind > GESTURE_SMART_ZOOM) return false;
+screen_gesture_report(Screen *screen, int kind, int phase, int x, int y, int mods, double delta, int dx, int dy, unsigned fingers) {
+    if (kind < GESTURE_PINCH || kind > GESTURE_HOLD || !(screen->gesture.mode & gesture_mode_bit(kind))) return false;
     GestureState *g = screen->gesture.gestures + kind;
     if (phase == GESTURE_BEGIN) {
-        if (g->active) write_gesture_report(screen, kind, GESTURE_CANCEL, g->x, g->y, g->mods, 0, g->total, 0, 0);
+        if (g->active) write_gesture_report(screen, kind, GESTURE_CANCEL, g->x, g->y, g->mods, 0, g->total, 0, 0, g->fingers);
         g->active = true;
         g->total = kind == GESTURE_PINCH ? 1 : 0;
+        g->fingers = fingers;  // the system tells the number of fingers when a gesture begins
     } else if (!g->active) return false;  // no gesture after a reset
     g->x = x;
     g->y = y;
     g->mods = mods;
     if (kind == GESTURE_PINCH) g->total *= 1 + delta;
     else g->total += delta;
-    write_gesture_report(screen, kind, phase, x, y, mods, delta, g->total, dx, dy);
+    write_gesture_report(screen, kind, phase, x, y, mods, delta, g->total, dx, dy, g->fingers);
     if (phase >= GESTURE_END) g->active = false;
     return true;
 }
 
 void
 screen_gesture_cancel(Screen *screen) {
-    for (int kind = GESTURE_PINCH; kind <= GESTURE_SMART_ZOOM; kind++) {
+    for (int kind = GESTURE_PINCH; kind <= GESTURE_HOLD; kind++) {
         GestureState *g = screen->gesture.gestures + kind;
         if (!g->active) continue;
         g->active = false;
-        write_gesture_report(screen, kind, GESTURE_CANCEL, g->x, g->y, g->mods, 0, g->total, 0, 0);
+        write_gesture_report(screen, kind, GESTURE_CANCEL, g->x, g->y, g->mods, 0, g->total, 0, 0, g->fingers);
     }
 }
 
+// The gestures the window system delivers, whose bits are those of the
+// protocol. There is none before there is a window system, as in the tests
 static unsigned
 gesture_caps(void) {
-#ifdef __APPLE__
-    return 15;
-#else
-    return global_state.is_wayland ? 7 : 0;
-#endif
+    return glfwGetSupportedGestures ? glfwGetSupportedGestures() : 0;
 }
 
 void
@@ -1761,16 +1768,16 @@ screen_gesture_osc(Screen *screen, const char *data, size_t sz) {
     }
     if (v != 1) return;
     if (!strcmp(op, "query") && id >= 0) {
-        snprintf(reply, sizeof(reply), "777;gesture;v=1:op=cap:id=%d:caps=%u:mode=%d", id, gesture_caps(), screen->gesture.version != 0);
+        snprintf(reply, sizeof(reply), "777;gesture;v=1:op=cap:id=%d:caps=%u:mode=%u", id, gesture_caps(), screen->gesture.mode);
         write_escape_code_to_child(screen, ESC_OSC, reply);
     } else if (!strcmp(op, "mode")) {
         if (mode < 0) {  // a read
-            snprintf(reply, sizeof(reply), "777;gesture;v=1:op=mode:mode=%d", screen->gesture.version != 0);
+            snprintf(reply, sizeof(reply), "777;gesture;v=1:op=mode:mode=%u", screen->gesture.mode);
             write_escape_code_to_child(screen, ESC_OSC, reply);
             return;
         }
         screen_gesture_cancel(screen);
-        screen->gesture.version = mode ? v : 0;
+        screen->gesture.mode = mode & 3;
     }
 }
 
@@ -1778,11 +1785,13 @@ bool
 gesture_event(const GLFWGestureEvent *ev) {
     const OSWindow *osw = global_state.callback_os_window;
     Window *w = NULL;
+    if (ev->kind < GLFW_GESTURE_PINCH || ev->kind > GLFW_GESTURE_HOLD) return false;
+    id_type *captured_by = gesture_window_ids + ev->kind;
     if (ev->phase == GLFW_GESTURE_BEGIN) {
         w = mouse_region(false, false).window;
-        if (w && !w->render_data.screen->gesture.version) w = NULL;
-        gesture_window_id = w ? w->id : 0;
-    } else if (gesture_window_id) w = window_for_window_id(gesture_window_id);
+        if (w && !(w->render_data.screen->gesture.mode & gesture_mode_bit(ev->kind))) w = NULL;
+        *captured_by = w ? w->id : 0;
+    } else if (*captured_by) w = window_for_window_id(*captured_by);
     if (!w) return false;
     const WindowGeometry *g = &w->render_data.geometry;
 #define coord(v) (int)round(MIN(MAX((v) * 256, -1073741823.), 1073741823.))
@@ -1790,17 +1799,20 @@ gesture_event(const GLFWGestureEvent *ev) {
 #undef coord
     const int mods = (ev->keyboard_modifiers & GLFW_MOD_SHIFT ? 1 : 0) | (ev->keyboard_modifiers & GLFW_MOD_ALT ? 2 : 0) |
                      (ev->keyboard_modifiers & GLFW_MOD_CONTROL ? 4 : 0) | (ev->keyboard_modifiers & GLFW_MOD_SUPER ? 8 : 0);
-    return screen_gesture_report(w->render_data.screen, ev->kind, ev->phase, x, y, mods, ev->delta, ev->dx, ev->dy);
+    return screen_gesture_report(w->render_data.screen, ev->kind, ev->phase, x, y, mods, ev->delta, ev->dx, ev->dy, ev->fingers);
 }
 
 static PyObject *
 send_gesture_report(PyObject *self UNUSED, PyObject *args, PyObject *kw) {
     Screen *screen;
     int kind, phase, x, y, mods = 0, dx = 0, dy = 0;
+    unsigned fingers = 0;
     double delta = 0;
-    static const char *kwlist[] = {"screen", "kind", "phase", "x", "y", "mods", "delta", "dx", "dy", NULL};
-    if (!PyArg_ParseTupleAndKeywords(args, kw, "O!iiii|idii", (char **)kwlist, &Screen_Type, &screen, &kind, &phase, &x, &y, &mods, &delta, &dx, &dy)) return NULL;
-    if (screen_gesture_report(screen, kind, phase, x, y, mods, delta, dx, dy)) Py_RETURN_TRUE;
+    static const char *kwlist[] = {"screen", "kind", "phase", "x", "y", "mods", "delta", "dx", "dy", "fingers", NULL};
+    if (!PyArg_ParseTupleAndKeywords(
+            args, kw, "O!iiii|idiiI", (char **)kwlist, &Screen_Type, &screen, &kind, &phase, &x, &y, &mods, &delta, &dx, &dy, &fingers))
+        return NULL;
+    if (screen_gesture_report(screen, kind, phase, x, y, mods, delta, dx, dy, fingers)) Py_RETURN_TRUE;
     Py_RETURN_FALSE;
 }
 // }}}

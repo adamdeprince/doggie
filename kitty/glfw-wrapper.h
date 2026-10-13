@@ -365,6 +365,8 @@ typedef enum GLFWGestureKind {
     GLFW_GESTURE_ROTATE = 2,
     GLFW_GESTURE_SWIPE = 3,
     GLFW_GESTURE_SMART_ZOOM = 4,
+    // Fingers resting on the trackpad without moving
+    GLFW_GESTURE_HOLD = 5,
 } GLFWGestureKind;
 
 typedef enum GLFWGesturePhase {
@@ -387,6 +389,9 @@ typedef struct GLFWGestureEvent {
     double delta;
     // The direction of a swipe, -1, 0 or 1 on each axis, positive right and down
     int dx, dy;
+    // The number of fingers making the gesture, given with GLFW_GESTURE_BEGIN,
+    // zero when the system does not say
+    unsigned fingers;
 } GLFWGestureEvent;
 
 /*! @defgroup joysticks Joysticks
@@ -2443,6 +2448,10 @@ GFW_EXTERN glfwSetTouchCallback_func glfwSetTouchCallback_impl;
 typedef GLFWgesturefun (*glfwSetGestureCallback_func)(GLFWwindow*, GLFWgesturefun);
 GFW_EXTERN glfwSetGestureCallback_func glfwSetGestureCallback_impl;
 #define glfwSetGestureCallback glfwSetGestureCallback_impl
+
+typedef unsigned (*glfwGetSupportedGestures_func)(void);
+GFW_EXTERN glfwGetSupportedGestures_func glfwGetSupportedGestures_impl;
+#define glfwGetSupportedGestures glfwGetSupportedGestures_impl
 
 typedef GLFWliveresizefun (*glfwSetLiveResizeCallback_func)(GLFWwindow*, GLFWliveresizefun);
 GFW_EXTERN glfwSetLiveResizeCallback_func glfwSetLiveResizeCallback_impl;

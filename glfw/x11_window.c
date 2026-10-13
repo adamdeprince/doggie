@@ -2671,6 +2671,11 @@ _glfwPlatformWindowBell(_GLFWwindow *window) {
     return XkbBell(_glfw.x11.display, window->x11.handle, 100, (Atom)0) ? true : false;
 }
 
+unsigned
+_glfwPlatformSupportedGestures(void) {
+    return 0;
+}
+
 void
 _glfwPlatformFocusWindow(_GLFWwindow *window) {
     if (_glfw.x11.NET_ACTIVE_WINDOW) sendEventToWM(window, _glfw.x11.NET_ACTIVE_WINDOW, 1, 0, 0, 0, 0);

@@ -368,6 +368,9 @@ load_glfw(const char* path) {
     *(void **) (&glfwSetGestureCallback_impl) = dlsym(handle, "glfwSetGestureCallback");
     if (glfwSetGestureCallback_impl == NULL) fail("Failed to load glfw function glfwSetGestureCallback with error: %s", dlerror());
 
+    *(void **) (&glfwGetSupportedGestures_impl) = dlsym(handle, "glfwGetSupportedGestures");
+    if (glfwGetSupportedGestures_impl == NULL) fail("Failed to load glfw function glfwGetSupportedGestures with error: %s", dlerror());
+
     *(void **) (&glfwSetLiveResizeCallback_impl) = dlsym(handle, "glfwSetLiveResizeCallback");
     if (glfwSetLiveResizeCallback_impl == NULL) fail("Failed to load glfw function glfwSetLiveResizeCallback with error: %s", dlerror());
 
