@@ -850,6 +850,25 @@ glfwSetWindowHDRActive(GLFWwindow *handle, bool active) {
     _glfwPlatformSetWindowHDRActive(window, active);
 }
 
+GLFWAPI bool
+glfwGetWindowPreferredColorDescription(GLFWwindow *handle, GLFWcolordescription *desc) {
+    _GLFWwindow *window = (_GLFWwindow *)handle;
+    assert(window != NULL);
+    assert(desc != NULL);
+
+    _GLFW_REQUIRE_INIT_OR_RETURN(false);
+    return _glfwPlatformGetWindowPreferredColorDescription(window, desc);
+}
+
+GLFWAPI bool
+glfwSetWindowColorDescription(GLFWwindow *handle, const GLFWcolordescription *desc, GLFWcolorintent intent) {
+    _GLFWwindow *window = (_GLFWwindow *)handle;
+    assert(window != NULL);
+
+    _GLFW_REQUIRE_INIT_OR_RETURN(false);
+    return _glfwPlatformSetWindowColorDescription(window, desc, intent);
+}
+
 
 GLFWAPI GLFWmonitor *
 glfwGetWindowMonitor(GLFWwindow *handle) {

@@ -3408,6 +3408,18 @@ _glfwPlatformSetWindowBlur(_GLFWwindow *window, int blur_radius) {
     return 0;
 }
 
+// X11 has no way to describe the colors of a window or of the display it is on
+
+bool
+_glfwPlatformGetWindowPreferredColorDescription(_GLFWwindow *window UNUSED, GLFWcolordescription *desc UNUSED) {
+    return false;
+}
+
+bool
+_glfwPlatformSetWindowColorDescription(_GLFWwindow *window UNUSED, const GLFWcolordescription *desc, GLFWcolorintent intent UNUSED) {
+    return desc == NULL;
+}
+
 
 bool
 _glfwPlatformGrabKeyboard(bool grab) {
