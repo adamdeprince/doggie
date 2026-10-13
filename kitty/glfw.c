@@ -901,6 +901,12 @@ touch_callback(GLFWwindow *w, const GLFWTouchEvent *ev) {
         global_state.callback_os_window = NULL;
         return;
     }
+    // The fingers on a touchpad are not at any place in the window, and the
+    // system already makes pointer and scroll events from them
+    if (ev->indirect) {
+        global_state.callback_os_window = NULL;
+        return;
+    }
     const int mods = ev->keyboard_modifiers;
     // The OS window of a gesture can close before its fingers lift, and then it
     // gets no more events

@@ -618,6 +618,9 @@ typedef struct GLFWTouchEvent {
     // can be delivered in bursts, so use this rather than the time of delivery to
     // measure taps, long presses and the velocity of flings
     monotonic_t timestamp;
+    // The system stamps these events more finely than a millisecond. When false
+    // only whole milliseconds of the differences between timestamps mean anything
+    bool timestamp_is_fine;
     // Every point that is down on the window, and the points that were released
     // in this event. At most 16 points are tracked, further simultaneous points
     // are ignored. The array is valid only during the callback
@@ -627,6 +630,13 @@ typedef struct GLFWTouchEvent {
     bool indirect;
     // The size of an indirect device in millimeters, zero when unknown
     double device_width, device_height;
+    // The force on an indirect device that measures it, on the device as a
+    // whole and not on each point. The stage is 0 for less than a click, 1 for
+    // a click and 2 for a click pressed harder, and the pressure runs from 0
+    // to 1 within the stage
+    bool has_pressure;
+    double pressure;
+    int stage;
 } GLFWTouchEvent;
 
 // The gestures the system recognizes on a trackpad. They arrive in addition to
@@ -669,7 +679,26 @@ typedef enum GLFWTabletEventType {
     GLFW_TABLET_OUT = 2,
     // The system took the tool over, discard what it did so far
     GLFW_TABLET_CANCEL = 3,
+    // Something was done with the tool that is not a button held down, see
+    // GLFWTabletAction. Only the action, the device when it is known, the
+    // modifiers and the timestamp are meaningful
+    GLFW_TABLET_ACTION = 4,
 } GLFWTabletEventType;
+
+typedef enum GLFWTabletAction {
+    GLFW_TABLET_ACTION_DOUBLE_TAP = 1,  // on the barrel
+    GLFW_TABLET_ACTION_SQUEEZE = 2,
+    GLFW_TABLET_ACTION_TAIL_CLICK = 3,  // of the button on the end of the tool
+    GLFW_TABLET_ACTION_TAIL_DOUBLE_CLICK = 4,
+    GLFW_TABLET_ACTION_TAIL_HOLD = 5,
+} GLFWTabletAction;
+
+// An action that lasts, such as a squeeze, begins and later ends
+typedef enum GLFWTabletActionState {
+    GLFW_TABLET_ACTION_INSTANT = 0,
+    GLFW_TABLET_ACTION_BEGAN = 1,
+    GLFW_TABLET_ACTION_ENDED = 2,
+} GLFWTabletActionState;
 
 typedef enum GLFWTabletTool {
     GLFW_TABLET_TOOL_UNKNOWN = 0,
@@ -711,6 +740,7 @@ typedef struct GLFWTabletEvent {
     // for GLFWTouchEvent. A stroke's speed is measured with this, not with the
     // time of delivery
     monotonic_t timestamp;
+    bool timestamp_is_fine;  // as for GLFWTouchEvent
     unsigned buttons, axes;
     // In window content coordinates, the same as the cursor position
     double x, y;
@@ -723,6 +753,12 @@ typedef struct GLFWTabletEvent {
     // when the system does not report them
     uint64_t device, serial, hardware_id;
     unsigned vendor_id, product_id;
+    // The name of the tablet the tool is on, or of the tool's own device, NULL
+    // when the system has none. Valid only during the callback
+    const char *name;
+    // For GLFW_TABLET_ACTION
+    GLFWTabletAction action;
+    GLFWTabletActionState action_state;
 } GLFWTabletEvent;
 
 /*! @defgroup joysticks Joysticks

@@ -491,11 +491,23 @@ translateFlags(NSUInteger flags) {
 }
 
 // The time the system generated an event, as monotonic() time. Event
-// timestamps and systemUptime are on the same clock
+// timestamps are on the clock of systemUptime. Its offset from monotonic() is
+// measured once and kept while it stays right to within a millisecond, so that
+// the times of two events differ by exactly what their timestamps do, to the
+// microsecond, however late each one is delivered
 static monotonic_t
 eventTimestamp(NSEvent *event) {
-    const double age = [[NSProcessInfo processInfo] systemUptime] - [event timestamp];
-    return monotonic() - s_double_to_monotonic_t(MAX(0, age));
+    static monotonic_t offset = 0;
+    static bool have_offset = false;
+    const monotonic_t now = monotonic(), measured = now - s_double_to_monotonic_t([[NSProcessInfo processInfo] systemUptime]);
+    if (!have_offset || measured < offset || measured - offset > MONOTONIC_T_1e6) {
+        // Half a millisecond below the measurement, so that the clocks have
+        // room to drift either way
+        offset = measured - MONOTONIC_T_1e6 / 2;
+        have_offset = true;
+    }
+    const monotonic_t ans = s_double_to_monotonic_t([event timestamp]) + offset;
+    return MIN(ans, now);
 }
 
 // Tablet {{{
@@ -505,6 +517,7 @@ eventTimestamp(NSEvent *event) {
 #define TABLET_CAP_PRESSURE 0x0400
 #define TABLET_CAP_TANGENT 0x0800
 #define TABLET_CAP_ROTATION 0x2000
+#define TABLET_VENDOR_WACOM 0x056A
 
 static _GLFWTabletToolNS *
 tabletTool(unsigned long device_id, bool create) {
@@ -541,6 +554,25 @@ handleTabletEvent(_GLFWwindow *window, NSEvent *event) {
                 case NSPointingDeviceTypeCursor: t->tool = GLFW_TABLET_TOOL_MOUSE; break;
                 default: t->tool = GLFW_TABLET_TOOL_UNKNOWN; break;
             }
+            // AppKit tells a pen, an eraser and a puck apart and no more. The
+            // Wacom driver puts the model of the tool in a field of its own.
+            // Wacom publishes these masks for the CSR_TYPE of Wintab and Qt
+            // applies them to this field, taking the bits from the unique id
+            // when the driver leaves the field empty. 0x0004, a mouse, is
+            // what AppKit's cursor already becomes
+            if (t->vendor_id == TABLET_VENDOR_WACOM) {
+                unsigned bits = (unsigned)[event vendorPointingDeviceType];
+                if (!bits) bits = (unsigned)(t->hardware_id >> 32);
+                switch (bits & 0x0F06) {
+                    case 0x0902:
+                        if (t->tool == GLFW_TABLET_TOOL_PEN) t->tool = GLFW_TABLET_TOOL_AIRBRUSH;
+                        break;
+                    case 0x0006:
+                        if (t->tool == GLFW_TABLET_TOOL_MOUSE) t->tool = GLFW_TABLET_TOOL_LENS;
+                        break;
+                    default: break;
+                }
+            }
         } else {
             t->in_proximity = false;
             [NSEvent setMouseCoalescingEnabled:YES];
@@ -549,6 +581,7 @@ handleTabletEvent(_GLFWwindow *window, NSEvent *event) {
                 .tool = t->tool,
                 .keyboard_modifiers = translateFlags([event modifierFlags]),
                 .timestamp = eventTimestamp(event),
+                .timestamp_is_fine = true,
                 .device = t->device_id,
             };
             _glfwInputTablet(window, &ev);
@@ -566,6 +599,7 @@ handleTabletEvent(_GLFWwindow *window, NSEvent *event) {
         .tool = t ? t->tool : GLFW_TABLET_TOOL_PEN,
         .keyboard_modifiers = translateFlags([event modifierFlags]),
         .timestamp = eventTimestamp(event),
+        .timestamp_is_fine = true,
         .buttons = (held & NSEventButtonMaskPenTip ? GLFW_TABLET_BUTTON_TIP : 0) | (held & NSEventButtonMaskPenLowerSide ? GLFW_TABLET_BUTTON_BARREL : 0) |
                    (held & NSEventButtonMaskPenUpperSide ? GLFW_TABLET_BUTTON_BARREL2 : 0),
         .axes = !caps ? (GLFW_TABLET_PRESSURE | GLFW_TABLET_TILT)
@@ -1221,6 +1255,32 @@ static void _glfwUpdateNotchCover(_GLFWwindow *);
     if (window) handleTabletEvent(window, event);
 }
 
+// A double tap on the side of an Apple Pencil that is paired with an iPad this
+// Mac uses as a display
+- (void)changeModeWithEvent:(NSEvent *)event {
+    if (!window) return;
+    GLFWTabletEvent ev = {
+        .type = GLFW_TABLET_ACTION,
+        .tool = GLFW_TABLET_TOOL_PEN,
+        .keyboard_modifiers = translateFlags([event modifierFlags]),
+        .timestamp = eventTimestamp(event),
+        .timestamp_is_fine = true,
+        .action = GLFW_TABLET_ACTION_DOUBLE_TAP,
+    };
+    // The event does not say which tool it was, which is known all the same
+    // when a single one is in proximity
+    for (size_t i = 0; i < arraysz(_glfw.ns.tablet_tools); i++) {
+        const _GLFWTabletToolNS *t = _glfw.ns.tablet_tools + i;
+        if (!t->in_proximity) continue;
+        if (ev.device) {
+            ev.device = 0;
+            break;
+        }
+        ev.device = t->device_id;
+    }
+    _glfwInputTablet(window, &ev);
+}
+
 - (void)mouseExited:(NSEvent *)event {
     (void)event;
     if (!window) return;
@@ -1628,6 +1688,23 @@ gesturePhase(NSEvent *event) {
 // small integer for as long as the finger is down.
 static id touch_identities[16];
 
+// The force on the trackpad as of its last pressure event. Only a trackpad
+// that measures force sends them
+static struct {
+    bool known;
+    double pressure;
+    int stage;
+} pad_force;
+
+// The fingers that were down after the last touch event, kept so that they
+// can be reported again when only the force on them changes
+static struct {
+    GLFWTouchPoint points[arraysz(touch_identities)];
+    size_t count;
+    GLFWid window_id;
+    NSSize device;
+} fingers_down;
+
 static int
 touchId(NSTouch *touch, bool allocate) {
     int free_slot = -1;
@@ -1671,19 +1748,60 @@ handleTouches(_GLFWwindow *window, NSView *view, NSEvent *event, GLFWTouchEventT
         .type = type,
         .keyboard_modifiers = translateFlags([event modifierFlags]),
         .timestamp = eventTimestamp(event),
+        .timestamp_is_fine = true,
         .num_points = n,
         .points = points,
         .indirect = true,
         // The device size is in points, 72 to the inch
         .device_width = device.width * 25.4 / 72,
         .device_height = device.height * 25.4 / 72,
+        .has_pressure = pad_force.known,
+        .pressure = pad_force.pressure,
+        .stage = pad_force.stage,
     };
     _glfwInputTouch(window, &ev);
+    fingers_down.count = 0;
+    fingers_down.window_id = window->id;
+    fingers_down.device = device;
     for (size_t i = 0; i < n; i++) {
-        if (points[i].state != GLFW_TOUCH_POINT_RELEASED) continue;
+        if (points[i].state != GLFW_TOUCH_POINT_RELEASED) {
+            if (type != GLFW_TOUCH_CANCEL) fingers_down.points[fingers_down.count++] = points[i];
+            continue;
+        }
         [touch_identities[points[i].id] release];
         touch_identities[points[i].id] = nil;
     }
+    // No fingers, no force, whether or not the trackpad said so
+    if (!fingers_down.count) pad_force.pressure = 0, pad_force.stage = 0;
+}
+
+// The force on a trackpad that measures it. It comes apart from the fingers,
+// which may not have moved, so they are reported again with the new force
+- (void)pressureChangeWithEvent:(NSEvent *)event {
+    pad_force.known = true;
+    pad_force.pressure = [event pressure];
+    pad_force.stage = (int)[event stage];
+    if (!window || !fingers_down.count || fingers_down.window_id != window->id) return;
+    GLFWTouchPoint points[arraysz(fingers_down.points)];
+    for (size_t i = 0; i < fingers_down.count; i++) {
+        points[i] = fingers_down.points[i];
+        points[i].state = GLFW_TOUCH_POINT_MOVED;
+    }
+    GLFWTouchEvent ev = {
+        .type = GLFW_TOUCH_UPDATE,
+        .keyboard_modifiers = translateFlags([event modifierFlags]),
+        .timestamp = eventTimestamp(event),
+        .timestamp_is_fine = true,
+        .num_points = fingers_down.count,
+        .points = points,
+        .indirect = true,
+        .device_width = fingers_down.device.width * 25.4 / 72,
+        .device_height = fingers_down.device.height * 25.4 / 72,
+        .has_pressure = true,
+        .pressure = pad_force.pressure,
+        .stage = pad_force.stage,
+    };
+    _glfwInputTouch(window, &ev);
 }
 
 - (void)touchesBeganWithEvent:(NSEvent *)event {

@@ -1421,7 +1421,14 @@ def send_gesture_report(screen: Screen, kind: int, phase: int, x: int, y: int, m
 def send_pointer_report(
     screen: Screen, kind: int, phase: int, device: int, contact: int, x: int, y: int, buttons: int = 0, mods: int = 0, tool: int = 1, valid: int = 0,
     p: int = 0, tx: int = 0, ty: int = 0, twist: int = 0, tangent: int = 0, z: int = 0, dist: int = 0, wheel: int = 0, wclicks: int = 0,
-    serial: int = 0, hwid: int = 0, vid: int = 0, pid: int = 0, t: int = 0, src: int = 0, major: int = 0, minor: int = 0, angle: int = 0, w: int = 0, h: int = 0
+    t: int = 0, src: int = 0, major: int = 0, minor: int = 0, angle: int = 0, w: int = 0, h: int = 0, tu: int = -1, stage: int = -1
+) -> bool: ...
+def send_pointer_action(
+    screen: Screen, action: int, device: int = 0, state: int = -1, x: int = 0, y: int = 0, mods: int = 0, t: int = 0, tu: int = -1
+) -> bool: ...
+def send_pointer_device(
+    screen: Screen, device: int, kind: int = 1, tool: int = 1, axes: int = 0, name: str | None = None, serial: int = 0, hwid: int = 0, vid: int = 0,
+    pid: int = 0
 ) -> bool: ...
 def set_window_logo(os_window_id: int, tab_id: int, window_id: int, path: str, position: str, alpha: float, png_data: bytes = b'') -> None:
     pass

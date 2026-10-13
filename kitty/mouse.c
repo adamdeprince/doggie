@@ -13,6 +13,7 @@
 #include <math.h>
 #include "glfw-wrapper.h"
 #include "control-codes.h"
+#include "base64.h"
 
 extern PyTypeObject Screen_Type;
 
@@ -1919,6 +1920,7 @@ static void
 write_pointer_report(Screen *screen, const PointerReport *r) {
     char buf[512];
     int n = snprintf(buf, sizeof(buf), "777;tablet-pointer;v=1:op=event:kind=%d:phase=%d:device=%llu:t=%llu", r->kind, r->phase, (unsigned long long)r->device, r->t);
+    if (r->has_tu) n += snprintf(buf + n, sizeof(buf) - n, ":tu=%u", r->tu);
     if (r->phase != POINTER_FRAME) {
         n += snprintf(buf + n, sizeof(buf) - n, ":contact=%d:x=%d:y=%d:buttons=%u:mods=%d:tool=%d:valid=%u", r->contact, r->x, r->y, r->buttons, r->mods, r->tool, r->valid);
 #define F(bit, ...) if (r->valid & bit) n += snprintf(buf + n, sizeof(buf) - n, __VA_ARGS__)
@@ -1931,13 +1933,63 @@ write_pointer_report(Screen *screen, const PointerReport *r) {
         F(64, ":wheel=%d:wclicks=%d", r->wheel, r->wclicks);
         F(128, ":major=%d:minor=%d:angle=%d", r->major, r->minor, r->angle);
 #undef F
+        if (r->has_stage) n += snprintf(buf + n, sizeof(buf) - n, ":stage=%d", r->stage);
         if (r->src) n += snprintf(buf + n, sizeof(buf) - n, ":src=%d", r->src);
-        if (r->w > 0 && r->h > 0) n += snprintf(buf + n, sizeof(buf) - n, ":w=%d:h=%d", r->w, r->h);
-        if (r->serial) n += snprintf(buf + n, sizeof(buf) - n, ":serial=%llu", (unsigned long long)r->serial);
-        if (r->hwid) n += snprintf(buf + n, sizeof(buf) - n, ":hwid=%llu", (unsigned long long)r->hwid);
-        if (r->vid || r->pid) snprintf(buf + n, sizeof(buf) - n, ":vid=%u:pid=%u", r->vid, r->pid);
+        if (r->w > 0 && r->h > 0) snprintf(buf + n, sizeof(buf) - n, ":w=%d:h=%d", r->w, r->h);
     }
     write_escape_code_to_child(screen, ESC_OSC, buf);
+}
+
+// Reports a tool action to a program that asked for them
+bool
+screen_pointer_action(Screen *screen, const PointerAction *a) {
+    if (!(screen->pointer.mode & POINTER_MODE_ACTIONS)) return false;
+    char buf[256];
+    int n = snprintf(buf, sizeof(buf), "777;tablet-pointer;v=1:op=event:kind=4:device=%llu:t=%llu", (unsigned long long)a->device, a->t);
+    if (a->has_tu) n += snprintf(buf + n, sizeof(buf) - n, ":tu=%u", a->tu);
+    n += snprintf(buf + n, sizeof(buf) - n, ":action=%d", a->action);
+    if (a->state >= 0) n += snprintf(buf + n, sizeof(buf) - n, ":state=%d", a->state);
+    snprintf(buf + n, sizeof(buf) - n, ":x=%d:y=%d:mods=%d", a->x, a->y, a->mods);
+    write_escape_code_to_child(screen, ESC_OSC, buf);
+    return true;
+}
+
+// The length of s cut to at most max bytes without splitting a UTF-8 sequence
+static size_t
+utf8_prefix_length(const char *s, size_t max) {
+    size_t n = MIN(strlen(s), max), lead = n;
+    while (lead > 0 && ((unsigned char)s[lead - 1] & 0xC0) == 0x80) lead--;
+    if (lead > 0) {
+        const unsigned char c = s[lead - 1];
+        const size_t sequence = c >= 0xF0 ? 4 : (c >= 0xE0 ? 3 : (c >= 0xC0 ? 2 : 1));
+        if (lead - 1 + sequence > n) n = lead - 1;
+    } else n = 0;
+    return n;
+}
+
+// Describes a tool to the program, which it is before the first of its
+// reports. The hardware identifiers go only to a program that asked for them
+bool
+screen_pointer_device(Screen *screen, const PointerDevice *d) {
+    if (!(screen->pointer.mode & d->kind)) return false;
+    char buf[512];
+    int n = snprintf(
+        buf, sizeof(buf), "777;tablet-pointer;v=1:op=device:device=%llu:kind=%d:tool=%d:axes=%u", (unsigned long long)d->device, d->kind, d->tool, d->axes);
+    if (d->name && d->name[0]) {
+        unsigned char name[192];
+        size_t sz = sizeof(name) - 1;
+        if (base64_encode8((const unsigned char *)d->name, utf8_prefix_length(d->name, 127), name, &sz, true)) {
+            name[sz] = 0;
+            n += snprintf(buf + n, sizeof(buf) - n, ":name=%s", name);
+        }
+    }
+    if (screen->pointer.mode & POINTER_MODE_IDS) {
+        if (d->serial) n += snprintf(buf + n, sizeof(buf) - n, ":serial=%llu", (unsigned long long)d->serial);
+        if (d->hwid) n += snprintf(buf + n, sizeof(buf) - n, ":hwid=%llu", (unsigned long long)d->hwid);
+        if (d->vid || d->pid) snprintf(buf + n, sizeof(buf) - n, ":vid=%u:pid=%u", d->vid, d->pid);
+    }
+    write_escape_code_to_child(screen, ESC_OSC, buf);
+    return true;
 }
 
 static PointerReport *
@@ -1996,15 +2048,24 @@ screen_pointer_cancel(Screen *screen, int kind) {
 }
 
 // What this terminal can report: tools 1, fingers on a touchscreen 2, fingers
-// on a touchpad 4, the shape of a finger contact 8
+// on a touchpad 4, the shape of a finger contact 8, tool actions 32, hardware
+// identifiers 64
 static unsigned
 pointer_caps(void) {
 #ifdef __APPLE__
-    return 1 | 4;
+    return 1 | 4 | 32 | 64;
 #else
-    return global_state.is_wayland ? 1 | 2 | 8 : 1;
+    return global_state.is_wayland ? 1 | 2 | 8 | 64 : 1 | 64;
 #endif
 }
+
+typedef struct TabletTool {
+    bool active, down;
+    uint64_t device;
+    id_type window_id;     // the window that captured the stroke
+    id_type described_to;  // the window whose program was sent the device frame
+} TabletTool;
+static TabletTool tablet_tools[8];
 
 void
 screen_tablet_pointer(Screen *screen, const char *data, size_t sz) {
@@ -2037,16 +2098,15 @@ screen_tablet_pointer(Screen *screen, const char *data, size_t sz) {
             return;
         }
         screen_pointer_cancel(screen, 0);
-        screen->pointer.mode = mode & 3;
+        // Only the bits this terminal knows are kept, so a program that reads the mode sees what took
+        screen->pointer.mode = mode & POINTER_MODES;
+        // A program that changes what it wants is told about the tools in proximity again
+        for (size_t i = 0; i < arraysz(tablet_tools); i++) {
+            if (tablet_tools[i].described_to == screen->window_id) tablet_tools[i].described_to = 0;
+        }
     }
 }
 
-typedef struct TabletTool {
-    bool active, down;
-    uint64_t device;
-    id_type window_id;  // the window that captured the stroke
-} TabletTool;
-static TabletTool tablet_tools[8];
 static id_type touch_pointer_window;  // the window that captured the fingers in progress
 
 static TabletTool *
@@ -2065,18 +2125,53 @@ pointer_mods(int mods) {
     return (mods & GLFW_MOD_SHIFT ? 1 : 0) | (mods & GLFW_MOD_ALT ? 2 : 0) | (mods & GLFW_MOD_CONTROL ? 4 : 0) | (mods & GLFW_MOD_SUPER ? 8 : 0);
 }
 
-// The window under the mouse, if it asked for reports of this kind
+// The window under the mouse, if it has this bit of the mode on
 static Window *
-pointer_window(int kind) {
+pointer_window(int bit) {
     Window *w = mouse_region(false, false).window;
-    return w && (w->render_data.screen->pointer.mode & kind) ? w : NULL;
+    return w && (w->render_data.screen->pointer.mode & bit) ? w : NULL;
 }
 
 #define pointer_coord(v) (int)round(MIN(MAX((v) * 256, -1073741823.), 1073741823.))
 #define pointer_clamp(v, lo, hi) MIN(MAX(v, lo), hi)
 
+// Sets the t and tu of a report or an action from the time of an event
+#define pointer_time(r, timestamp, is_fine)                                \
+    {                                                                      \
+        const monotonic_t pointer_time_ = MAX(0, timestamp);               \
+        (r)->t = (unsigned long long)(pointer_time_ / MONOTONIC_T_1e6);    \
+        (r)->tu = (unsigned)(pointer_time_ / MONOTONIC_T_1e3 % 1000);      \
+        (r)->has_tu = is_fine;                                             \
+    }
+
+// An action goes to the window that has the stroke of its tool, or else to the
+// window under the pointer
+static bool
+tablet_action(const GLFWTabletEvent *ev) {
+    const OSWindow *osw = global_state.callback_os_window;
+    Window *w = NULL;
+    for (size_t i = 0; i < arraysz(tablet_tools) && ev->device; i++) {
+        const TabletTool *t = tablet_tools + i;
+        if (t->active && t->device == ev->device && t->window_id) w = window_for_window_id(t->window_id);
+    }
+    if (!w) w = pointer_window(POINTER_MODE_ACTIONS);
+    if (!w) return false;
+    const WindowGeometry *g = &w->render_data.geometry;
+    PointerAction a = {
+        .action = ev->action,
+        .state = ev->action_state == GLFW_TABLET_ACTION_INSTANT ? -1 : ev->action_state == GLFW_TABLET_ACTION_BEGAN,
+        .device = ev->device,
+        .x = pointer_coord(osw->mouse_x - g->left),
+        .y = pointer_coord(osw->mouse_y - g->top),
+        .mods = pointer_mods(ev->keyboard_modifiers),
+    };
+    pointer_time(&a, ev->timestamp, ev->timestamp_is_fine);
+    return screen_pointer_action(w->render_data.screen, &a);
+}
+
 bool
 tablet_event(const GLFWTabletEvent *ev) {
+    if (ev->type == GLFW_TABLET_ACTION) return tablet_action(ev);
     const OSWindow *osw = global_state.callback_os_window;
     TabletTool *t = tablet_tool(ev->device);
     Window *w = t->window_id ? window_for_window_id(t->window_id) : pointer_window(POINTER_PEN);
@@ -2085,16 +2180,18 @@ tablet_event(const GLFWTabletEvent *ev) {
         return false;
     }
     const WindowGeometry *g = &w->render_data.geometry;
+    if (t->described_to != w->id) {
+        const PointerDevice d = {
+            .kind = POINTER_PEN, .tool = ev->tool, .axes = ev->axes, .device = ev->device, .name = ev->name,
+            .serial = ev->serial, .hwid = ev->hardware_id, .vid = ev->vendor_id, .pid = ev->product_id,
+        };
+        if (screen_pointer_device(w->render_data.screen, &d)) t->described_to = w->id;
+    }
     PointerReport r = {
         .kind = POINTER_PEN,
         .device = ev->device,
-        .serial = ev->serial,
-        .hwid = ev->hardware_id,
-        .vid = ev->vendor_id,
-        .pid = ev->product_id,
         .x = pointer_coord(osw->mouse_x - g->left),
         .y = pointer_coord(osw->mouse_y - g->top),
-        .t = monotonic_t_to_ms(ev->timestamp),
         .buttons = ev->buttons,
         .mods = pointer_mods(ev->keyboard_modifiers),
         .tool = ev->tool,
@@ -2109,6 +2206,7 @@ tablet_event(const GLFWTabletEvent *ev) {
         .wheel = (int)round(ev->wheel * 100),
         .wclicks = ev->wheel_clicks,
     };
+    pointer_time(&r, ev->timestamp, ev->timestamp_is_fine);
     if (ev->type == GLFW_TABLET_POINT) {
         const bool tip = ev->buttons & GLFW_TABLET_BUTTON_TIP;
         r.phase = tip ? (t->down ? POINTER_MOVE : POINTER_DOWN) : (t->down ? POINTER_UP : POINTER_HOVER);
@@ -2147,15 +2245,15 @@ touch_pointer_event(const GLFWTouchEvent *ev) {
     if (!w) return false;
     Screen *screen = w->render_data.screen;
     const WindowGeometry *g = &w->render_data.geometry;
-    const unsigned long long t = monotonic_t_to_ms(ev->timestamp);
     const int mods = pointer_mods(ev->keyboard_modifiers);
     bool reported = false;
     for (size_t i = 0; i < ev->num_points; i++) {
         const GLFWTouchPoint *p = ev->points + i;
         PointerReport r = {
-            .kind = POINTER_TOUCH, .contact = p->id, .t = t, .buttons = 1, .mods = mods, .src = ev->indirect,
+            .kind = POINTER_TOUCH, .contact = p->id, .buttons = 1, .mods = mods, .src = ev->indirect,
             .w = pointer_coord(ev->device_width), .h = pointer_coord(ev->device_height),
         };
+        pointer_time(&r, ev->timestamp, ev->timestamp_is_fine);
         switch (p->state) {
             case GLFW_TOUCH_POINT_PRESSED: r.phase = POINTER_DOWN; break;
             case GLFW_TOUCH_POINT_MOVED: r.phase = POINTER_MOVE; break;
@@ -2165,6 +2263,13 @@ touch_pointer_event(const GLFWTouchEvent *ev) {
         if (ev->indirect) {
             r.x = pointer_clamp((int)round(p->x * 65535), 0, 65535);
             r.y = pointer_clamp((int)round(p->y * 65535), 0, 65535);
+            if (ev->has_pressure) {
+                // The force on the pad as a whole, which every finger on it reports
+                r.valid |= 1;
+                r.p = pointer_clamp((int)round(ev->pressure * 65535), 0, 65535);
+                r.stage = pointer_clamp(ev->stage, 0, 2);
+                r.has_stage = true;
+            }
         } else {
             r.x = pointer_coord(p->x * osw->viewport_x_ratio - g->left);
             r.y = pointer_coord(p->y * osw->viewport_y_ratio - g->top);
@@ -2179,27 +2284,58 @@ touch_pointer_event(const GLFWTouchEvent *ev) {
     }
     if (ev->type == GLFW_TOUCH_CANCEL) screen_pointer_cancel(screen, POINTER_TOUCH);
     if (reported) {
-        PointerReport frame = {.kind = POINTER_TOUCH, .phase = POINTER_FRAME, .t = t};
+        PointerReport frame = {.kind = POINTER_TOUCH, .phase = POINTER_FRAME};
+        pointer_time(&frame, ev->timestamp, ev->timestamp_is_fine);
         screen_pointer_report(screen, &frame);
     }
     return true;
 }
 #undef pointer_coord
 #undef pointer_clamp
+#undef pointer_time
 
 static PyObject *
 send_pointer_report(PyObject *self UNUSED, PyObject *args, PyObject *kw) {
     Screen *screen;
     PointerReport r = {.tool = 1};
-    static const char *kwlist[] = {"screen", "kind",    "phase", "device", "contact", "x",    "y",      "buttons", "mods", "tool", "valid", "p",
-                                   "tx",     "ty",      "twist", "tangent", "z",      "dist", "wheel",  "wclicks", "serial", "hwid", "vid", "pid",
-                                   "t",      "src",     "major", "minor",   "angle",  "w",    "h",      NULL};
+    int tu = -1;
+    int stage = -1;
+    static const char *kwlist[] = {"screen", "kind",  "phase",   "device", "contact", "x",    "y",     "buttons", "mods", "tool",  "valid", "p",     "tx", "ty",
+                                   "twist",  "tangent", "z",     "dist",   "wheel",   "wclicks", "t",  "src",     "major", "minor", "angle", "w",     "h",  "tu",
+                                   "stage",  NULL};
     if (!PyArg_ParseTupleAndKeywords(
-            args, kw, "O!iiKiii|IiiIiiiiiiiiiKKIIKiiiiii", (char **)kwlist, &Screen_Type, &screen, &r.kind, &r.phase, &r.device, &r.contact, &r.x, &r.y, &r.buttons, &r.mods,
-            &r.tool, &r.valid, &r.p, &r.tx, &r.ty, &r.twist, &r.tangent, &r.z, &r.dist, &r.wheel, &r.wclicks, &r.serial, &r.hwid, &r.vid, &r.pid,
-            &r.t, &r.src, &r.major, &r.minor, &r.angle, &r.w, &r.h))
+            args, kw, "O!iiKiii|IiiIiiiiiiiiiKiiiiiiii", (char **)kwlist, &Screen_Type, &screen, &r.kind, &r.phase, &r.device, &r.contact, &r.x, &r.y, &r.buttons, &r.mods,
+            &r.tool, &r.valid, &r.p, &r.tx, &r.ty, &r.twist, &r.tangent, &r.z, &r.dist, &r.wheel, &r.wclicks, &r.t, &r.src, &r.major, &r.minor, &r.angle, &r.w,
+            &r.h, &tu, &stage))
         return NULL;
+    if (tu >= 0) r.tu = tu, r.has_tu = true;
+    if (stage >= 0) r.stage = stage, r.has_stage = true;
     if (screen_pointer_report(screen, &r)) Py_RETURN_TRUE;
+    Py_RETURN_FALSE;
+}
+
+static PyObject *
+send_pointer_action(PyObject *self UNUSED, PyObject *args, PyObject *kw) {
+    Screen *screen;
+    PointerAction a = {.state = -1};
+    int tu = -1;
+    static const char *kwlist[] = {"screen", "action", "device", "state", "x", "y", "mods", "t", "tu", NULL};
+    if (!PyArg_ParseTupleAndKeywords(args, kw, "O!i|KiiiiKi", (char **)kwlist, &Screen_Type, &screen, &a.action, &a.device, &a.state, &a.x, &a.y, &a.mods, &a.t, &tu))
+        return NULL;
+    if (tu >= 0) a.tu = tu, a.has_tu = true;
+    if (screen_pointer_action(screen, &a)) Py_RETURN_TRUE;
+    Py_RETURN_FALSE;
+}
+
+static PyObject *
+send_pointer_device(PyObject *self UNUSED, PyObject *args, PyObject *kw) {
+    Screen *screen;
+    PointerDevice d = {.kind = POINTER_PEN, .tool = 1};
+    static const char *kwlist[] = {"screen", "device", "kind", "tool", "axes", "name", "serial", "hwid", "vid", "pid", NULL};
+    if (!PyArg_ParseTupleAndKeywords(
+            args, kw, "O!K|iiIzKKII", (char **)kwlist, &Screen_Type, &screen, &d.device, &d.kind, &d.tool, &d.axes, &d.name, &d.serial, &d.hwid, &d.vid, &d.pid))
+        return NULL;
+    if (screen_pointer_device(screen, &d)) Py_RETURN_TRUE;
     Py_RETURN_FALSE;
 }
 // }}}
@@ -2342,6 +2478,8 @@ static PyMethodDef module_methods[] = {
     {"send_scroll_report", (PyCFunction)(void (*)(void))(send_scroll_report), METH_VARARGS | METH_KEYWORDS, NULL},
     {"send_gesture_report", (PyCFunction)(void (*)(void))(send_gesture_report), METH_VARARGS | METH_KEYWORDS, NULL},
     {"send_pointer_report", (PyCFunction)(void (*)(void))(send_pointer_report), METH_VARARGS | METH_KEYWORDS, NULL},
+    {"send_pointer_device", (PyCFunction)(void (*)(void))(send_pointer_device), METH_VARARGS | METH_KEYWORDS, NULL},
+    {"send_pointer_action", (PyCFunction)(void (*)(void))(send_pointer_action), METH_VARARGS | METH_KEYWORDS, NULL},
     METHODB(test_encode_mouse, METH_VARARGS),
     METHODB(test_scale_scroll, METH_VARARGS),
     METHODB(send_mock_mouse_event_to_window, METH_VARARGS),

@@ -190,6 +190,7 @@ read_xi_tablet_device(const XIDeviceInfo *device) {
             if (vi->label == labels[k]) *axes[k] = (XITabletAxis){.number = vi->number, .min = vi->min, .max = vi->max, .value = vi->value};
         }
     }
+    snprintf(td.name, sizeof(td.name), "%s", device->name);
     if (td.tool != GLFW_TABLET_TOOL_UNKNOWN && td.pressure.number >= 0 && _glfw.x11.xi.num_tablet_devices < arraysz(_glfw.x11.xi.tablet_devices)) {
         _glfw.x11.xi.tablet_devices[_glfw.x11.xi.num_tablet_devices++] = td;
     }
