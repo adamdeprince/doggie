@@ -1961,6 +1961,247 @@ class TestGraphics(BaseTest):
         self.ae(pixel(img, 2, 2), (255, 0, 0, 255))
         self.ae(pixel(img, 7, 7), (0, 255, 0, 255))
 
+    def test_terminal_side_ink(self):
+        # A program gives the terminal a brush for a vector image, and the terminal then draws the strokes of
+        # the pen itself, by applying to the image the records the program would have sent, see
+        # docs/ink-protocol.rst. What it draws must be exactly what those records draw.
+        import math
+
+        from kitty.fast_data_types import send_pointer_report
+
+        cw, ch = 10, 20
+        s = self.create_screen(cols=30, lines=12, cell_width=cw, cell_height=ch)
+        g = s.grman
+        c = s.callbacks
+
+        def gr(payload='', **kw):
+            return parse_full_response(send_command(s, ','.join(f'{k}={v}' for k, v in kw.items()), payload))
+
+        def osc(selector, body):
+            c.clear()
+            parse_bytes(s, f'\x1b]777;{selector};v=1:{body}\x1b\\'.encode())
+            return c.wtcbuf.decode()
+
+        def ink(body):
+            return osc('ink', body)
+
+        def report(phase, x, y, p=None, tool=1, device=7, delivered=True):
+            # a report of a tool at x, y in pixels of the cell area, returns its ink field
+            c.clear()
+            kw = {} if p is None else {'valid': 1, 'p': p}
+            self.ae(send_pointer_report(s, 1, phase, device, 0, round(x * 256), round(y * 256), tool=tool, buttons=int(phase in (1, 2)), **kw), delivered)
+            if not delivered:
+                self.ae(c.wtcbuf, b'')
+                return None
+            fields = dict(f.split('=') for f in c.wtcbuf.decode().split(';')[2].rstrip('\x1b\\').split(':'))
+            self.ae(fields['phase'], str(phase))
+            return int(fields['ink']) if 'ink' in fields else None
+
+        def num(v):
+            return '%.17g' % v
+
+        def point(x, y, p, place, w0, w1, e=1.0, to_group=None):
+            # the point a report adds to a stroke, by the formulas of the specification
+            left, top, width, height, sx, sy, sw, sh = place
+            ux = sx + (x - left) * sw / width
+            uy = sy + (y - top) * sh / height
+            if to_group is not None:
+                ux, uy = to_group(ux, uy)
+            f = 1.0 if p is None else p / 65535.0
+            return f'{num(ux)},{num(uy)},{num(w0 + (w1 - w0) * math.pow(f, e))}'
+
+        def stroke(element, points, fill, group=0):
+            g_ = f' g={group}' if group else ''
+            return f'k id={element}{g_} pts={",".join(points)} fill={fill}\n'
+
+        def elements(i=1):
+            return g.image_for_client_id(i)['vector_elements']
+
+        base = 'p id=1 d=M0,0L100,0L100,80L0,80Z fill=#ffffff\np id=2 d=M10,10L60,70 stroke=#0000ff w=3 fill=none\n'
+
+        def same_as(records, base=base, i=1):
+            # the image the terminal drew on against the same scene with the strokes sent as records
+            self.ae(gr(base + records, a='t', f=200, i=99, s=100, v=80).code, 'OK')
+            for w, h in ((100, 80), (173, 131)):
+                self.assertTrue(g.render_vector_image(i, w, h) == g.render_vector_image(99, w, h), f'Ink differs from the records:\n{records}')
+
+        # nothing is inked until a brush is given, and the query says what there is
+        self.ae(ink('op=query:id=3'), '\x1b]777;ink;v=1:op=cap:id=3:caps=1:mode=0\x1b\\')
+        self.ae(ink('op=mode'), '\x1b]777;ink;v=1:op=mode:mode=0\x1b\\')
+        c.clear()
+        parse_bytes(s, b'\x1b]777;ink;v=2:op=query:id=3\x1b\\')
+        parse_bytes(s, b'\x1b]777;ink;v=1:op=query\x1b\\')
+        parse_bytes(s, b'\x1b]777;ink;garbage\x1b\\')
+        self.ae(c.wtcbuf, b'')
+        self.ae(str(s.line(0)), '')
+
+        parse_bytes(s, b'\x1b[2;3H')  # the image goes at the third column of the second line
+        self.ae(gr(base, a='T', f=200, i=1, s=100, v=80, C=1).code, 'OK')
+        plain = (2 * cw, ch, 100, 80, 0, 0, 100, 80)
+        osc('tablet-pointer', 'op=mode:mode=1')
+        self.assertIsNone(report(1, 30, 30, 20000))
+        report(3, 30, 30)
+        self.ae(elements(), 2)
+
+        # a brush that cannot be used changes nothing
+        for bad in (
+            'k=100:w1=5', 'i=1:w1=5', 'i=1:k=100', 'i=0:k=100:w1=5', 'i=1:k=0:w1=5', 'i=1:k=100:n=0:w1=5', 'i=1:k=4294967295:n=2:w1=5',
+            'i=1:k=100:w1=-1', 'i=1:k=100:w1=5:w0=x', 'i=1:k=100:w1=5:e=0', 'i=1:k=100:w1=5:fill=none', 'i=1:k=100:w1=5:fill=red',
+            'i=1:k=100:w1=5:tools=0', 'i=1:k=100:w1=5:tools=512', 'i=1:k=1x:w1=5', 'i=1:k=100:w1=inf',
+        ):
+            self.ae(ink('op=brush:' + bad), '')
+            self.ae(ink('op=mode'), '\x1b]777;ink;v=1:op=mode:mode=0\x1b\\', bad)
+        self.ae(ink('op=mode:mode=1'), '')  # there is no brush to turn on
+        self.ae(ink('op=mode'), '\x1b]777;ink;v=1:op=mode:mode=0\x1b\\')
+
+        # a stroke: the report that begins it names the element, every report adds a point
+        self.ae(ink('op=brush:i=1:k=100:n=3:fill=#ff0000c0:w0=1:w1=5'), '')
+        self.ae(ink('op=query:id=4'), '\x1b]777;ink;v=1:op=cap:id=4:caps=1:mode=1:i=1:g=0:k=100:n=3:fill=#ff0000c0:w0=1:w1=5:e=1:tools=58\x1b\\')
+        self.assertIsNone(report(0, 28, 28, 0))  # hovering draws nothing
+        self.ae(elements(), 2)
+        path = [(30, 30, 9000), (41.5, 36.25, 30000), (60, 52, 65535), (75.75, 61, 41000)]
+        self.ae(report(1, *path[0]), 100)
+        self.ae(elements(), 3)
+        pixels = bytearray()
+        g.update_vector_pixels(1, 100, 80, pixels)
+        for x, y, p in path[1:]:
+            self.assertIsNone(report(2, x, y, p))
+        rect = g.update_vector_pixels(1, 100, 80, pixels)  # only the part under the stroke is drawn again
+        self.assertTrue(0 < rect[2] * rect[3] < 100 * 80 / 2)
+        self.assertTrue(pixels == g.render_vector_image(1, 100, 80))
+        self.assertIsNone(report(3, 80, 64, 12345))  # the pressure of an up is reported as none
+        pts = [point(x, y, p, plain, 1, 5) for x, y, p in path] + [point(80, 64, 0, plain, 1, 5)]
+        first = stroke(100, pts, '#ff0000c0')
+        same_as(first)
+        self.ae(ink('op=query:id=5'), '\x1b]777;ink;v=1:op=cap:id=5:caps=1:mode=1:i=1:g=0:k=101:n=2:fill=#ff0000c0:w0=1:w1=5:e=1:tools=58\x1b\\')
+
+        # the eraser does not draw, nor does a pen while ink is off, and turning it on again goes on with the ids
+        self.assertIsNone(report(1, 30, 60, 30000, tool=2))
+        report(3, 30, 60, tool=2)
+        self.ae(ink('op=mode:mode=0'), '')
+        self.assertIsNone(report(1, 30, 60, 30000))
+        report(3, 30, 60)
+        self.ae(elements(), 3)
+        self.ae(ink('op=mode:mode=1'), '')
+        self.ae(ink('op=mode'), '\x1b]777;ink;v=1:op=mode:mode=1\x1b\\')
+
+        # a tool that measures no pressure draws at full width, and a stroke goes on outside the placement
+        self.ae(report(1, 100, 90), 101)
+        self.assertIsNone(report(2, 150, 130))
+        self.assertIsNone(report(3, 10, 5))
+        second = stroke(101, [point(100, 90, None, plain, 1, 5), point(150, 130, None, plain, 1, 5), point(10, 5, None, plain, 1, 5)], '#ff0000c0')
+        same_as(first + second)
+
+        # a stroke that is cancelled is taken away again
+        self.ae(report(1, 50, 50, 30000), 102)
+        report(2, 60, 55, 30000)
+        self.ae(elements(), 5)
+        self.assertIsNone(report(4, 60, 55))
+        self.ae(elements(), 4)
+        same_as(first + second)
+        # and so is one cut short by a change of the tablet mode
+        self.ae(ink('op=brush:i=1:k=200:n=2:w0=2:w1=2'), '')
+        self.ae(report(1, 50, 50, 30000), 200)
+        self.ae(elements(), 5)
+        self.assertIn('phase=4', osc('tablet-pointer', 'op=mode:mode=1'))
+        self.ae(elements(), 4)
+        self.assertIsNone(report(2, 60, 55, 30000, delivered=False))
+        # the last of the ids, after which nothing is inked
+        self.ae(report(1, 40, 70, 65535), 201)
+        report(3, 44, 70, 65535)
+        third = stroke(201, [point(40, 70, 65535, plain, 2, 2), point(44, 70, 0, plain, 2, 2)], '#000000')
+        same_as(first + second + third)
+        self.assertIsNone(report(1, 50, 50, 30000))
+        report(3, 50, 50)
+        self.ae(elements(), 5)
+        self.assertIn(':k=202:n=0:', ink('op=query:id=6'))
+
+        # a curve for the pressure, the tools that draw, and a group that does not exist
+        self.ae(ink('op=brush:i=1:k=300:n=5:fill=#00ff00:w0=0.5:w1=8.5:e=2:tools=4:g=77'), '')
+        self.assertIsNone(report(1, 60, 40, 30000, tool=2))
+        report(3, 60, 40, tool=2)
+        self.ae(ink('op=brush:i=1:k=300:n=5:fill=#00ff00:w0=0.5:w1=8.5:e=2:tools=4'), '')
+        self.assertIsNone(report(1, 60, 40, 30000))
+        report(3, 60, 40)
+        self.ae(report(1, 60, 40, 30000, tool=2), 300)
+        report(3, 90, 40, 0, tool=2)
+        fourth = stroke(300, [point(60, 40, 30000, plain, 0.5, 8.5, 2.0), point(90, 40, 0, plain, 0.5, 8.5, 2.0)], '#00ff00')
+        same_as(first + second + third + fourth)
+
+        # the stroke is in the units of the group it goes into, whatever the transforms above it
+        def mul(m, n):
+            return (
+                m[0] * n[0] + m[2] * n[1], m[1] * n[0] + m[3] * n[1], m[0] * n[2] + m[2] * n[3], m[1] * n[2] + m[3] * n[3],
+                m[0] * n[4] + m[2] * n[5] + m[4], m[1] * n[4] + m[3] * n[5] + m[5])
+
+        def inverse(m):
+            det = m[0] * m[3] - m[1] * m[2]
+            return (m[3] / det, -m[1] / det, -m[2] / det, m[0] / det, (m[2] * m[5] - m[3] * m[4]) / det, (m[1] * m[4] - m[0] * m[5]) / det)
+
+        root, outer, inner = (0.5, 0, 0, 0.5, 4, 8), (2, 0, 0, 4, 16, 8), (0, 1, -1, 0, 32, 0)
+        inv = inverse(mul(root, mul(outer, inner)))
+
+        def to_inner(x, y):
+            return inv[0] * x + inv[2] * y + inv[4], inv[1] * x + inv[3] * y + inv[5]
+
+        groups = f'g id=0 t={",".join(map(str, root))}\ng id=10 t={",".join(map(str, outer))}\ng id=11 p=10 t={",".join(map(str, inner))}\n'
+        self.ae(gr(groups, a='e', i=1).code, 'OK')
+        self.ae(ink('op=brush:i=1:g=11:k=400:fill=#0000ff:w0=1:w1=3'), '')
+        self.ae(report(1, 44, 52, 65535), 400)
+        report(2, 60.5, 71.25, 20000)
+        report(3, 90, 30, 0)
+        fifth = stroke(400, [point(x, y, p, plain, 1, 3, to_group=to_inner) for x, y, p in ((44, 52, 65535), (60.5, 71.25, 20000), (90, 30, 0))], '#0000ff', 11)
+        same_as(first + second + third + fourth + groups + fifth)
+        # a group whose transform cannot be undone takes no ink
+        self.ae(gr('g id=12 t=1,2,2,4,0,0\n', a='e', i=1).code, 'OK')
+        self.ae(ink('op=brush:i=1:g=12:k=500:w1=3'), '')
+        self.assertIsNone(report(1, 44, 52, 65535))
+        report(3, 44, 52)
+
+        # a placement that scales and crops the image, and that scrolls during the stroke
+        scene = 'p id=1 d=M0,0L100,0L100,80L0,80Z fill=#ffffff\n'
+        self.ae(gr(scene, a='t', f=200, i=2, s=100, v=80).code, 'OK')
+        parse_bytes(s, b'\x1b[7;11H')
+        self.ae(gr(a='p', i=2, x=20, y=10, w=50, h=40, c=20, r=4, X=3, Y=5, C=1).code, 'OK')
+        scaled = [10 * cw + 3, 6 * ch + 5, 20 * cw - 3, 4 * ch - 5, 20, 10, 50, 40]
+        self.ae(ink('op=brush:i=2:k=7:n=9:fill=#800080:w0=1:w1=6'), '')
+        self.ae(report(1, 130.5, 140, 40000), 7)
+        pts = [point(130.5, 140, 40000, scaled, 1, 6)]
+        report(2, 180, 170.25, 50000)
+        pts.append(point(180, 170.25, 50000, scaled, 1, 6))
+        parse_bytes(s, b'\x1b[12;1H\n')  # the screen moves up a line and the image with it
+        scaled[1] -= ch
+        report(2, 180, 170.25, 50000)
+        pts.append(point(180, 170.25, 50000, scaled, 1, 6))
+        report(3, 250, 150, 0)
+        pts.append(point(250, 150, 0, scaled, 1, 6))
+        same_as(stroke(7, pts, '#800080'), scene, 2)
+
+        # of two placements of the image the one on top is drawn on
+        self.ae(gr(a='p', i=2, z=5, C=1).code, 'OK')  # at the cursor, the start of the last line, at its own size
+        on_top = (0, 11 * ch, 100, 80, 0, 0, 100, 80)
+        self.ae(report(1, 99, 11 * ch + 2, 65535), 8)  # inside the first placement as well
+        report(3, 99, 11 * ch + 2)
+        same_as(stroke(7, pts, '#800080') + stroke(8, [point(99, 11 * ch + 2, 65535, on_top, 1, 6), point(99, 11 * ch + 2, 0, on_top, 1, 6)], '#800080'), scene, 2)
+
+        # when the image goes the stroke on it is over, and the reports go on
+        self.ae(report(1, 130.5, 140, 40000), 9)
+        send_command(s, 'a=d,d=I,i=2')
+        self.assertIsNone(report(2, 140, 140, 40000))
+        self.assertIsNone(report(3, 140, 140))
+        self.assertIsNone(report(1, 130.5, 140, 40000))
+        report(3, 130.5, 140)
+
+        # without tool reports there is nothing to ink, and a reset forgets the brush
+        self.ae(ink('op=brush:i=1:k=600:w1=3'), '')
+        osc('tablet-pointer', 'op=mode:mode=0')
+        before = elements()
+        report(1, 30, 30, 30000, delivered=False)
+        self.ae(elements(), before)
+        osc('tablet-pointer', 'op=mode:mode=1')
+        s.reset()
+        self.ae(ink('op=query:id=9'), '\x1b]777;ink;v=1:op=cap:id=9:caps=1:mode=0\x1b\\')
+
     def test_vector_image_damage(self):
         # A patch to a vector image draws only the part of it that changed.
         # The pixels kept up that way must be those of drawing all of it.

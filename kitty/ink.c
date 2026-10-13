@@ -1,0 +1,242 @@
+/*
+ * ink.c
+ * Copyright (C) 2026 Adam DePrince
+ *
+ * Distributed under terms of the GPL3 license.
+ */
+
+// Terminal-side ink, see docs/ink-protocol.rst. A program hands the terminal
+// a brush for one of its vector images, and from then on the terminal draws
+// the strokes of the pen itself, as the reports of the tablet pointer protocol
+// are made, by applying to that image the records the program would have sent.
+
+#include "state.h"
+#include "screen.h"
+#include "control-codes.h"
+#include <math.h>
+
+// The width of the stroke is worked out exactly as the specification writes it
+#ifdef __clang__
+#pragma STDC FP_CONTRACT OFF
+#endif
+
+#define DEFAULT_TOOLS (1u << 1 | 1u << 3 | 1u << 4 | 1u << 5)  // pen, brush, pencil, airbrush
+#define ALL_TOOLS 511u                                         // the tool values 0 to 8
+#define MAX_WIDTH 1e9
+#define MAX_EXPONENT 100.
+
+static bool
+parse_u32(const char *s, uint32_t *out) {
+    if (!*s) return false;
+    uint64_t v = 0;
+    for (; *s; s++) {
+        if (*s < '0' || *s > '9') return false;
+        v = v * 10 + (unsigned)(*s - '0');
+        if (v > UINT32_MAX) return false;
+    }
+    *out = (uint32_t)v;
+    return true;
+}
+
+// A number as the records of a vector image write one
+static bool
+parse_number(const char *s, double *out) {
+    if (!*s) return false;
+    for (const char *p = s; *p; p++) {
+        if (!((*p >= '0' && *p <= '9') || *p == '.' || *p == 'e' || *p == 'E' || *p == '-' || *p == '+')) return false;
+    }
+    char *end;
+    *out = strtod(s, &end);
+    return !*end && isfinite(*out);
+}
+
+// The shortest text that reads back as the same number
+static const char *
+number(double v, char *buf, size_t sz) {
+    for (int digits = 1; digits <= 17; digits++) {
+        snprintf(buf, sz, "%.*g", digits, v);
+        if (strtod(buf, NULL) == v) break;
+    }
+    return buf;
+}
+
+static void
+end_strokes(Screen *self) {
+    for (size_t i = 0; i < arraysz(self->ink.strokes); i++) self->ink.strokes[i].active = false;
+    self->ink.num_strokes = 0;
+}
+
+// Turns ink off as mode=0 does: the brush is kept, the strokes being drawn stay as they are
+void
+screen_ink_off(Screen *self) {
+    self->ink.on = false;
+    end_strokes(self);
+}
+
+void
+screen_ink_reset(Screen *self) {
+    zero_at_ptr(&self->ink);
+}
+
+static void
+set_brush(Screen *self, char *fields[], size_t count) {
+    InkBrush b = {.tools = DEFAULT_TOOLS, .remaining = 1, .exponent = 1, .w0 = -1, .w1 = -1, .fill = "#000000"};
+    bool has_first = false;
+    for (size_t i = 0; i < count; i++) {
+        const char *key = fields[i], *val = key + strlen(key) + 1;
+        if (!strcmp(key, "i")) {
+            if (!parse_u32(val, &b.image)) return;
+        } else if (!strcmp(key, "g")) {
+            if (!parse_u32(val, &b.group)) return;
+        } else if (!strcmp(key, "k")) {
+            if (!parse_u32(val, &b.next_id)) return;
+            has_first = true;
+        } else if (!strcmp(key, "n")) {
+            if (!parse_u32(val, &b.remaining)) return;
+        } else if (!strcmp(key, "tools")) {
+            uint32_t tools;
+            if (!parse_u32(val, &tools) || !tools || tools > ALL_TOOLS) return;
+            b.tools = tools;
+        } else if (!strcmp(key, "w0")) {
+            if (!parse_number(val, &b.w0) || b.w0 < 0 || b.w0 > MAX_WIDTH) return;
+        } else if (!strcmp(key, "w1")) {
+            if (!parse_number(val, &b.w1) || b.w1 < 0 || b.w1 > MAX_WIDTH) return;
+        } else if (!strcmp(key, "e")) {
+            if (!parse_number(val, &b.exponent) || !(b.exponent > 0) || b.exponent > MAX_EXPONENT) return;
+        } else if (!strcmp(key, "fill")) {
+            const size_t len = strlen(val);
+            if (len >= sizeof(b.fill) || !vector_color_paints(val, len)) return;
+            memcpy(b.fill, val, len + 1);
+        }
+    }
+    // the image, the first of the ids and the width at full pressure have to be given
+    if (!b.image || !has_first || !b.next_id || !b.remaining || b.w1 < 0) return;
+    if (b.remaining - 1 > UINT32_MAX - b.next_id) return;  // the ids run past the largest there is
+    if (b.w0 < 0) b.w0 = b.w1;
+    self->ink.brush = b;
+    self->ink.on = true;
+}
+
+void
+screen_ink(Screen *self, const char *data, size_t sz) {
+    char buf[128], reply[320], *saveptr = NULL, *fields[24];
+    const char *op = "";
+    int v = 0, mode = -1, id = -1;
+    size_t count = 0;
+    if (sz >= sizeof(buf)) return;
+    memcpy(buf, data, sz);
+    buf[sz] = 0;
+    for (char *tok = strtok_r(buf, ":", &saveptr); tok; tok = strtok_r(NULL, ":", &saveptr)) {
+        char *val = strchr(tok, '=');
+        if (!val) return;
+        *val++ = 0;
+        if (!strcmp(tok, "v")) v = atoi(val);
+        else if (!strcmp(tok, "op")) op = val;
+        else if (!strcmp(tok, "mode")) mode = atoi(val);
+        else if (!strcmp(tok, "id")) id = atoi(val);
+        else if (count < arraysz(fields)) fields[count++] = tok;
+    }
+    if (v != 1) return;
+    const InkBrush *b = &self->ink.brush;
+    if (!strcmp(op, "query") && id >= 0) {
+        int n = snprintf(reply, sizeof(reply), "777;ink;v=1:op=cap:id=%d:caps=1:mode=%d", id, self->ink.on);
+        if (b->image) {
+            char w0[32], w1[32], e[32];
+            snprintf(
+                reply + n, sizeof(reply) - n, ":i=%u:g=%u:k=%u:n=%u:fill=%s:w0=%s:w1=%s:e=%s:tools=%u", b->image, b->group, b->next_id, b->remaining, b->fill,
+                number(b->w0, w0, sizeof(w0)), number(b->w1, w1, sizeof(w1)), number(b->exponent, e, sizeof(e)), b->tools);
+        }
+        write_escape_code_to_child(self, ESC_OSC, reply);
+    } else if (!strcmp(op, "mode")) {
+        if (mode < 0) {  // a read
+            snprintf(reply, sizeof(reply), "777;ink;v=1:op=mode:mode=%d", self->ink.on);
+            write_escape_code_to_child(self, ESC_OSC, reply);
+        } else if (mode == 0) screen_ink_off(self);
+        else if (mode == 1 && b->image) self->ink.on = true;  // with the brush last given, there is nothing to turn on without one
+    } else if (!strcmp(op, "brush")) set_brush(self, fields, count);
+}
+
+static InkStroke *
+stroke_of(Screen *self, const PointerReport *r) {
+    for (size_t i = 0; self->ink.num_strokes && i < arraysz(self->ink.strokes); i++) {
+        InkStroke *s = self->ink.strokes + i;
+        if (s->active && s->device == r->device && s->contact == r->contact) return s;
+    }
+    return NULL;
+}
+
+static void
+end_stroke(Screen *self, InkStroke *s) {
+    s->active = false;
+    self->ink.num_strokes--;
+}
+
+// The point a report adds to a stroke: where the tool is in the cell area, in
+// pixels, and the width that the pressure on it gives. A tool that does not
+// measure pressure draws at the width of full pressure.
+static InkPoint
+point_of(const PointerReport *r, double w0, double w1, double exponent) {
+    const double f = r->valid & 1 ? r->p / 65535. : 1.;
+    const double curved = pow(f, exponent);
+    const double span = w1 - w0;
+    const double grown = span * curved;
+    return (InkPoint){.x = r->x / 256., .y = r->y / 256., .width = w0 + grown};
+}
+
+static InkView
+view_of(const Screen *self) {
+    return (InkView){.cell = self->cell_size, .scrolled_by = self->scrolled_by, .scroll_offset = pixel_scroll_enabled(self) ? self->pixel_scroll_offset_y : 0};
+}
+
+static void
+start_stroke(Screen *self, PointerReport *r) {
+    InkBrush *b = &self->ink.brush;
+    if (!self->ink.on || !b->remaining || r->tool < 0 || r->tool > 8 || !(b->tools & (1u << r->tool))) return;
+    InkStroke *s = NULL;
+    for (size_t i = 0; i < arraysz(self->ink.strokes) && !s; i++) {
+        if (!self->ink.strokes[i].active) s = self->ink.strokes + i;
+    }
+    if (!s) return;
+    const InkView view = view_of(self);
+    InkStrokeTarget target;
+    if (!grman_ink_start(self->grman, &view, b->image, b->group, b->next_id, b->fill, point_of(r, b->w0, b->w1, b->exponent), &target)) return;
+    *s = (InkStroke){
+        .active = true, .device = r->device, .contact = r->contact, .grman = self->grman, .target = target, .element = b->next_id, .group = b->group,
+        .w0 = b->w0, .w1 = b->w1, .exponent = b->exponent,
+    };
+    self->ink.num_strokes++;
+    r->ink = b->next_id;
+    b->next_id++;
+    b->remaining--;
+    self->is_dirty = true;
+}
+
+// Called with every report of a tool that is in a stroke or beginning one,
+// before the report is sent to the program
+void
+screen_ink_report(Screen *self, PointerReport *r) {
+    InkStroke *s = stroke_of(self, r);
+    switch (r->phase) {
+        case POINTER_DOWN:
+            if (s) end_stroke(self, s);  // a down for a contact that is still down replaces its stroke
+            start_stroke(self, r);
+            break;
+        case POINTER_MOVE:
+        case POINTER_UP: {
+            if (!s) break;
+            const InkView view = view_of(self);
+            // the stroke stays with the image it began on, which is no longer shown when the other screen is
+            const bool drawn = s->grman == self->grman && grman_ink_append(s->grman, &view, s->target, s->group, s->element, point_of(r, s->w0, s->w1, s->exponent));
+            if (drawn) self->is_dirty = true;
+            if (!drawn || r->phase == POINTER_UP) end_stroke(self, s);
+        } break;
+        case POINTER_CANCEL:
+            if (!s) break;
+            // a stroke that is cancelled never happened
+            grman_ink_remove(s->grman, s->target, s->element);
+            end_stroke(self, s);
+            self->is_dirty = true;
+            break;
+        default: break;
+    }
+}

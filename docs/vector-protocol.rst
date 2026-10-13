@@ -131,7 +131,8 @@ Replacing an element keeps its place in that order.
 
     Ink: a ribbon through the points with the width given at each point,
     joined and, by default, capped round. This is the record for live drawing,
-    one ``a`` record per pen event appends to it.
+    one ``a`` record per pen event appends to it. A terminal can apply these
+    records itself as the pen moves, see :doc:`ink-protocol`.
 
 ``a`` *append*
     ``a id= d=<path>`` or ``a id= pts=<x,y,width,...>``

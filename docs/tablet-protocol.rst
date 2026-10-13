@@ -211,6 +211,9 @@ default to zero, except ``tool``, which defaults to ``1``:
                  millimeter when the system knows it, so a program can turn
                  positions into distances or map the pad onto its canvas with
                  the right aspect ratio
+``ink``          In the ``down`` of a tool, the element of a vector image that
+                 the terminal is drawing the stroke into, for a program that
+                 gave it a brush, see :doc:`ink-protocol`; absent otherwise
 ================ ==================================================================
 
 A measurement is present exactly when its bit is set in ``valid``. A clear

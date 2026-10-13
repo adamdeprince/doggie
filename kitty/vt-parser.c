@@ -614,6 +614,10 @@ dispatch_osc(PS *self, uint8_t *buf, size_t limit, bool is_extended_osc) {
                 screen_tablet_pointer(self->screen, (const char *)buf + i + 15, limit - i - 15);
                 break;
             }
+            if (limit - i > 4 && memcmp(buf + i, "ink;", 4) == 0) {
+                screen_ink(self->screen, (const char *)buf + i + 4, limit - i - 4);
+                break;
+            }
             /* fallthrough */
         case 9:
         case 99:

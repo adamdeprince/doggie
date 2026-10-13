@@ -2117,6 +2117,98 @@ update_vector_texture(GraphicsManager *self, Image *img, double width, double he
     img->vector_tex_height = h;
 }
 
+// Terminal-side ink, see docs/ink-protocol.rst. The terminal applies to a
+// vector image the records a program would have sent for a stroke of the pen.
+
+// The rectangle a placement is shown in, in pixels from the top left of the
+// cell area, by the arithmetic of grman_update_layers()
+static bool
+ref_rect_in_pixels(const GraphicsManager *self, const ImageRef *ref, const InkView *view, double *left, double *top, double *width, double *height) {
+    if (ref->is_virtual_ref || !(ref->src_width > 0) || !(ref->src_height > 0)) return false;
+    int32_t start_row = ref->start_row, start_column = ref->start_column;
+    if (ref->parent.img) {
+        bool has_virtual_ancestor;
+        if (!resolve_parent_offset(self, ref, &start_row, &start_column, &has_virtual_ancestor)) return false;
+    }
+    const double cw = view->cell.width, ch = view->cell.height, first_row_at = (double)view->scrolled_by * ch + view->scroll_offset;
+    *left = start_column * cw + ref->cell_x_offset;
+    *top = first_row_at + start_row * ch + ref->cell_y_offset;
+    if (ref->num_rows) {
+        *height = first_row_at + ((double)start_row + ref->num_rows) * ch - *top;
+        *width = ref->num_cols ? ((double)start_column + ref->num_cols) * cw - *left : *height * ref->src_width / ref->src_height;
+    } else {
+        *width = ref->num_cols ? ((double)start_column + ref->num_cols) * cw - *left : ref->src_width;
+        *height = *width * ref->src_height / ref->src_width;
+    }
+    return *width > 0 && *height > 0;
+}
+
+// Takes a position in the cell area to the coordinate system of a group of
+// the image, through the placement it is shown in
+static bool
+ink_point(const GraphicsManager *self, const Image *img, const ImageRef *ref, uint32_t group, const InkView *view, double *x, double *y) {
+    double left, top, width, height;
+    if (!ref_rect_in_pixels(self, ref, view, &left, &top, &width, &height)) return false;
+    *x = ref->src_x + (*x - left) * ref->src_width / width;
+    *y = ref->src_y + (*y - top) * ref->src_height / height;
+    return vector_doc_point_to_group(img->vector, group, x, y);
+}
+
+static bool
+ink_apply(GraphicsManager *self, Image *img, const char *records, int sz) {
+    if (sz <= 0) return false;
+    const size_t before = vector_doc_size(img->vector);
+    const char *err = vector_doc_apply(img->vector, (const uint8_t *)records, (size_t)sz);
+    img->used_storage = vector_doc_size(img->vector);
+    self->used_storage = self->used_storage - MIN(self->used_storage, before) + img->used_storage;
+    img->atime = monotonic();
+    set_layers_dirty(self);
+    return err == NULL;
+}
+
+bool
+grman_ink_start(GraphicsManager *self, const InkView *view, uint32_t image, uint32_t group, uint32_t element, const char *fill, InkPoint p, InkStrokeTarget *target) {
+    Image *img = img_by_client_id(self, image);
+    if (!img || !img->vector) return false;
+    // the placement on top of the others under the pen
+    const ImageRef *under = NULL;
+    iter_refs(img) {
+        const ImageRef *ref = i.data->val;
+        double left, top, width, height;
+        if (!ref_rect_in_pixels(self, ref, view, &left, &top, &width, &height)) continue;
+        if (p.x < left || p.y < top || p.x >= left + width || p.y >= top + height) continue;
+        if (!under || ref->z_index > under->z_index || (ref->z_index == under->z_index && ref->internal_id > under->internal_id)) under = ref;
+    }
+    if (!under || !ink_point(self, img, under, group, view, &p.x, &p.y)) return false;
+    char records[256];
+    int n = snprintf(records, sizeof(records), "k id=%u", element);
+    if (group) n += snprintf(records + n, sizeof(records) - n, " g=%u", group);
+    n += snprintf(records + n, sizeof(records) - n, " pts=%.17g,%.17g,%.17g fill=%s\n", p.x, p.y, p.width, fill);
+    if (!ink_apply(self, img, records, n)) return false;
+    *target = (InkStrokeTarget){.image = img->internal_id, .placement = under->internal_id};
+    return true;
+}
+
+bool
+grman_ink_append(GraphicsManager *self, const InkView *view, InkStrokeTarget target, uint32_t group, uint32_t element, InkPoint p) {
+    Image *img = img_by_internal_id(self, target.image);
+    const ImageRef *ref = img && img->vector ? ref_by_internal_id(img, target.placement) : NULL;
+    if (!ref) return false;  // the image or the placement the stroke began in has gone
+    // a position that cannot be taken into the group is left out, the stroke goes on with the next
+    if (!ink_point(self, img, ref, group, view, &p.x, &p.y)) return true;
+    char records[128];
+    ink_apply(self, img, records, snprintf(records, sizeof(records), "a id=%u pts=%.17g,%.17g,%.17g\n", element, p.x, p.y, p.width));
+    return true;
+}
+
+void
+grman_ink_remove(GraphicsManager *self, InkStrokeTarget target, uint32_t element) {
+    Image *img = img_by_internal_id(self, target.image);
+    if (!img || !img->vector) return;
+    char records[32];
+    ink_apply(self, img, records, snprintf(records, sizeof(records), "x id=%u\n", element));
+}
+
 // }}}
 
 static void

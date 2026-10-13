@@ -258,6 +258,21 @@ bool grman_update_layers(
     unsigned int num_cols,
     unsigned int num_rows,
     CellPixelSize);
+// Terminal-side ink, see docs/ink-protocol.rst
+typedef struct InkView {  // how the cells of a window are shown, which is what places an image in it
+    CellPixelSize cell;
+    unsigned scrolled_by;
+    double scroll_offset;  // in pixels
+} InkView;
+typedef struct InkPoint {  // a position in pixels from the top left of the cell area and the width of the stroke there
+    double x, y, width;
+} InkPoint;
+typedef struct InkStrokeTarget {  // the image and the placement of it a stroke began in
+    id_type image, placement;
+} InkStrokeTarget;
+bool grman_ink_start(GraphicsManager *self, const InkView *view, uint32_t image, uint32_t group, uint32_t element, const char *fill, InkPoint p, InkStrokeTarget *target);
+bool grman_ink_append(GraphicsManager *self, const InkView *view, InkStrokeTarget target, uint32_t group, uint32_t element, InkPoint p);
+void grman_ink_remove(GraphicsManager *self, InkStrokeTarget target, uint32_t element);
 void grman_scroll_images(GraphicsManager *self, const ScrollData *, CellPixelSize fg);
 bool grman_has_any_images(GraphicsManager *self);
 bool grman_has_hdr_images(GraphicsManager *self);
