@@ -183,11 +183,16 @@ read_xi_tablet_device(const XIDeviceInfo *device) {
     XITabletAxis *axes[] = {&td.pressure, &td.tilt_x, &td.tilt_y, &td.wheel, &td.distance, &td.rotation};
     const Atom labels[] = {_glfw.x11.xi.label_pressure, _glfw.x11.xi.label_tilt_x, _glfw.x11.xi.label_tilt_y, _glfw.x11.xi.label_wheel, _glfw.x11.xi.label_distance, _glfw.x11.xi.label_rz};
     for (size_t k = 0; k < arraysz(axes); k++) axes[k]->number = -1;
+    td.x.number = td.y.number = -1;
     for (int j = 0; j < device->num_classes; j++) {
         if (device->classes[j]->type != XIValuatorClass) continue;
         XIValuatorClassInfo *vi = (XIValuatorClassInfo *)device->classes[j];
         for (size_t k = 0; k < arraysz(axes); k++) {
             if (vi->label == labels[k]) *axes[k] = (XITabletAxis){.number = vi->number, .min = vi->min, .max = vi->max, .value = vi->value};
+        }
+        // The first two valuators are the position. See handle_xi_tablet_event() for why it is wanted
+        if (device->use == XISlavePointer && vi->mode == XIModeAbsolute && vi->max > vi->min && (vi->number == 0 || vi->number == 1)) {
+            *(vi->number ? &td.y : &td.x) = (XITabletAxis){.number = vi->number, .min = vi->min, .max = vi->max, .value = vi->value};
         }
     }
     snprintf(td.name, sizeof(td.name), "%s", device->name);

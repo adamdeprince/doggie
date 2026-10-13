@@ -1468,9 +1468,28 @@ tablet_device_for_id(int deviceid) {
     return NULL;
 }
 
+// The server stamps the event of a device that is attached to the core pointer
+// with the position the pointer had before that event, so a tool would be
+// reported where it was one event ago, and its first report where the mouse
+// was. The event has the position the tool is at as valuators, in the units of
+// the tablet and after the server's mapping of the tablet to the screen, and
+// the server gets the pointer position from those by scaling them to the size
+// of the screen. The same is done here, and the result moved into the window
+// by as much as the position in the event is
+static void
+xi_tablet_position(const XITabletDevice *d, const XIDeviceEvent *de, double *x, double *y) {
+    *x = de->event_x;
+    *y = de->event_y;
+    if (d->x.number < 0 || d->y.number < 0) return;
+    const double screen_x = (d->x.value - d->x.min) * DisplayWidth(_glfw.x11.display, _glfw.x11.screen) / (d->x.max - d->x.min + 1);
+    const double screen_y = (d->y.value - d->y.min) * DisplayHeight(_glfw.x11.display, _glfw.x11.screen) / (d->y.max - d->y.min + 1);
+    *x = screen_x - (de->root_x - de->event_x);
+    *y = screen_y - (de->root_y - de->event_y);
+}
+
 static bool
 handle_xi_tablet_event(_GLFWwindow *window, XITabletDevice *d, XIDeviceEvent *de) {
-    XITabletAxis *axes[] = {&d->pressure, &d->tilt_x, &d->tilt_y, &d->wheel, &d->distance, &d->rotation};
+    XITabletAxis *axes[] = {&d->pressure, &d->tilt_x, &d->tilt_y, &d->wheel, &d->distance, &d->rotation, &d->x, &d->y};
     unsigned vidx = 0;
     for (int i = 0; i < de->valuators.mask_len * 8; i++) {
         if (!XIMaskIsSet(de->valuators.mask, i)) continue;
@@ -1487,6 +1506,8 @@ handle_xi_tablet_event(_GLFWwindow *window, XITabletDevice *d, XIDeviceEvent *de
         if (de->evtype == XI_ButtonPress) buttons |= 1u << de->detail;
         else if (de->evtype == XI_ButtonRelease) buttons &= ~(1u << de->detail);
     }
+    double x, y;
+    xi_tablet_position(d, de, &x, &y);
 #define norm(a) ((a).max > (a).min ? ((a).value - (a).min) / ((a).max - (a).min) : 0)
     GLFWTabletEvent ev = {
         .type = GLFW_TABLET_POINT,
@@ -1498,8 +1519,8 @@ handle_xi_tablet_event(_GLFWwindow *window, XITabletDevice *d, XIDeviceEvent *de
                    (buttons & 256 ? GLFW_TABLET_BUTTON_BACK : 0) | (buttons & 512 ? GLFW_TABLET_BUTTON_FORWARD : 0),
         .axes = (d->pressure.number >= 0 ? GLFW_TABLET_PRESSURE : 0) | (d->tilt_x.number >= 0 && d->tilt_y.number >= 0 ? GLFW_TABLET_TILT : 0) |
                 (d->rotation.number >= 0 ? GLFW_TABLET_TWIST : 0) | (d->wheel.number >= 0 ? GLFW_TABLET_TANGENT : 0) | (d->distance.number >= 0 ? GLFW_TABLET_DISTANCE : 0),
-        .x = de->event_x,
-        .y = de->event_y,
+        .x = x,
+        .y = y,
         .pressure = norm(d->pressure),
         .distance = norm(d->distance),
         .tilt_x = d->tilt_x.value,

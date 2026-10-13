@@ -272,6 +272,9 @@ typedef struct XITabletDevice {
     uint64_t serial;
     GLFWid window_id;  // the window it last reported to
     XITabletAxis pressure, tilt_x, tilt_y, wheel, distance, rotation;
+    // Where the tool is on the tablet, for a tool that is attached to the core
+    // pointer and reports absolute positions; the number is -1 otherwise
+    XITabletAxis x, y;
     char name[128];
 } XITabletDevice;
 
