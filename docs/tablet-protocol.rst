@@ -51,7 +51,7 @@ A program asks the terminal whether it supports the protocol::
 the reply so replies can be matched to queries. A supporting terminal
 answers::
 
-    <OSC> 777 ; tablet-pointer ; v=1 : op=cap : id=42 : caps=69 : mode=0 : w=1200 : h=800 : cw=12 : ch=24 <ST>
+    <OSC> 777 ; tablet-pointer ; v=1 : op=cap : id=42 : caps=101 : mode=0 : w=1200 : h=800 : cw=12 : ch=24 <ST>
 
 ``caps`` is a bit set of what the terminal can report:
 
@@ -61,6 +61,7 @@ answers::
 ``4``   Fingers on a touchpad
 ``8``   The shape of a finger contact
 ``16``  Reserved
+``32``  Tool actions
 ``64``  The hardware identifiers of tools
 ======= ==============================================================
 
@@ -87,6 +88,7 @@ off:
 ``2``   Reports of fingers
 ``4``   Reserved
 ``8``   The hardware identifiers of tools, see `Devices`_
+``16``  Reports of tool actions, see `Tool actions`_
 ======= ==============================================================
 
 While bit ``1`` or ``2`` is on, that kind of input over the window is
@@ -159,12 +161,13 @@ A report is a single frame per event::
 
     <OSC> 777 ; tablet-pointer ; v=1 : op=event : kind=1 : phase=1 : device=3 : t=408211 : contact=0 : x=25600 : y=51200 : buttons=1 : mods=0 : tool=1 : valid=3 : p=32000 : tx=-1200 : ty=600 <ST>
 
-``kind``, ``phase``, ``device``, ``t``, ``contact``, ``x`` and ``y`` are
-required. The other fields in this table default to zero, except ``tool``,
-which defaults to ``1``:
+In the reports of tools and fingers ``kind``, ``phase``, ``device``, ``t``,
+``contact``, ``x`` and ``y`` are required. The other fields in this table
+default to zero, except ``tool``, which defaults to ``1``:
 
 ================ ==================================================================
-``kind``         ``1`` tool, ``2`` finger
+``kind``         ``1`` tool, ``2`` finger. ``4`` is a tool action, which has
+                 fields of its own, see `Tool actions`_
 ``phase``        ``0`` hover, ``1`` down, ``2`` move, ``3`` up, ``4`` cancel,
                  ``5`` the tool left proximity, ``6`` frame, see below
 ``device``       Identifies the tool or touch device for as long as it is in
@@ -194,6 +197,8 @@ which defaults to ``1``:
 ``valid``        The measurements the report carries, a bit set, see below
 ``src``          For a finger, ``1`` when it is on a touchpad rather than on
                  the screen; absent otherwise
+``stage``        For a finger on a touchpad that measures force, how hard the
+                 pad is pressed, see `Fingers`_
 ``w``, ``h``     For a finger on a touchpad, the size of the pad in 1/256
                  millimeter when the system knows it, so a program can turn
                  positions into distances or map the pad onto its canvas with
@@ -244,6 +249,43 @@ A program that paints one stroke per finger can act on each report as it
 comes. Frames are sent for fingers only; a tool reports one contact at a
 time.
 
+A touchpad that measures how hard it is pressed reports that with ``p`` and
+``stage``. The force is on the pad as a whole, not under each finger, so
+every finger on the pad carries the same two values, and when only the force
+changes the fingers are reported again as a ``move`` that did not move.
+``stage`` is ``0`` while the pad is pressed less than a click, ``1`` for a
+click and ``2`` for a click pressed harder, and ``p`` runs from 0 to 65535
+within each stage, so it drops back when the stage goes up.
+
+Tool actions
+~~~~~~~~~~~~~~~
+
+Some things done with a tool are not a button held down: a double tap on the
+barrel of a pen, a squeeze of it, a click of the button on its end. While
+mode bit ``16`` is on they are reported with ``kind=4``::
+
+    <OSC> 777 ; tablet-pointer ; v=1 : op=event : kind=4 : device=3 : t=408211 : action=1 : x=25600 : y=51200 : mods=0 <ST>
+
+================ ==================================================================
+``device``       The tool, as in its reports, ``0`` when the system does not
+                 say which tool it was
+``t``, ``tu``    The time of the action, as in the other reports
+``action``       ``1`` a double tap on the barrel, ``2`` a squeeze, ``3`` a
+                 click of the button on the end of the tool, ``4`` a double
+                 click of that button, ``5`` that button pressed and held
+``state``        For an action that lasts, as a squeeze does, ``1`` when it
+                 begins and ``0`` when it ends; absent for the others
+``x``, ``y``     The position of the pointer, as in a tool report
+``mods``         As in a tool report
+================ ==================================================================
+
+``device``, ``t``, ``action``, ``x``, ``y`` and ``mods`` are always present.
+An action has no ``phase`` and no ``contact`` and belongs to no stroke. It
+goes to the window that has a stroke of the tool captured, and otherwise to
+the window under the pointer. What an action does is the program's choice; a
+double tap usually switches between the pen and the eraser. A program
+ignores an ``action`` it does not know.
+
 Lifecycle
 -------------
 
@@ -273,7 +315,9 @@ and cancels contacts when panes move or resize. It keeps the mode of each
 pane and asks the terminal for the union of them. It keeps the last
 description of each tool in proximity and sends it to a pane before that
 pane's first report of the tool, without the hardware identifiers unless
-that pane asked for them. A multiplexer or relay that
+that pane asked for them. A tool action goes to the pane that has a stroke
+of the tool, and otherwise to the pane under the pointer, with ``x,y``
+translated as for a contact. A multiplexer or relay that
 detaches or loses its connection while contacts are live sends ``cancel``
 for each of them to the program, so a program never holds a dead contact,
 and a relay that reconnects forwards nothing it did not see: the fingers
@@ -283,8 +327,9 @@ Implementations
 -------------------
 
 * silkie, this fork of kitty: tools on macOS, Wayland and X11; fingers on
-  the touchpad on macOS and on touchscreens, with contact shape, on Wayland.
-  ``kitty --debug-input`` logs the tablet and touch events it sees.
+  the touchpad on macOS and on touchscreens, with contact shape, on Wayland;
+  tool actions on macOS. ``kitty --debug-input`` logs the tablet and touch
+  events it sees.
 * Inkline, Goblin Skiff and GoblinView carry a codec for an earlier draft of
   this protocol and are being brought up to this specification.
 
@@ -298,12 +343,21 @@ program gets what the system reports:
   Tilt is scaled from the driver's fraction of maximum tilt assuming 60
   degrees, as Wacom tablets report, and ``z`` is the driver's absolute Z.
   While a program takes a tool's reports, AppKit's merging of tablet points
-  is turned off, so every sample the tablet sends is reported.
+  is turned off, so every sample the tablet sends is reported. AppKit tells
+  a pen, an eraser and a puck apart; the airbrush and the lens cursor of a
+  Wacom tablet are recognised from the driver's own code for the tool. No
+  name is known for the device frame. The one tool action is the double tap
+  on an Apple Pencil paired with an iPad that the Mac uses as a display, and
+  the system does not say which tool it came from, so ``device`` is ``0``
+  unless a single tool is in proximity.
   Fingers are the indirect touches of the trackpad, as AppKit reports them
   to the content view, so a finger resting on the pad is not reported; the
   pad size is the device size AppKit gives, taken to be in points at 72 to
   the inch. Trackpad fingers are reported alongside the mouse and scroll
-  events the system makes from them.
+  events the system makes from them. A trackpad that measures force gives
+  ``p`` and ``stage`` once it has been pressed for the first time. The Wacom
+  tool types, the double tap and the force are written from the
+  documentation of AppKit and have not been tried with the hardware.
 * On Wayland, tools come through the ``tablet-v2`` protocol, which reports
   every measurement above, identifies the tool and names the tablet, and
   fingers through ``wl_touch``, with ``shape`` and ``orientation`` on a seat

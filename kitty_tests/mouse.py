@@ -13,6 +13,7 @@ from kitty.fast_data_types import (
     create_mock_window,
     mock_mouse_selection,
     send_mock_mouse_event_to_window,
+    send_pointer_action,
     send_pointer_device,
     send_pointer_report,
 )
@@ -464,7 +465,7 @@ class TestMouse(BaseTest):
 
         s = self.create_screen()
         c = s.callbacks
-        caps = 69 if is_macos else 65
+        caps = 101 if is_macos else 65
 
         def send(body):
             c.clear()
@@ -555,7 +556,31 @@ class TestMouse(BaseTest):
         # Bits of the mode this terminal does not know are dropped, so reading it back shows what took
         send('v=1:op=mode:mode=1023')
         send('v=1:op=mode')
-        self.ae(c.wtcbuf, b'\x1b]777;tablet-pointer;v=1:op=mode:mode=11\x1b\\')
+        self.ae(c.wtcbuf, b'\x1b]777;tablet-pointer;v=1:op=mode:mode=27\x1b\\')
+        send('v=1:op=mode:mode=0')
+
+        # Tool actions are a kind of report with a mode bit of its own
+        def action(*a, **kw):
+            c.clear()
+            return send_pointer_action(s, *a, **kw)
+
+        self.assertFalse(action(1))
+        send('v=1:op=mode:mode=3')
+        self.assertFalse(action(1))
+        send('v=1:op=mode:mode=16')
+        self.assertFalse(report(1, 0))
+        self.assertTrue(action(1, t=1000, x=256, y=512, mods=1))
+        self.ae(c.wtcbuf, ev('kind=4:device=0:t=1000:action=1:x=256:y=512:mods=1'))
+        self.assertTrue(action(2, device=7, state=1, t=1000, tu=5))
+        self.ae(c.wtcbuf, ev('kind=4:device=7:t=1000:tu=5:action=2:state=1:x=0:y=0:mods=0'))
+        self.assertTrue(action(2, device=7, state=0, t=1200))
+        self.ae(c.wtcbuf, ev('kind=4:device=7:t=1200:action=2:state=0:x=0:y=0:mods=0'))
+        # The force on a touchpad is carried by the fingers on it, with its stage
+        send('v=1:op=mode:mode=2')
+        report(2, 1, 0, tool=0, buttons=1, src=1, valid=1, p=30000, stage=1)
+        self.ae(c.wtcbuf, ev('kind=2:phase=1:device=7:t=1000:contact=0:x=256:y=512:buttons=1:mods=0:tool=0:valid=1:p=30000:stage=1:src=1'))
+        report(2, 2, 0, tool=0, buttons=1, src=1, valid=1, p=0, stage=0)
+        self.ae(c.wtcbuf, ev('kind=2:phase=2:device=7:t=1000:contact=0:x=256:y=512:buttons=1:mods=0:tool=0:valid=1:p=0:stage=0:src=1'))
         send('v=1:op=mode:mode=0')
         # The contact table grows, so a touchscreen with many fingers down is not truncated
         send('v=1:op=mode:mode=2')

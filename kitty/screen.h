@@ -26,11 +26,17 @@ typedef struct DnDCommand {
 typedef enum PointerPhase { POINTER_HOVER, POINTER_DOWN, POINTER_MOVE, POINTER_UP, POINTER_CANCEL, POINTER_OUT, POINTER_FRAME } PointerPhase;
 typedef enum PointerKind { POINTER_PEN = 1, POINTER_TOUCH = 2 } PointerKind;
 // The bits of the mode beyond the report kinds, and all the bits this terminal knows
-typedef enum PointerMode { POINTER_MODE_IDS = 8, POINTER_MODES = POINTER_PEN | POINTER_TOUCH | POINTER_MODE_IDS } PointerMode;
+typedef enum PointerMode {
+    POINTER_MODE_IDS = 8,
+    POINTER_MODE_ACTIONS = 16,
+    POINTER_MODES = POINTER_PEN | POINTER_TOUCH | POINTER_MODE_IDS | POINTER_MODE_ACTIONS
+} PointerMode;
 
 // A tablet pointer protocol event, see docs/tablet-protocol.rst
 typedef struct PointerReport {
     int kind, phase, contact, x, y, mods, tool, p, tx, ty, twist, tangent, z, dist, wheel, wclicks, src, major, minor, angle, w, h;
+    int stage;  // of the force on a touchpad, only meaningful with has_stage
+    bool has_stage;
     unsigned buttons, valid;
     uint64_t device;
     unsigned long long t;
@@ -45,6 +51,15 @@ typedef struct PointerDevice {
     uint64_t device, serial, hwid;
     const char *name;  // UTF-8, NULL or empty when unknown
 } PointerDevice;
+
+// Something done with a tool that is not a button held down
+typedef struct PointerAction {
+    int action, state, x, y, mods;  // state is 1 when the action began, 0 when it ended and -1 when it does not last
+    uint64_t device;
+    unsigned long long t;
+    unsigned tu;
+    bool has_tu;
+} PointerAction;
 
 typedef struct {
     bool mLNM, mIRM, mDECTCEM, mDECSCNM, mDECOM, mDECAWM, mDECCOLM, mDECARM, mDECCKM, mCOLOR_PREFERENCE_NOTIFICATION, mBRACKETED_PASTE, mFOCUS_TRACKING,
@@ -323,6 +338,7 @@ void screen_tablet_pointer(Screen *self, const char *data, size_t sz);
 void screen_pointer_cancel(Screen *self, int kind);
 bool screen_pointer_report(Screen *self, PointerReport *r);
 bool screen_pointer_device(Screen *self, const PointerDevice *d);
+bool screen_pointer_action(Screen *self, const PointerAction *a);
 void set_icon(Screen *self, PyObject *);
 void set_dynamic_color(Screen *self, unsigned int code, PyObject *);
 void color_control(Screen *self, unsigned int code, PyObject *);
