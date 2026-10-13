@@ -1946,7 +1946,8 @@ pointer_contact(Screen *screen, const PointerReport *r, bool create) {
         PointerReport *c = screen->pointer.contacts + i;
         if (c->kind == r->kind && c->device == r->device && c->contact == r->contact) return c;
     }
-    if (!create || screen->pointer.num_contacts >= arraysz(screen->pointer.contacts)) return NULL;
+    if (!create) return NULL;
+    ensure_space_for(&screen->pointer, contacts, PointerReport, screen->pointer.num_contacts + 1, capacity, 16, false);
     return screen->pointer.contacts + screen->pointer.num_contacts++;
 }
 
@@ -1961,7 +1962,7 @@ screen_pointer_report(Screen *screen, PointerReport *r) {
     switch (r->phase) {
         case POINTER_DOWN:
         case POINTER_MOVE:
-            if (!c) return false;  // no stroke after a reset or resize
+            if (!c) return false;  // a move whose stroke was cancelled by a reset or resize
             *c = *r;
             break;
         case POINTER_UP:

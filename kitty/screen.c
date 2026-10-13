@@ -811,6 +811,7 @@ dealloc(Screen *self) {
     free(self->last_rendered_window_char.canvas);
     free(self->extra_cursors.locations);
     free(self->paused_rendering.extra_cursors.locations);
+    free(self->pointer.contacts);
     if (self->lc) {
         cleanup_list_of_chars(self->lc);
         free(self->lc);

@@ -268,7 +268,8 @@ typedef struct {
     struct {
         unsigned mode;  // the report kinds the child asked for, see docs/tablet-protocol.rst, 0 when off
         unsigned num_contacts;
-        PointerReport contacts[8];
+        size_t capacity;
+        PointerReport *contacts;  // grows as fingers land, see pointer_contact()
     } pointer;
 } Screen;
 
