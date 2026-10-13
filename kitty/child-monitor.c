@@ -831,9 +831,11 @@ prepare_to_render_os_window(
     bool needs_render = os_window->needs_render;
     os_window->needs_render = false;
     bool was_previously_rendered_with_layers = os_window->needs_layers;
+    if (update_os_window_colorspace(os_window)) needs_render = true;
+    // A window in a wide gamut is converted to it as a whole, after everything is drawn
     os_window->needs_layers =
         (!global_state.supports_framebuffer_srgb || effective_os_window_alpha(os_window) < 1.f || os_window->live_resize.in_progress ||
-         (background_image_for_os_window(os_window) != NULL) || os_window->shader_anim.has_active_shaders);
+         (background_image_for_os_window(os_window) != NULL) || os_window->shader_anim.has_active_shaders || os_window->wide_gamut);
     if (TD.screen && os_window->num_tabs && !os_window->has_too_few_tabs) {
         if (!os_window->tab_bar_data_updated) {
             call_boss(update_tab_bar_data, "K", os_window->id);

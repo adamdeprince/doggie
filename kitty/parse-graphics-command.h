@@ -47,7 +47,8 @@ parent_placement_id='Q',
 usage_hints='N',
 offset_from_parent_x='H',
 offset_from_parent_y='V',
-tone_map='T'
+tone_map='T',
+gamut='G'
     };
 
     enum KEYS key = 'a';
@@ -90,6 +91,7 @@ case usage_hints: value_state = UINT; break;
 case offset_from_parent_x: value_state = INT; break;
 case offset_from_parent_y: value_state = INT; break;
 case tone_map: value_state = UINT; break;
+case gamut: value_state = UINT; break;
                     default:
                         REPORT_ERROR("Malformed GraphicsCommand control block, invalid key character: 0x%x", key);
                         return;
@@ -178,7 +180,7 @@ case tone_map: value_state = UINT; break;
                 READ_UINT;
 #define U(x) case x: g.x = code; break
                 switch(key) {
-                    U(format); U(more); U(id); U(image_number); U(placement_id); U(quiet); U(width); U(height); U(x_offset); U(y_offset); U(data_height); U(data_width); U(data_sz); U(data_offset); U(num_cells); U(num_lines); U(cell_x_offset); U(cell_y_offset); U(cursor_movement); U(unicode_placement); U(parent_id); U(parent_placement_id); U(usage_hints); U(tone_map);
+                    U(format); U(more); U(id); U(image_number); U(placement_id); U(quiet); U(width); U(height); U(x_offset); U(y_offset); U(data_height); U(data_width); U(data_sz); U(data_offset); U(num_cells); U(num_lines); U(cell_x_offset); U(cell_y_offset); U(cursor_movement); U(unicode_placement); U(parent_id); U(parent_placement_id); U(usage_hints); U(tone_map); U(gamut);
                     default: break;
                 }
                 state = AFTER_VALUE;
@@ -225,11 +227,11 @@ case tone_map: value_state = UINT; break;
             break;
     }
 
-    REPORT_VA_COMMAND("K s {sc sc sc sc sI sI sI sI sI sI sI sI sI sI sI sI sI sI sI sI sI sI sI sI sI sI sI sI si si si ss#}", self->window_id, "graphics_command",
+    REPORT_VA_COMMAND("K s {sc sc sc sc sI sI sI sI sI sI sI sI sI sI sI sI sI sI sI sI sI sI sI sI sI sI sI sI sI si si si ss#}", self->window_id, "graphics_command",
 
 "action", g.action, "delete_action", g.delete_action, "transmission_type", g.transmission_type, "compressed", g.compressed,
 
-"format", (unsigned int)g.format, "more", (unsigned int)g.more, "id", (unsigned int)g.id, "image_number", (unsigned int)g.image_number, "placement_id", (unsigned int)g.placement_id, "quiet", (unsigned int)g.quiet, "width", (unsigned int)g.width, "height", (unsigned int)g.height, "x_offset", (unsigned int)g.x_offset, "y_offset", (unsigned int)g.y_offset, "data_height", (unsigned int)g.data_height, "data_width", (unsigned int)g.data_width, "data_sz", (unsigned int)g.data_sz, "data_offset", (unsigned int)g.data_offset, "num_cells", (unsigned int)g.num_cells, "num_lines", (unsigned int)g.num_lines, "cell_x_offset", (unsigned int)g.cell_x_offset, "cell_y_offset", (unsigned int)g.cell_y_offset, "cursor_movement", (unsigned int)g.cursor_movement, "unicode_placement", (unsigned int)g.unicode_placement, "parent_id", (unsigned int)g.parent_id, "parent_placement_id", (unsigned int)g.parent_placement_id, "usage_hints", (unsigned int)g.usage_hints, "tone_map", (unsigned int)g.tone_map,
+"format", (unsigned int)g.format, "more", (unsigned int)g.more, "id", (unsigned int)g.id, "image_number", (unsigned int)g.image_number, "placement_id", (unsigned int)g.placement_id, "quiet", (unsigned int)g.quiet, "width", (unsigned int)g.width, "height", (unsigned int)g.height, "x_offset", (unsigned int)g.x_offset, "y_offset", (unsigned int)g.y_offset, "data_height", (unsigned int)g.data_height, "data_width", (unsigned int)g.data_width, "data_sz", (unsigned int)g.data_sz, "data_offset", (unsigned int)g.data_offset, "num_cells", (unsigned int)g.num_cells, "num_lines", (unsigned int)g.num_lines, "cell_x_offset", (unsigned int)g.cell_x_offset, "cell_y_offset", (unsigned int)g.cell_y_offset, "cursor_movement", (unsigned int)g.cursor_movement, "unicode_placement", (unsigned int)g.unicode_placement, "parent_id", (unsigned int)g.parent_id, "parent_placement_id", (unsigned int)g.parent_placement_id, "usage_hints", (unsigned int)g.usage_hints, "tone_map", (unsigned int)g.tone_map, "gamut", (unsigned int)g.gamut,
 
 "z_index", (int)g.z_index, "offset_from_parent_x", (int)g.offset_from_parent_x, "offset_from_parent_y", (int)g.offset_from_parent_y,
 

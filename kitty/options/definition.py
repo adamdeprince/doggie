@@ -3688,6 +3688,25 @@ config is not supported.
 )
 
 opt(
+    'wayland_colorspace',
+    'srgb',
+    choices=('srgb', 'displayp3', 'rec2020', 'auto'),
+    ctype='wayland_colorspace',
+    long_text="""
+The colorspace OS windows are drawn in on Wayland. With the default of
+:code:`srgb` a window is what it always was. With :code:`displayp3` or
+:code:`rec2020` the compositor is told the window is in that wider gamut, and
+colors and images that a program tags with a wide gamut, see
+:doc:`wide-gamut-protocol`, are shown in it rather than being clipped to sRGB.
+:code:`auto` picks the widest of the three that the display the window is on
+can show in full. Everything that is not tagged with a gamut is sRGB and
+keeps its appearance, unlike with :opt:`macos_colorspace`. This needs a
+compositor that implements color management, on any other the window stays
+sRGB. A wide window is drawn with one extra pass over its pixels.
+""",
+)
+
+opt(
     'wayland_enable_ime',
     'yes',
     option_type='to_bool',

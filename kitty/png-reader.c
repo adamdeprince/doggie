@@ -13,6 +13,96 @@
 
 
 static cmsHPROFILE srgb_profile = NULL;
+// The gamuts of docs/wide-gamut-protocol.rst as profiles: the primaries of the
+// gamut, the D65 white point and the sRGB transfer curve, indexed by gamut id
+static cmsHPROFILE gamut_profiles[GAMUT_REC2020 + 1] = {0};
+
+static cmsHPROFILE
+profile_for_gamut(unsigned gamut) {
+    if (gamut >= arraysz(gamut_profiles)) return NULL;
+    if (!gamut_profiles[gamut]) {
+        if (gamut == 0) gamut_profiles[0] = cmsCreate_sRGBProfile();
+        else {
+            static const cmsCIExyYTRIPLE primaries[arraysz(gamut_profiles)] = {
+                [GAMUT_DISPLAY_P3] = {{0.680, 0.320, 1}, {0.265, 0.690, 1}, {0.150, 0.060, 1}},
+                [GAMUT_REC2020] = {{0.708, 0.292, 1}, {0.170, 0.797, 1}, {0.131, 0.046, 1}},
+            };
+            static const cmsCIExyY d65 = {0.3127, 0.3290, 1};
+            // The curve of IEC 61966-2-1, as cmsCreate_sRGBProfile() makes it
+            static const cmsFloat64Number srgb_curve[] = {2.4, 1 / 1.055, 0.055 / 1.055, 1 / 12.92, 0.04045};
+            cmsToneCurve *curve = cmsBuildParametricToneCurve(NULL, 4, srgb_curve);
+            if (curve) {
+                cmsToneCurve *curves[3] = {curve, curve, curve};
+                gamut_profiles[gamut] = cmsCreateRGBProfile(&d65, &primaries[gamut], curves);
+                cmsFreeToneCurve(curve);
+            }
+        }
+    }
+    return gamut_profiles[gamut];
+}
+
+// The chromaticities of the red, green and blue of an RGB profile as lcms
+// sees them, which is adapted to the D50 white of its connection space
+static bool
+primaries_of_profile(cmsHPROFILE profile, double xy[6]) {
+    if (cmsGetColorSpace(profile) != cmsSigRgbData) return false;
+    cmsHPROFILE xyz_profile = cmsCreateXYZProfile();
+    if (!xyz_profile) return false;
+    const cmsUInt32Number flags = cmsFLAGS_NOOPTIMIZE | cmsFLAGS_NOCACHE;
+    cmsHTRANSFORM t = cmsCreateTransform(profile, TYPE_RGB_DBL, xyz_profile, TYPE_XYZ_DBL, INTENT_RELATIVE_COLORIMETRIC, flags);
+    cmsCloseProfile(xyz_profile);
+    if (!t) return false;
+    static const double rgb[9] = {1, 0, 0, 0, 1, 0, 0, 0, 1};
+    cmsCIEXYZ xyz[3];
+    cmsDoTransform(t, rgb, xyz, 3);
+    cmsDeleteTransform(t);
+    for (int i = 0; i < 3; i++) {
+        const double sum = xyz[i].X + xyz[i].Y + xyz[i].Z;
+        if (!(sum > 0)) return false;
+        xy[2 * i] = xyz[i].X / sum;
+        xy[2 * i + 1] = xyz[i].Y / sum;
+    }
+    return true;
+}
+
+// The wide gamut a profile is in, zero when it is in neither. A profile is in
+// a gamut when each of its primaries is within 0.005 in x and in y of that of
+// the gamut, both adapted to D50. That takes in the Display P3 and Rec. 2020
+// profiles in circulation whatever their curve, which differ from ours in the
+// fourth decimal, and leaves out sRGB, Adobe RGB and the P3 of cinemas, whose
+// white is not D65 and whose adapted primaries are therefore elsewhere
+static uint8_t
+wide_gamut_of_profile(cmsHPROFILE profile) {
+    double xy[6], wanted[6];
+    if (!primaries_of_profile(profile, xy)) return 0;
+    for (uint8_t gamut = GAMUT_DISPLAY_P3; gamut <= GAMUT_REC2020; gamut++) {
+        cmsHPROFILE p = profile_for_gamut(gamut);
+        if (!p || !primaries_of_profile(p, wanted)) continue;
+        bool same = true;
+        for (int i = 0; i < 6; i++) same = same && fabs(xy[i] - wanted[i]) <= 0.005;
+        if (same) return gamut;
+    }
+    return 0;
+}
+
+bool
+convert_pixels_between_gamuts(uint8_t *pixels, size_t num_pixels, bool has_alpha, unsigned from, unsigned to) {
+    if (from == to) return true;
+    cmsHPROFILE a = profile_for_gamut(from), b = profile_for_gamut(to);
+    if (!a || !b) return false;
+    const cmsUInt32Number fmt = has_alpha ? TYPE_RGBA_8 : TYPE_RGB_8;
+    cmsHTRANSFORM t = cmsCreateTransform(a, fmt, b, fmt, INTENT_PERCEPTUAL, 0);
+    if (!t) return false;
+    // Done in place, which leaves the alpha bytes as they are
+    for (size_t done = 0; done < num_pixels;) {
+        const size_t n = MIN(num_pixels - done, (size_t)1 << 20);
+        cmsDoTransform(t, pixels + done * (has_alpha ? 4 : 3), pixels + done * (has_alpha ? 4 : 3), (cmsUInt32Number)n);
+        done += n;
+    }
+    cmsDeleteTransform(t);
+    return true;
+}
+
 struct fake_file {
     const uint8_t *buf;
     size_t sz, cur;
@@ -86,7 +176,51 @@ inflate_png_inner(png_read_data *d, const uint8_t *buf, size_t bufsz, int max_im
     bit_depth = png_get_bit_depth(png, info);
     double image_gamma;
     int intent;
-    if (png_get_sRGB(png, info, &intent)) {
+    d->gamut = 0;
+    // A file in a wide gamut that is to stay in one is dealt with here, every
+    // other file by the code below, as it always was
+    bool wide = false;
+    if (d->keep_wide_gamut || d->convert_to_gamut) {
+        uint8_t source = 0;
+#ifdef PNG_READ_cICP_SUPPORTED
+        // The code points of ITU-T H.273: primaries 12 are Display P3 and 9
+        // Rec. 2020, transfer 13 is the sRGB curve, so the pixels are already
+        // what such a gamut holds. A chunk that says anything else, the HDR
+        // curves in particular, is ignored as before
+        png_byte primaries, transfer, matrix, full_range;
+        if ((png_get_cICP(png, info, &primaries, &transfer, &matrix, &full_range) & PNG_INFO_cICP) && transfer == 13 && matrix == 0 && full_range == 1)
+            source = primaries == 12 ? GAMUT_DISPLAY_P3 : (primaries == 9 ? GAMUT_REC2020 : 0);
+#endif
+        cmsHPROFILE from = source ? profile_for_gamut(source) : NULL;
+        if (!source && !png_get_sRGB(png, info, &intent)) {
+            // An embedded profile takes precedence over gAMA and cHRM chunks
+            png_charp name;
+            int compression_type;
+            png_bytep profdata;
+            png_uint_32 proflen;
+            if (png_get_iCCP(png, info, &name, &compression_type, &profdata, &proflen) & PNG_INFO_iCCP) {
+                input_profile = cmsOpenProfileFromMem(profdata, proflen);
+                if (input_profile && (source = wide_gamut_of_profile(input_profile))) from = input_profile;
+            }
+        }
+        if (source) {
+            d->gamut = d->convert_to_gamut ? d->convert_to_gamut : source;
+            cmsHPROFILE to = profile_for_gamut(d->gamut);
+            if (from == to) wide = from != NULL;
+            else if (from && to) {
+                colorspace_transform = cmsCreateTransform(from, TYPE_RGBA_8, to, TYPE_RGBA_8, INTENT_PERCEPTUAL, 0);
+                wide = colorspace_transform != NULL;
+            }
+            if (!wide) d->gamut = 0;
+        }
+        if (!wide && input_profile) {
+            cmsCloseProfile(input_profile);
+            input_profile = NULL;
+        }
+    }
+    if (wide) {
+        // the colors are taken care of
+    } else if (png_get_sRGB(png, info, &intent)) {
         // do nothing since we output sRGB
     } else if (png_get_gAMA(png, info, &image_gamma)) {
         if (image_gamma != 0 && fabs(image_gamma - 1.0 / 2.2) > 0.0001) png_set_gamma(png, 2.2, image_gamma);
@@ -106,6 +240,15 @@ inflate_png_inner(png_read_data *d, const uint8_t *buf, size_t bufsz, int max_im
                 colorspace_transform = cmsCreateTransform(input_profile, TYPE_RGBA_8, srgb_profile, TYPE_RGBA_8, INTENT_PERCEPTUAL, 0);
             }
         }
+    }
+    if (!wide && d->convert_to_gamut) {
+        // What the code above made sRGB is wanted in another gamut: straight
+        // from the embedded profile when there is one, from sRGB otherwise
+        cmsHPROFILE to = profile_for_gamut(d->convert_to_gamut), from = colorspace_transform ? input_profile : profile_for_gamut(0);
+        if (colorspace_transform) cmsDeleteTransform(colorspace_transform);
+        colorspace_transform = from && to ? cmsCreateTransform(from, TYPE_RGBA_8, to, TYPE_RGBA_8, INTENT_PERCEPTUAL, 0) : NULL;
+        if (!colorspace_transform) ABRT(EINVAL, "Failed to convert the PNG image to the gamut wanted");
+        d->gamut = d->convert_to_gamut;
     }
 
     // Ensure we get RGBA data out of libpng
@@ -277,6 +420,10 @@ static void
 unload(void) {
     if (srgb_profile) cmsCloseProfile(srgb_profile);
     srgb_profile = NULL;
+    for (size_t i = 0; i < arraysz(gamut_profiles); i++) {
+        if (gamut_profiles[i]) cmsCloseProfile(gamut_profiles[i]);
+        gamut_profiles[i] = NULL;
+    }
 }
 
 bool

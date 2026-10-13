@@ -552,9 +552,11 @@ png_error_handler(png_read_data *d UNUSED, const char *code, const char *msg) {
     set_command_failed_response(code, "%s", msg);
 }
 
+// The gamut of a PNG is what the file says it is, unless it is a frame of an
+// image, in which case it is converted to the gamut of that image
 static bool
-inflate_png(LoadData *load_data, uint8_t *buf, size_t bufsz) {
-    png_read_data d = {.err_handler = png_error_handler};
+inflate_png(LoadData *load_data, uint8_t *buf, size_t bufsz, const Image *frame_of) {
+    png_read_data d = {.err_handler = png_error_handler, .keep_wide_gamut = frame_of == NULL, .convert_to_gamut = frame_of ? frame_of->gamut : 0};
     inflate_png_inner(&d, buf, bufsz, MAX_IMAGE_DIMENSION);
     if (d.ok) {
         free_load_data(load_data);
@@ -564,6 +566,7 @@ inflate_png(LoadData *load_data, uint8_t *buf, size_t bufsz) {
         load_data->data_sz = d.sz;
         load_data->width = d.width;
         load_data->height = d.height;
+        load_data->gamut = d.gamut;
     } else free(d.decompressed);
     free(d.row_pointers);
     return d.ok;
@@ -937,8 +940,14 @@ load_image_data(
         ABRT("ENODATA", "Insufficient image data: %zu < %zu", (buf_used), (data_sz)); \
     }
 
+// The gamut a command says its pixels are in, see docs/wide-gamut-protocol.rst
+static uint8_t
+gamut_of_command(const GraphicsCommand *g) {
+    return g->gamut == GAMUT_DISPLAY_P3 || g->gamut == GAMUT_REC2020 ? g->gamut : 0;
+}
+
 static Image *
-process_image_data(GraphicsManager *self, Image *img, const GraphicsCommand *g, const uint32_t data_fmt) {
+process_image_data(GraphicsManager *self, Image *img, const GraphicsCommand *g, const uint32_t data_fmt, const bool is_frame) {
     if (data_fmt == VECTOR) {  // text records of a size known only once loaded
         LoadData *ld = &self->currently_loading;
         switch (g->compressed) {
@@ -953,10 +962,13 @@ process_image_data(GraphicsManager *self, Image *img, const GraphicsCommand *g, 
         }
         ld->data = ld->buf;
         ld->data_sz = ld->buf_used;
+        ld->gamut = 0;  // the colors in the records are sRGB
         ld->loading_completed_successfully = true;
         return img;
     }
     bool needs_processing = g->compressed || data_fmt == PNG;
+    // An HDR image is linear extended sRGB whatever the command says, see docs/hdr-protocol.rst
+    self->currently_loading.gamut = data_fmt == RGBA16F ? 0 : gamut_of_command(g);
     if (needs_processing) {
         uint8_t *buf;
         size_t bufsz;
@@ -979,7 +991,7 @@ process_image_data(GraphicsManager *self, Image *img, const GraphicsCommand *g, 
         switch (data_fmt) {
             case PNG:
                 IB;
-                if (!inflate_png(&self->currently_loading, buf, bufsz)) {
+                if (!inflate_png(&self->currently_loading, buf, bufsz, is_frame ? img : NULL)) {
                     self->currently_loading.loading_completed_successfully = false;
                     return NULL;
                 }
@@ -1098,6 +1110,7 @@ load_surface_image(GraphicsManager *self, const GraphicsCommand *g, Image *img, 
     }
     img->surface = surface;
     img->surface_is_bgra = is_bgra;
+    img->gamut = gamut_of_command(g);  // the pixels of a surface are those of f=32
     img->width = width;
     img->height = height;
     img->root_frame = (const Frame){.id = ++img->frame_id_counter, .is_4byte_aligned = true, .width = width, .height = height};
@@ -1168,7 +1181,7 @@ handle_add_command(GraphicsManager *self, const GraphicsCommand *g, const uint8_
     img = load_image_data(self, img, g, tt, fmt, payload);
     if (!img || !self->currently_loading.loading_completed_successfully) return NULL;
     self->currently_loading.loading_for = (const ImageAndFrame){0};
-    img = process_image_data(self, img, g, fmt);
+    img = process_image_data(self, img, g, fmt, false);
     if (!img) return NULL;
     if (fmt == VECTOR) {
         LoadData *ld = &self->currently_loading;
@@ -1184,6 +1197,7 @@ handle_add_command(GraphicsManager *self, const GraphicsCommand *g, const uint8_
         img->height = ld->height;
         img->root_frame = (const Frame){
             .id = ++img->frame_id_counter, .is_4byte_aligned = true, .width = img->width, .height = img->height, .transient = (g->usage_hints & GRAPHICS_USAGE_HINT_TRANSIENT) != 0};
+        img->gamut = 0;
         if (is_query) vector_doc_free(doc);
         else {
             img->vector = doc;
@@ -1205,6 +1219,7 @@ handle_add_command(GraphicsManager *self, const GraphicsCommand *g, const uint8_
     if (self->currently_loading.loading_completed_successfully) {
         img->width = self->currently_loading.width;
         img->height = self->currently_loading.height;
+        img->gamut = self->currently_loading.gamut;
         if (img->root_frame.id) remove_from_cache(self, (const ImageAndFrame){.image_id = img->internal_id, .frame_id = img->root_frame.id});
         img->root_frame = (const Frame){
             .id = ++img->frame_id_counter,
@@ -1792,6 +1807,7 @@ grman_update_layers(
             rd->texture_id = texture_id_for_img(img);
             rd->peak = img->peak;
             rd->tone_map = img->tone_map;
+            rd->gamut = img->gamut;
             img->is_drawn = true;
             refitr = vt_next(refitr);
         }
@@ -2279,12 +2295,18 @@ handle_animation_frame_load_command(GraphicsManager *self, GraphicsCommand *g, I
     img = load_image_data(self, img, g, tt, fmt, payload);
     if (!img || !load_data->loading_completed_successfully) return NULL;
     self->currently_loading.loading_for = (const ImageAndFrame){0};
-    img = process_image_data(self, img, g, fmt);
+    img = process_image_data(self, img, g, fmt, true);
     if (!img || !load_data->loading_completed_successfully) return img;
 
     const unsigned long bytes_per_pixel = pixel_size(load_data->is_opaque, load_data->is_float);
     if (load_data->data_sz < bytes_per_pixel * load_data->width * load_data->height)
         ABRT("ENODATA", "Insufficient image data %zu < %zu", load_data->data_sz, bytes_per_pixel * g->data_width * g->data_height);
+    // The frames of an image are all in its gamut, as they are blended with each other
+    if (load_data->gamut != img->gamut) {
+        if (!convert_pixels_between_gamuts(load_data->data, (size_t)load_data->width * load_data->height, !load_data->is_opaque, load_data->gamut, img->gamut))
+            ABRT("EINVAL", "Failed to convert the frame from gamut %u to the gamut of the image: %u", load_data->gamut, img->gamut);
+        load_data->gamut = img->gamut;
+    }
     if (load_data->width > img->width) ABRT("EINVAL", "Frame width %u larger than image width: %u", load_data->width, img->width);
     if (load_data->is_float) img->peak = MAX(img->peak, peak_of_half_data(load_data->data, load_data->data_sz));
     if (load_data->height > img->height) ABRT("EINVAL", "Frame height %u larger than image height: %u", load_data->height, img->height);
@@ -2439,7 +2461,7 @@ handle_vector_edit_command(GraphicsManager *self, GraphicsCommand *g, Image *img
     img = load_image_data(self, img, g, tt, VECTOR, payload);
     if (!img || !load_data->loading_completed_successfully) return NULL;
     self->currently_loading.loading_for = (const ImageAndFrame){0};
-    img = process_image_data(self, img, g, VECTOR);
+    img = process_image_data(self, img, g, VECTOR, false);
     if (!img) return NULL;
     const size_t before = vector_doc_size(img->vector);
     const char *err = vector_doc_apply(img->vector, load_data->data, load_data->data_sz);
@@ -3306,7 +3328,7 @@ image_as_dict(GraphicsManager *self, Image *img) {
         "{sI sI sI sI sI sI sI "
         "sO sI sO "
         "sI sI sI "
-        "sI sy# sN sO sf sI}",
+        "sI sI sy# sN sO sf sI}",
         "texture_id",
         texture_id_for_img(img),
         U(client_id),
@@ -3328,6 +3350,7 @@ image_as_dict(GraphicsManager *self, Image *img) {
         U(current_frame_index),
 
         U(animation_duration),
+        U(gamut),
         "data",
         cfd.buf,
         (Py_ssize_t)(cfd.buf ? pixel_size(cfd.is_opaque, cfd.is_float) * img->width * img->height : 0),

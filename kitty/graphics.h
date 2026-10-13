@@ -14,7 +14,7 @@
 
 typedef struct {
     unsigned char action, transmission_type, compressed, delete_action;
-    uint32_t format, more, id, image_number, data_sz, data_offset, placement_id, quiet, parent_id, parent_placement_id, usage_hints, tone_map;
+    uint32_t format, more, id, image_number, data_sz, data_offset, placement_id, quiet, parent_id, parent_placement_id, usage_hints, tone_map, gamut;
     uint32_t width, height, x_offset, y_offset;
     union {
         uint32_t cursor_movement, compose_mode;
@@ -56,6 +56,7 @@ typedef struct {
     id_type image_id, ref_id;
     float peak; // of HDR images, see docs/hdr-protocol.rst
     bool tone_map;
+    uint32_t gamut;  // the gamut of the pixels, see docs/wide-gamut-protocol.rst
 } ImageRenderData;
 
 typedef struct {
@@ -135,6 +136,7 @@ typedef struct {
     bool tone_map;
     VectorDoc *vector;  // f=200 images are rasterized on demand at the size they are shown at, the document tracks what changed
     uint32_t vector_tex_width, vector_tex_height;
+    uint8_t gamut;  // the gamut the pixels of every frame are in, see docs/wide-gamut-protocol.rst
 } Image;
 
 typedef struct {
@@ -151,6 +153,7 @@ typedef struct {
     bool is_4byte_aligned;
     bool is_opaque, loading_completed_successfully, is_float;
     uint32_t width, height;
+    uint8_t gamut;  // of the loaded pixels
     GraphicsCommand start_command;
     ImageAndFrame loading_for;
 } LoadData;

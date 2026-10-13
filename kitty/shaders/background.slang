@@ -8,6 +8,7 @@
 module background;
 
 import utils;
+import gamut;
 
 #define NUM_COLORS 256
 
@@ -97,25 +98,10 @@ color_to_vec(uint c) {
     return float3(gamma_lut[r], gamma_lut[g], gamma_lut[b]);
 }
 
-// Gamuts of cell colors, see docs/wide-gamut-protocol.rst. A color tagged with
-// a gamut is converted to the colorspace of the window, through XYZ (D65).
-// Untagged colors are the colorspace of the window, as they always were, so
-// they and colors already in the output gamut are passed through untouched.
-public static const uint GAMUT_SRGB = 0, GAMUT_DISPLAY_P3 = 1, GAMUT_REC2020 = 2, GAMUT_UNMANAGED = 3;
-static const float3x3 gamut_to_xyz[3] = {
-    float3x3(0.4124564, 0.3575761, 0.1804375, 0.2126729, 0.7151522, 0.0721750, 0.0193339, 0.1191920, 0.9503041),
-    float3x3(0.4865709, 0.2656677, 0.1982173, 0.2289746, 0.6917385, 0.0792869, 0.0000000, 0.0451134, 1.0439444),
-    float3x3(0.6369580, 0.1446169, 0.1688810, 0.2627002, 0.6779981, 0.0593017, 0.0000000, 0.0280727, 1.0609851),
-};
-static const float3x3 xyz_to_gamut[2] = {
-    float3x3(3.2404542, -1.5371385, -0.4985314, -0.9692660, 1.8760108, 0.0415560, 0.0556434, -0.2040259, 1.0572252),
-    float3x3(2.4934969, -0.9313836, -0.4027108, -0.8294890, 1.7626641, 0.0236247, 0.0358458, -0.0761724, 0.9568845),
-};
-
+// A cell color tagged with a gamut, as this window draws it, see gamut.slang
 public float3
 convert_gamut(float3 c, uint gamut) {
-    if (gamut == GAMUT_SRGB || gamut == crd.output_gamut || crd.output_gamut == GAMUT_UNMANAGED) return c;
-    return clamp(mul(xyz_to_gamut[crd.output_gamut], mul(gamut_to_xyz[gamut], c)), 0.f, 1.f);
+    return convert_from_gamut(c, gamut, crd.output_gamut);
 }
 
 public float

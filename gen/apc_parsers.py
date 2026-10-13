@@ -319,6 +319,7 @@ def parsers() -> None:
         'H': ('offset_from_parent_x', 'int'),
         'V': ('offset_from_parent_y', 'int'),
         'T': ('tone_map', 'uint'),
+        'G': ('gamut', 'uint'),
     }
     text = generate('parse_graphics_code', 'screen_handle_graphics_command', 'graphics_command', keymap, 'GraphicsCommand')
     write_header(text, 'kitty/parse-graphics-command.h')

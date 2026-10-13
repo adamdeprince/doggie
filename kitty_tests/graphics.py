@@ -92,6 +92,61 @@ def byte_block(sz):
     return (all_bytes * d) + all_bytes[:m]
 
 
+def icc_profile(colorants, gamma=None):
+    # A minimal RGB matrix profile: the D50 adapted XYZ of red, green and blue
+    # and one curve for the three, the sRGB one unless a plain gamma is given
+    import struct
+
+    def s15f16(x):
+        return struct.pack('>i', round(x * 65536))
+
+    def xyz(v):
+        return b'XYZ \0\0\0\0' + b''.join(map(s15f16, v))
+
+    if gamma is None:
+        curve = b'para\0\0\0\0' + struct.pack('>HH', 3, 0) + b''.join(map(s15f16, (2.4, 1 / 1.055, 0.055 / 1.055, 1 / 12.92, 0.04045)))
+    else:
+        curve = b'para\0\0\0\0' + struct.pack('>HH', 0, 0) + s15f16(gamma)
+    d50 = (0.9642, 1.0, 0.8249)
+    tags = [(b'wtpt', xyz(d50)), (b'rXYZ', xyz(colorants[0])), (b'gXYZ', xyz(colorants[1])), (b'bXYZ', xyz(colorants[2])), (b'rTRC', curve)]
+    table, data, offset = b'', b'', 128 + 4 + 12 * (len(tags) + 2)
+    for sig, payload in tags:
+        payload += b'\0' * (-len(payload) % 4)
+        table += sig + struct.pack('>II', offset + len(data), len(payload))
+        if sig == b'rTRC':
+            for other in (b'gTRC', b'bTRC'):
+                table += other + struct.pack('>II', offset + len(data), len(payload))
+        data += payload
+    body = struct.pack('>I', len(tags) + 2) + table + data
+    header = struct.pack('>I4sI4s4s4s', 128 + len(body), b'', 0x04200000, b'mntr', b'RGB ', b'XYZ ') + b'\0' * 12 + b'acsp' + b'\0' * 28
+    header += b''.join(map(s15f16, d50)) + b'\0' * 48
+    assert len(header) == 128
+    return header + body
+
+
+SRGB_COLORANTS = (0.4360747, 0.2225045, 0.0139322), (0.3850649, 0.7168786, 0.0971045), (0.1430804, 0.0606169, 0.7141733)
+DISPLAY_P3_COLORANTS = (0.5151, 0.2412, -0.0011), (0.2920, 0.6922, 0.0419), (0.1571, 0.0666, 0.7841)
+REC2020_COLORANTS = (0.67348, 0.27904, -0.00194), (0.16566, 0.67535, 0.02998), (0.12505, 0.04561, 0.79686)
+ADOBE_RGB_COLORANTS = (0.6097559, 0.3111242, 0.0194811), (0.2052401, 0.6256560, 0.0608902), (0.1492240, 0.0632197, 0.7448387)
+
+
+def make_png(rgba, width, *chunks, profile=None):
+    # An RGBA PNG with the given chunks, and an embedded profile if any, ahead of the pixels
+    import struct
+
+    def chunk(kind, payload):
+        return struct.pack('>I', len(payload)) + kind + payload + struct.pack('>I', zlib.crc32(kind + payload))
+
+    height = len(rgba) // (4 * width)
+    rows = b''.join(b'\0' + rgba[i * 4 * width : (i + 1) * 4 * width] for i in range(height))
+    ans = b'\x89PNG\r\n\x1a\n' + chunk(b'IHDR', struct.pack('>IIBBBBB', width, height, 8, 6, 0, 0, 0))
+    for kind, payload in chunks:
+        ans += chunk(kind, payload)
+    if profile is not None:
+        ans += chunk(b'iCCP', b'icc\0\0' + zlib.compress(profile))
+    return ans + chunk(b'IDAT', zlib.compress(rows)) + chunk(b'IEND', b'')
+
+
 def load_helpers(self):
     s = self.create_screen()
     g = s.grman
@@ -675,6 +730,85 @@ class TestGraphics(BaseTest):
         self.ae(pl(b'a' * 20, f=100, S=20).partition(':')[0], 'EBADPNG')
         s.reset()
         self.assertEqual(g.disk_cache.total_size, 0)
+
+    def test_image_gamut(self):
+        s, g, pl, sl = load_helpers(self)
+
+        def close(a, b, by=1):
+            self.ae(len(a), len(b))
+            self.assertTrue(all(abs(x - y) <= by for x, y in zip(a, b)), f'{tuple(a)} is not within {by} of {tuple(b)}')
+
+        # Pixels sent as they are say what gamut they are in, an unknown one is sRGB
+        self.ae(sl('abcd', s=1, v=1)['gamut'], 0)
+        for fmt, payload in ((32, 'abcd'), (24, 'abc')):
+            for gamut, expected in ((0, 0), (1, 1), (2, 2), (3, 0), (77, 0)):
+                self.ae(sl(payload, s=1, v=1, f=fmt, G=gamut)['gamut'], expected)
+        self.ae(pl('abcd', s=1, v=1, a='q', G=1), 'OK')
+        self.ae(pl('abcd', s=1, v=1, a='q', G=9), 'OK')
+        # so does a chunked load, in its first chunk
+        self.assertIsNone(pl('abcd', s=2, v=1, m=1, G=2))
+        self.ae(pl('efgh', m=0), 'OK')
+        img = g.image_for_client_id(1)
+        self.ae((img['gamut'], img['data']), (2, b'abcdefgh'))
+        # and sending the image again without one makes it sRGB again
+        self.ae(sl('abcd', s=1, v=1)['gamut'], 0)
+
+        # A PNG says it with its profile. One in a wide gamut stays there, any other is made sRGB
+        rgba = bytes((255, 0, 0, 255, 10, 200, 30, 128, 200, 50, 50, 255, 128, 128, 128, 255))
+
+        def load(*chunks, profile=None, gamut=0):
+            self.ae(pl(make_png(rgba, 2, *chunks, profile=profile), f=100), 'OK')
+            img = g.image_for_client_id(1)
+            self.ae((img['gamut'], img['width'], img['height']), (gamut, 2, 2))
+            return img['data']
+
+        self.ae(load(), rgba)
+        close(load(profile=icc_profile(SRGB_COLORANTS)), rgba)
+        close(load(profile=icc_profile(DISPLAY_P3_COLORANTS), gamut=1), rgba)
+        close(load(profile=icc_profile(REC2020_COLORANTS), gamut=2), rgba)
+        # a profile with another curve is brought to the sRGB curve, the alpha is left alone
+        linear_p3 = load(profile=icc_profile(DISPLAY_P3_COLORANTS, gamma=1), gamut=1)
+        close(linear_p3, bytes((255, 0, 0, 255, 56, 229, 96, 128, 229, 122, 122, 255, 188, 188, 188, 255)))
+        adobe = load(profile=icc_profile(ADOBE_RGB_COLORANTS, gamma=2.19921875))
+        self.assertNotEqual(adobe[8:11], rgba[8:11])
+        self.ae(adobe[3::4], rgba[3::4])
+        # the sRGB chunk and a profile are not meant to be in one file, the chunk wins as before
+        self.ae(load((b'sRGB', b'\0'), profile=icc_profile(DISPLAY_P3_COLORANTS)), rgba)
+        # a profile takes precedence over a gamma
+        close(load((b'gAMA', (45455).to_bytes(4, 'big')), profile=icc_profile(DISPLAY_P3_COLORANTS), gamut=1), rgba)
+        # code points in place of a profile: the pixels are what they say, only the sRGB curve is understood
+        self.ae(load((b'cICP', bytes((12, 13, 0, 1))), gamut=1), rgba)
+        self.ae(load((b'cICP', bytes((9, 13, 0, 1))), gamut=2), rgba)
+        self.ae(load((b'cICP', bytes((1, 13, 0, 1)))), rgba)
+        self.ae(load((b'cICP', bytes((9, 16, 0, 1)))), rgba)
+        # elsewhere PNG is always read as sRGB
+        self.assertNotEqual(load_png_data(make_png(rgba, 2, profile=icc_profile(DISPLAY_P3_COLORANTS)))[0][4:7], rgba[4:7])
+        self.ae(load_png_data(make_png(rgba, 2))[0], rgba)
+
+        # The frames of an image are all in its gamut, a frame in another one is converted when it is loaded
+        srgb_red, p3_for_srgb_red = bytes((255, 0, 0, 255)), bytes((234, 51, 35, 255))
+
+        def frames():
+            return tuple(f['data'] for f in g.image_for_client_id(1)['extra_frames'])
+
+        self.ae(sl(p3_for_srgb_red, s=1, v=1, G=1)['gamut'], 1)
+        self.ae(pl(p3_for_srgb_red, a='f', s=1, v=1, G=1).partition(':')[0], 'OK')
+        self.ae(pl(srgb_red, a='f', s=1, v=1).partition(':')[0], 'OK')
+        self.ae(pl(make_png(srgb_red, 1), a='f', f=100).partition(':')[0], 'OK')
+        self.ae(pl(make_png(p3_for_srgb_red, 1, profile=icc_profile(DISPLAY_P3_COLORANTS)), a='f', f=100).partition(':')[0], 'OK')
+        self.ae(len(frames()), 4)
+        self.ae(frames()[0], p3_for_srgb_red)
+        for frame in frames()[1:]:
+            close(frame, p3_for_srgb_red)
+        self.ae(g.image_for_client_id(1)['gamut'], 1)
+        self.ae(sl(srgb_red, s=1, v=1)['gamut'], 0)
+        self.ae(pl(p3_for_srgb_red, a='f', s=1, v=1, G=1).partition(':')[0], 'OK')
+        self.ae(pl(make_png(p3_for_srgb_red, 1, (b'cICP', bytes((12, 13, 0, 1)))), a='f', f=100).partition(':')[0], 'OK')
+        self.ae(pl(srgb_red[:3], a='f', s=1, v=1, f=24).partition(':')[0], 'OK')
+        self.ae(len(frames()), 3)
+        close(frames()[0], srgb_red)
+        self.ae(frames()[2], srgb_red[:3])
+        self.ae(g.image_for_client_id(1)['gamut'], 0)
 
     def test_load_png_simple(self):
         # 1x1 transparent PNG

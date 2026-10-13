@@ -1162,7 +1162,7 @@ class TestParser(BaseTest):
             for f in (
                 'format more id data_sz data_offset width height x_offset y_offset data_height data_width cursor_movement'
                 ' num_cells num_lines cell_x_offset cell_y_offset z_index placement_id image_number quiet unicode_placement'
-                ' parent_id parent_placement_id usage_hints offset_from_parent_x offset_from_parent_y tone_map'
+                ' parent_id parent_placement_id usage_hints offset_from_parent_x offset_from_parent_y tone_map gamut'
             ).split():
                 k.setdefault(f, 0)
             p = k.pop('payload', '')
@@ -1186,6 +1186,7 @@ class TestParser(BaseTest):
         t('a=t,t=d,s=100,z=9', payload='payload', action='t', transmission_type='d', data_width=100, z_index=9)
         t('a=t,t=d,s=100,z=9,q=2', action='t', transmission_type='d', data_width=100, z_index=9, quiet=2)
         t('N=1', usage_hints=1)
+        t('G=1,f=24', gamut=1, format=24)
         e(',s=1', 'Malformed GraphicsCommand control block, invalid key character: 0x2c')
         e('W=1', 'Malformed GraphicsCommand control block, invalid key character: 0x57')
         e('1=1', 'Malformed GraphicsCommand control block, invalid key character: 0x31')

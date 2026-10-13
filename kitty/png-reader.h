@@ -25,8 +25,16 @@ typedef struct png_read_data {
         char *buf;
         size_t used, capacity;
     } error;
+    // The gamut of the decoded pixels, see docs/wide-gamut-protocol.rst. It is
+    // sRGB unless the caller asks otherwise: with keep_wide_gamut a PNG whose
+    // colors are Display P3 or Rec. 2020 stays in that gamut, and with
+    // convert_to_gamut non-zero every PNG is converted into that gamut
+    bool keep_wide_gamut;
+    uint8_t convert_to_gamut, gamut;
 } png_read_data;
 
 void inflate_png_inner(png_read_data *d, const uint8_t *buf, size_t bufsz, int max_image_dimension);
+// Converts RGB or RGBA pixels in place from one gamut of docs/wide-gamut-protocol.rst to another
+bool convert_pixels_between_gamuts(uint8_t *pixels, size_t num_pixels, bool has_alpha, unsigned from, unsigned to);
 const char *png_from_32bit_rgba(const char *data, size_t width, size_t height, size_t *out_size, bool flip_vertically);
 const char *png_from_24bit_rgb(const char *data, size_t width, size_t height, size_t *out_size, bool flip_vertically);

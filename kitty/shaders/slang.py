@@ -1526,7 +1526,7 @@ def build_custom_shader_pipeline_ir(pipeline: Pipeline, cache_dir: str, invocati
     pipeline_parts: list[str] = []
     for g_idx, group in enumerate(pipeline['groups']):
         calls = '\n'.join(f'        color = {entry_point(g_idx, i)}(color, t, csd);' for i in range(len(group['shaders'])))
-        calls += '\n        if (convert_to_srgb) color = float4(linear2srgb(color.rgb), color.a);'
+        calls += '\n        if (convert_to_srgb) color = float4(linear2srgb(output_from_extended(color.rgb, wide_gamut)), color.a);'
         prefix = '} else ' if g_idx else ''
         pipeline_parts.append(f'    {prefix}if (group == {g_idx}) {{\n{calls}')
     pipeline_parts.append('    }')
@@ -1573,9 +1573,10 @@ float4 fmain_wrap(
     uniform int group,
     uniform float4 viewport,
     uniform float animation_progress,
-    uniform bool convert_to_srgb
+    uniform bool convert_to_srgb,
+    uniform uint wide_gamut
 ) : SV_Target {
-    return pipeline_fragment_main(texcoord, group, viewport, animation_progress, convert_to_srgb);
+    return pipeline_fragment_main(texcoord, group, viewport, animation_progress, convert_to_srgb, wide_gamut);
 }
         """.replace('MODULE', slot.replace('-', '_')).encode()
 

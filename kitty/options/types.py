@@ -41,6 +41,7 @@ choices_for_tab_switch_strategy = typing.Literal['last', 'left', 'previous', 'ri
 choices_for_terminfo_type = typing.Literal['path', 'direct', 'none']
 choices_for_undercurl_style = typing.Literal['thin-sparse', 'thin-dense', 'thick-sparse', 'thick-dense']
 choices_for_underline_hyperlinks = typing.Literal['hover', 'always', 'never']
+choices_for_wayland_colorspace = typing.Literal['srgb', 'displayp3', 'rec2020', 'auto']
 choices_for_window_logo_position = choices_for_placement_strategy
 choices_for_window_title_bar = typing.Literal['top', 'bottom']
 choices_for_window_title_bar_align = typing.Literal['left', 'center', 'right']
@@ -509,6 +510,7 @@ option_names = (
     'visual_bell_duration',
     'visual_window_select_characters',
     'watcher',
+    'wayland_colorspace',
     'wayland_enable_ime',
     'wayland_titlebar_color',
     'wheel_scroll_min_lines',
@@ -729,6 +731,7 @@ class Options:
     visual_bell_color: kitty.fast_data_types.Color | None = None
     visual_bell_duration: tuple[float, kitty.options.utils.EasingFunction, kitty.options.utils.EasingFunction] = (0.0, kitty.options.utils.EasingFunction(), kitty.options.utils.EasingFunction())
     visual_window_select_characters: str = '1234567890ABCDEFGHIJKLMNOPQRSTUVWXYZ'
+    wayland_colorspace: choices_for_wayland_colorspace = 'srgb'
     wayland_enable_ime: bool = True
     wayland_titlebar_color: int = 0
     wheel_scroll_min_lines: int = 1

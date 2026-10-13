@@ -452,6 +452,15 @@ macos_colorspace(PyObject *csname) {
     return 0;
 }
 
+// A gamut id of docs/wide-gamut-protocol.rst, or 3 for the widest the display shows
+static inline int
+wayland_colorspace(PyObject *csname) {
+    if (PyUnicode_CompareWithASCIIString(csname, "displayp3") == 0) return 1;
+    if (PyUnicode_CompareWithASCIIString(csname, "rec2020") == 0) return 2;
+    if (PyUnicode_CompareWithASCIIString(csname, "auto") == 0) return 3;
+    return 0;
+}
+
 static inline void
 free_url_prefixes(Options *opts) {
     opts->url_prefixes.num = 0;

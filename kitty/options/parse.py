@@ -1542,6 +1542,14 @@ class Parser:
         for k, v in store_multiple(val, ans["watcher"]):
             ans["watcher"][k] = v
 
+    def wayland_colorspace(self, val: str, ans: dict[str, typing.Any]) -> None:
+        val = val.lower()
+        if val not in self.choices_for_wayland_colorspace:
+            raise ValueError(f"The value {val} is not a valid choice for wayland_colorspace")
+        ans["wayland_colorspace"] = val
+
+    choices_for_wayland_colorspace = frozenset(('srgb', 'displayp3', 'rec2020', 'auto'))
+
     def wayland_enable_ime(self, val: str, ans: dict[str, typing.Any]) -> None:
         ans['wayland_enable_ime'] = to_bool(val)
 

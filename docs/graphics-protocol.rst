@@ -290,7 +290,8 @@ RGB and RGBA data
 ~~~~~~~~~~~~~~~~~~~
 
 In these formats the pixel data is stored directly as 3 or 4 bytes per pixel,
-respectively. The colors in the data **must** be in the *sRGB color space*.  When
+respectively. The colors in the data **must** be in the *sRGB color space*,
+unless the ``G`` key names a wider gamut, see :doc:`wide-gamut-protocol`.  When
 specifying images in this format, the image dimensions **must** be sent in the
 control data. For example::
 
@@ -1160,6 +1161,8 @@ Key      Value                 Default    Description
                                           the image.
 ``T``    ``0, 1``              ``0``      Whether to compress the bright parts of an HDR image into the range the
                                           display can show, see the :doc:`hdr-protocol`.
+``G``    ``0, 1, 2``           ``0``      The gamut the pixel data is in: sRGB, Display P3 or Rec. 2020, see
+                                          :doc:`wide-gamut-protocol`.
 **Keys for image display**
 -----------------------------------------------------------
 ``x``    Positive integer      ``0``      The left edge (in pixels) of the image area to display
