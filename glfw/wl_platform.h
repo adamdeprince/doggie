@@ -425,6 +425,8 @@ typedef struct _GLFWlibraryWayland {
         // The time of the latest wl_touch event, in milliseconds of the compositor clock
         uint32_t last_event_time;
         bool has_event_time;
+        // The compositor has sent the shape of a contact, which not every one does
+        bool shape_seen;
     } touch_state;
     struct wl_data_device_manager *dataDeviceManager;
     struct wl_data_device *dataDevice;

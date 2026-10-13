@@ -503,6 +503,7 @@ touchHandleCancel(void *data UNUSED, struct wl_touch *wl_touch UNUSED) {
 // they belong to, and are reported with it
 static void
 touchHandleShape(void *data UNUSED, struct wl_touch *wl_touch UNUSED, int32_t id, wl_fixed_t major, wl_fixed_t minor) {
+    touch.shape_seen = true;
     const ssize_t i = touch_point_index(id);
     if (i < 0) return;
     touch.points[i].major = wl_fixed_to_double(major);

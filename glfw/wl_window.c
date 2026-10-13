@@ -1805,8 +1805,10 @@ _glfwPlatformGetDoubleClickInterval(_GLFWwindow *window UNUSED) {
 
 unsigned
 _glfwPlatformGetPointerInputClasses(void) {
-    // Tools and pads need the compositor to have the tablet protocol. A touchscreen is reported through the core protocol
-    return (_glfw.wl.tablet_manager ? GLFW_POINTER_INPUT_TOOLS | GLFW_POINTER_INPUT_PADS : 0) | GLFW_POINTER_INPUT_TOUCHSCREEN | GLFW_POINTER_INPUT_TOUCH_SHAPE;
+    // Tools and pads need the compositor to have the tablet protocol. A touchscreen is reported through the core protocol,
+    // which has the shape of a contact too, but a compositor need not send it and nothing says whether it will
+    return (_glfw.wl.tablet_manager ? GLFW_POINTER_INPUT_TOOLS | GLFW_POINTER_INPUT_PADS : 0) | GLFW_POINTER_INPUT_TOUCHSCREEN |
+           (_glfw.wl.touch_state.shape_seen ? GLFW_POINTER_INPUT_TOUCH_SHAPE : 0);
 }
 
 void

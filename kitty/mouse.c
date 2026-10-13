@@ -1905,7 +1905,7 @@ pointer_caps(void) {
 #ifdef __APPLE__
     unsigned caps = 1 | 4 | 32;
 #else
-    unsigned caps = global_state.is_wayland ? 1 | 2 | 8 : 1;
+    unsigned caps = global_state.is_wayland ? 1 | 2 : 1;
 #endif
     // No window system is loaded when the tests run
     if (glfwGetPointerInputClasses) caps = glfwGetPointerInputClasses();

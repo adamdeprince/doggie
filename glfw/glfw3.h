@@ -737,7 +737,8 @@ typedef enum GLFWPointerInputClass {
     GLFW_POINTER_INPUT_TOOLS = 1,
     GLFW_POINTER_INPUT_TOUCHSCREEN = 2,
     GLFW_POINTER_INPUT_TOUCHPAD = 4,
-    // The shape of the contact of a finger
+    // The shape of the contact of a finger. Where the system does not say
+    // whether it reports shapes this is set once it has reported one
     GLFW_POINTER_INPUT_TOUCH_SHAPE = 8,
     GLFW_POINTER_INPUT_PADS = 16,
     GLFW_POINTER_INPUT_TOOL_ACTIONS = 32,

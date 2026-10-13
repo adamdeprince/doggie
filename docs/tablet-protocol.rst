@@ -68,8 +68,12 @@ answers::
 ======= ===================================================================
 
 It describes the terminal on the system it runs on, not the hardware
-attached right now. What goes beyond tools and fingers, the last four, is
-sent only when asked for with the mode. ``mode`` is the current state of the
+attached right now. A bit is set only for what the terminal knows it can
+report. Where the system does not say beforehand whether it gives the shape
+of a contact, bit ``8`` stays clear until a contact has had one, so a
+program does not wait for the bit: a report has a shape when its ``valid``
+says so. What goes beyond tools and fingers, the last four, is sent only
+when asked for with the mode. ``mode`` is the current state of the
 mode described below. ``w,h`` are the size of the cell area in pixels (1 to
 65535) and ``cw,ch`` the cell size (1 to 4096). A program queries again
 after a resize. A terminal that does not support the protocol ignores the
@@ -520,8 +524,9 @@ and touch events in whole milliseconds.
 * On Wayland, tools come through the ``tablet-v2`` protocol, which reports
   every measurement above, identifies the tool and names the tablet, and
   fingers through ``wl_touch``, with ``shape`` and ``orientation`` on a seat
-  of version 6 or later (``caps`` claims the shape on every Wayland seat; on
-  an older one the shape measurement is simply absent). The pointer cursor
+  of version 6 or later whose compositor sends them, which sway and GNOME
+  did not when this was written; ``caps`` claims the shape once a contact
+  has had one. The pointer cursor
   follows a tool only on compositors with ``cursor-shape-v1``. GNOME applies
   its own stylus button mapping first (by default the lower button is the
   middle button), sway passes the buttons through. Pads come through
