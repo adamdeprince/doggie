@@ -117,10 +117,11 @@ hex::
     <ESC>P+q6b697474792d71756572792d6864725f68656164726f6f6d<ESC>\
 
 The headroom changes over time, so re-query it before relying on a value
-obtained a while ago. No notification of changes is sent. On macOS the
-display fades its extended range in over the first second or so after an HDR
-window appears, so a value obtained at startup is often smaller than one
-obtained a moment later.
+obtained a while ago. This query sends no notification of changes; a program
+that wants to be told turns on the events of the :doc:`display-protocol`,
+whose ``headroom`` field is the same value. On macOS the display fades its
+extended range in over the first second or so after an HDR window appears, so
+a value obtained at startup is often smaller than one obtained a moment later.
 
 Configuration
 ----------------

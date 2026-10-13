@@ -149,4 +149,6 @@ Configuration
 The operating system reports most of these values, but not all. Nothing tells
 a terminal that it is on e-ink, so in kitty the :opt:`display_info` option
 declares whatever the OS cannot, overriding detection. Currently, kitty reports
-``kind`` and ``gamut`` only on macOS, and ``headroom`` is always ``1``.
+``kind`` and ``gamut`` only on macOS. ``headroom`` is the headroom of the
+:doc:`hdr-protocol`, after the cap of :opt:`hdr_max_headroom`, so it is ``1``
+unless :opt:`hdr` is enabled, which so far only macOS supports.
