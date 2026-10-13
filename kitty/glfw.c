@@ -942,6 +942,17 @@ touch_callback(GLFWwindow *w, const GLFWTouchEvent *ev) {
     global_state.callback_os_window = NULL;
 }
 
+static void
+tablet_pad_callback(GLFWwindow *w, const GLFWTabletPadEvent *ev) {
+    if (!set_callback_window(w)) return;
+    const bool reported = is_window_ready_for_callbacks() && tablet_pad_event(ev);
+    debug_input(
+        "\x1b[33mTablet pad\x1b[m type: %d device: %llu index: %u pressed: %d value: %.3f stopped: %d delta: %d mode: %u reported: %d\n",
+        ev->type, (unsigned long long)ev->device, ev->index, ev->pressed, ev->value, ev->stopped, ev->delta, ev->mode, reported);
+    if (reported) request_tick_callback();
+    global_state.callback_os_window = NULL;
+}
+
 static bool
 tablet_callback(GLFWwindow *w, const GLFWTabletEvent *ev) {
     if (!set_callback_window(w)) return false;
@@ -2535,6 +2546,7 @@ create_os_window(PyObject UNUSED *self, PyObject *args, PyObject *kw) {
     glfwSetScrollCallback(glfw_window, scroll_callback);
     glfwSetTouchCallback(glfw_window, touch_callback);
     glfwSetTabletCallback(glfw_window, tablet_callback);
+    glfwSetTabletPadCallback(glfw_window, tablet_pad_callback);
     glfwSetKeyboardCallback(glfw_window, key_callback);
 
     glfwSetDragSourceCallback(glfw_window, drag_source_callback);
