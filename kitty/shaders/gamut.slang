@@ -8,6 +8,12 @@ module gamut;
 // docs/wide-gamut-protocol.rst, and the last one, which only a window has:
 // its colorspace is whatever the display is, so nothing is converted for it.
 public static const uint GAMUT_SRGB = 0, GAMUT_DISPLAY_P3 = 1, GAMUT_REC2020 = 2, GAMUT_UNMANAGED = 3;
+// Added to the gamut of a window in which untagged colors are sRGB whatever
+// the gamut of the window is, so that they look as they do in an sRGB window.
+// Such a window is drawn in linear sRGB that extends below zero and above one
+// to reach the colors outside sRGB, and everything is converted to the gamut
+// of the window at the very end, by output_from_extended().
+public static const uint GAMUT_EXTENDED = 4;
 
 // Linear RGB of each gamut to CIE XYZ and back, all with the D65 white point
 static const float3x3 gamut_to_xyz[3] = {
@@ -24,9 +30,23 @@ static const float3x3 xyz_to_gamut[3] = {
 // A linear color tagged with a gamut, as the window draws it. An untagged
 // color is the colorspace of the window, as it always was, so it and a color
 // already in the gamut of the window are passed through untouched. Anything
-// else is converted to the gamut of the window and clipped to it.
+// else is converted to the gamut of the window and clipped to it. In a window
+// drawn in extended sRGB a tagged color is brought into the gamut of the
+// window in the same way and then written in the sRGB primaries, unclipped.
 public float3
 convert_from_gamut(float3 c, uint gamut, uint output_gamut) {
     if (gamut == GAMUT_SRGB || gamut == output_gamut || output_gamut == GAMUT_UNMANAGED) return c;
-    return clamp(mul(xyz_to_gamut[output_gamut], mul(gamut_to_xyz[gamut], c)), 0.f, 1.f);
+    if ((output_gamut & GAMUT_EXTENDED) == 0u) return clamp(mul(xyz_to_gamut[output_gamut], mul(gamut_to_xyz[gamut], c)), 0.f, 1.f);
+    uint window_gamut = output_gamut & 3u;
+    if (gamut != window_gamut) c = clamp(mul(xyz_to_gamut[window_gamut], mul(gamut_to_xyz[gamut], c)), 0.f, 1.f);
+    return mul(xyz_to_gamut[GAMUT_SRGB], mul(gamut_to_xyz[window_gamut], c));
+}
+
+// The last step for a window drawn in extended sRGB: a linear color in the
+// sRGB primaries becomes one in the gamut of the window, clipped to it. Any
+// other window is left as it is.
+public float3
+output_from_extended(float3 c, uint output_gamut) {
+    if ((output_gamut & GAMUT_EXTENDED) == 0u) return c;
+    return clamp(mul(xyz_to_gamut[output_gamut & 3u], mul(gamut_to_xyz[GAMUT_SRGB], c)), 0.f, 1.f);
 }

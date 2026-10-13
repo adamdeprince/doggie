@@ -110,8 +110,29 @@ Display P3 and Rec. 2020 colors are clipped to sRGB, with ``displayp3``
 Display P3 colors are shown as they are and Rec. 2020 colors are clipped to
 Display P3, while untagged colors keep being interpreted as Display P3, as
 that option has always done. With ``default`` the window is in the native
-colorspace of the display and every color is passed through unconverted. On
-other platforms the window draws in sRGB.
+colorspace of the display and every color is passed through unconverted.
+
+On Wayland the window draws in sRGB unless :opt:`wayland_colorspace` asks for
+``displayp3``, ``rec2020`` or ``auto`` and the compositor implements color
+management, the ``color-management-v1`` protocol. The compositor is then told
+that the window is in that gamut, and colors and images tagged with a gamut
+are converted to it: in a ``displayp3`` window Display P3 colors are shown as
+they are and Rec. 2020 colors are clipped to Display P3. Unlike on macOS,
+untagged colors stay sRGB: they are converted to the gamut of the window as
+well, so everything that does not ask for a wider gamut looks as it does in
+an sRGB window. ``auto`` picks the widest of the three gamuts whose primaries
+the display reaches, going by what the compositor reports for it. The option
+takes effect on existing windows when the configuration is reloaded.
+
+The window is declared to the compositor with the primaries of its gamut and
+a gamma of 2.2, the display the colors of a terminal are made for and what a
+compositor takes a window that declares nothing to be. Grays therefore have
+the same values in a wide window as in an sRGB one. The conversion between
+primaries is done in the linear light of the sRGB curve, as all blending in
+kitty is, which can move a saturated untagged color by one step in 255 from
+what an sRGB window shows. A compositor that offers no gamma of 2.2 is given
+the sRGB curve instead. On a compositor without the protocol, and on X11, the
+window draws in sRGB.
 
 The profile of a PNG is taken to be Display P3 or Rec. 2020 when each of its
 three primaries is within 0.005 in x and in y of the primary of that gamut,

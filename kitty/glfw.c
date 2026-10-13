@@ -458,6 +458,111 @@ dpi_change_callback(GLFWwindow *w, float x_scale UNUSED, float y_scale UNUSED) {
     request_tick_callback();
 }
 
+// A wide window on Wayland {{{
+
+// Is the point p inside the triangle abc, with a little room around it
+static bool
+chromaticity_in_triangle(const float *p, const float *a, const float *b, const float *c) {
+#define side(u, v) ((p[0] - v[0]) * (u[1] - v[1]) - (u[0] - v[0]) * (p[1] - v[1]))
+    const float d1 = side(a, b), d2 = side(b, c), d3 = side(c, a), room = 2e-4f;
+#undef side
+    return !((d1 < -room || d2 < -room || d3 < -room) && (d1 > room || d2 > room || d3 > room));
+}
+
+// The widest gamut of docs/wide-gamut-protocol.rst whose three primaries the
+// display can show, going by the colors the compositor says it reaches
+static uint8_t
+widest_gamut_shown(const GLFWcolordescription *d) {
+    static const float primaries[][6] = {
+        [GAMUT_DISPLAY_P3] = {0.680f, 0.320f, 0.265f, 0.690f, 0.150f, 0.060f},
+        [GAMUT_REC2020] = {0.708f, 0.292f, 0.170f, 0.797f, 0.131f, 0.046f},
+    };
+    const float *shown = d->target_chromaticities;
+    bool known = false;
+    for (int i = 0; i < 6 && !known; i++) known = shown[i] != 0;
+    if (!known) shown = d->chromaticities;
+    for (uint8_t gamut = GAMUT_REC2020; gamut >= GAMUT_DISPLAY_P3; gamut--) {
+        const float *p = primaries[gamut];
+        if (chromaticity_in_triangle(p, shown, shown + 2, shown + 4) && chromaticity_in_triangle(p + 2, shown, shown + 2, shown + 4) &&
+            chromaticity_in_triangle(p + 4, shown, shown + 2, shown + 4))
+            return gamut;
+    }
+    return 0;
+}
+
+// The gamut the user wants this window drawn in, an id of
+// docs/wide-gamut-protocol.rst, zero being the sRGB a window always was
+static uint8_t
+gamut_wanted_for_os_window(OSWindow *w) {
+    const uint8_t wanted = (uint8_t)OPT(wayland_colorspace);
+    if (wanted <= GAMUT_REC2020) return wanted;
+    // auto
+    GLFWcolordescription shown;
+    return glfwGetWindowPreferredColorDescription(w->handle, &shown) ? widest_gamut_shown(&shown) : 0;
+}
+
+// How a window in a gamut is described to the compositor. A surface has a
+// single description, so this is the one place the primaries of a window are
+// chosen: whatever else has a say in the description, a window that shows
+// more than SDR white for instance, starts from what this returns for
+// OSWindow.wide_gamut and changes the curve and the luminances.
+//
+// What is drawn is sRGB encoded: linear values go through the two piece curve
+// of sRGB on their way to the window. That curve is how the colors were
+// encoded, not how they are meant to be shown. They are made on and for
+// displays with a gamma of 2.2, which is what compositors take a window
+// without a description to be, and what the protocol says to declare for
+// computer graphics. So the window is declared as gamma 2.2: grays come out
+// with the very values they have in an sRGB window and the compositor has
+// nothing to change in them. Declaring the two piece curve would have the
+// compositor lift every dark tone on its way to a gamma 2.2 display. The
+// price is that the change of primaries is done in light that is linear for
+// the two piece curve rather than for the declared one, which can move a
+// saturated untagged color by a step in 255.
+static GLFWcolordescription
+color_description_for_gamut(uint8_t gamut) {
+    static const GLFWcolorprimaries primaries[] = {
+        [0] = GLFW_COLOR_PRIMARIES_SRGB,
+        [GAMUT_DISPLAY_P3] = GLFW_COLOR_PRIMARIES_DISPLAY_P3,
+        [GAMUT_REC2020] = GLFW_COLOR_PRIMARIES_BT2020,
+    };
+    return (GLFWcolordescription){.primaries = primaries[gamut < arraysz(primaries) ? gamut : 0], .transfer = GLFW_COLOR_TRANSFER_GAMMA22};
+}
+
+// Tells the compositor that the window is in the wide gamut the user asked
+// for with wayland_colorspace, or that it no longer is, and returns whether
+// that changed, which changes how the window has to be drawn: see
+// GAMUT_EXTENDED in shaders/gamut.slang. Called before a frame is drawn.
+bool
+update_os_window_colorspace(OSWindow *w) {
+    if (!global_state.is_wayland || !w->handle) return false;
+    const uint8_t wanted = gamut_wanted_for_os_window(w);
+    if (wanted == w->wide_gamut) return false;
+    if (wanted && wanted == w->refused_wide_gamut) return false;
+    const uint8_t before = w->wide_gamut;
+    w->wide_gamut = 0;
+    w->refused_wide_gamut = 0;
+    if (wanted && wide_gamut_can_be_drawn()) {
+        GLFWcolordescription desc = color_description_for_gamut(wanted);
+        bool accepted = glfwSetWindowColorDescription(w->handle, &desc, GLFW_COLOR_INTENT_PERCEPTUAL);
+        if (!accepted) {
+            // The two piece curve itself, where gamma 2.2 is not on offer
+            desc.transfer = GLFW_COLOR_TRANSFER_SRGB;
+            accepted = glfwSetWindowColorDescription(w->handle, &desc, GLFW_COLOR_INTENT_PERCEPTUAL);
+        }
+        if (accepted) w->wide_gamut = wanted;
+    }
+    if (wanted && !w->wide_gamut) {
+        // Not asked for again until something else is wanted
+        w->refused_wide_gamut = wanted;
+        debug("The window %llu stays sRGB, the compositor does not take a description for gamut %u\n", w->id, wanted);
+    }
+    if (before && !w->wide_gamut) glfwSetWindowColorDescription(w->handle, NULL, GLFW_COLOR_INTENT_PERCEPTUAL);
+    if (before != w->wide_gamut) debug("The window %llu is now drawn in gamut %u\n", w->id, w->wide_gamut);
+    return before != w->wide_gamut;
+}
+// }}}
+
 static void
 refresh_callback(GLFWwindow *w) {
     if (!set_callback_window(w)) return;

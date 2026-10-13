@@ -59,10 +59,22 @@ linear2srgb(float3 x) { // vector
     return lerp(lower, upper, step(float3(0.0031308f), x));
 }
 
+// A window in a wide gamut is drawn in linear sRGB that extends beyond zero
+// and one, see gamut.slang. Its colors are brought to the gamut of the window,
+// 1 for Display P3 and 2 for Rec. 2020, before they are encoded. Zero is any
+// other window, which is left as it is.
+float3
+output_from_extended(float3 c, uint wide_gamut) {
+    if (wide_gamut == 1u) c = mul(float3x3(0.8224621, 0.1775380, 0.0000000, 0.0331941, 0.9668058, 0.0000000, 0.0170827, 0.0723974, 0.9105199), c);
+    else if (wide_gamut == 2u) c = mul(float3x3(0.6274039, 0.3292830, 0.0433131, 0.0690973, 0.9195404, 0.0113623, 0.0163914, 0.0880133, 0.8955953), c);
+    else return c;
+    return clamp(c, 0.f, 1.f);
+}
+
 uniform Sampler2D backbuffer, a, b, persist;
 
 public float4
-pipeline_fragment_main(float2 backbuffer_pos, int group, float4 viewport, float animation_progress, bool convert_to_srgb) {
+pipeline_fragment_main(float2 backbuffer_pos, int group, float4 viewport, float animation_progress, bool convert_to_srgb, uint wide_gamut) {
     float4 color = backbuffer.Sample(backbuffer_pos); // pre multiplied linear RGB
     color = float4(color.rgb / color.a, color.a);     // un pre multiplied color passed through pipeline
     // src_rect encodes (0, sy, sx, 0) — the fraction of the shared texture occupied by the current

@@ -48,7 +48,8 @@ primaries_of_profile(cmsHPROFILE profile, double xy[6]) {
     if (cmsGetColorSpace(profile) != cmsSigRgbData) return false;
     cmsHPROFILE xyz_profile = cmsCreateXYZProfile();
     if (!xyz_profile) return false;
-    cmsHTRANSFORM t = cmsCreateTransform(profile, TYPE_RGB_DBL, xyz_profile, TYPE_XYZ_DBL, INTENT_RELATIVE_COLORIMETRIC, cmsFLAGS_NOOPTIMIZE | cmsFLAGS_NOCACHE);
+    const cmsUInt32Number flags = cmsFLAGS_NOOPTIMIZE | cmsFLAGS_NOCACHE;
+    cmsHTRANSFORM t = cmsCreateTransform(profile, TYPE_RGB_DBL, xyz_profile, TYPE_XYZ_DBL, INTENT_RELATIVE_COLORIMETRIC, flags);
     cmsCloseProfile(xyz_profile);
     if (!t) return false;
     static const double rgb[9] = {1, 0, 0, 0, 1, 0, 0, 0, 1};

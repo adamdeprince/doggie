@@ -156,7 +156,7 @@ typedef struct Options {
         double outer, inner;
     } tab_bar_margin_height;
     long macos_menubar_title_max_length;
-    int macos_colorspace;
+    int macos_colorspace, wayland_colorspace;
     struct {
         float val;
         AdjustmentUnit unit;
@@ -555,6 +555,10 @@ typedef struct OSWindow {
     uint32_t persist_texture_id, persist_fbo_id, persist_texture_generation;
     unsigned int active_tab, num_tabs, capacity, last_active_tab, last_num_tabs, last_active_window_id;
     bool focused_at_last_render, needs_render, needs_layers;
+    // On Wayland, the wide gamut the compositor has been told the window is
+    // in, zero while it is the sRGB it always was, and the gamut that was
+    // asked for and not to be had, see update_os_window_colorspace()
+    uint8_t wide_gamut, refused_wide_gamut;
     unsigned keep_rendering_till_swap;
     WindowRenderData tab_bar_render_data;
     struct {
@@ -683,6 +687,7 @@ typedef struct GlobalState {
         uint32_t extra_texture_id, extra_texture_setup_fbo_id;
         uint32_t texture_a_id, texture_a_fbo_id;
         uint32_t texture_b_id, texture_b_fbo_id;
+        bool is_float;
     } layers_render_texture;
 } GlobalState;
 
@@ -803,6 +808,8 @@ bool custom_shader_needs_render(const ShaderAnimState *before, const ShaderAnimS
 void swap_window_buffers(OSWindow *w);
 void take_screenshot_of_rectangular_region(OSWindow *os_window, Region region, unsigned char *dst_buf, unsigned *thumb_w, unsigned *thumb_h, bool no_scaling);
 bool current_framebuffer_is_ok(void);
+bool update_os_window_colorspace(OSWindow *w);
+bool wide_gamut_can_be_drawn(void);
 void request_drop_status_update(OSWindow *osw);
 void register_mimes_for_drop(OSWindow *w, const char **mimes, size_t sz);
 int request_drop_data(OSWindow *w, id_type wid, const char *mime);
