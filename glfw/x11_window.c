@@ -457,8 +457,64 @@ disableRawMouseMotion(_GLFWwindow *window UNUSED) {
     XISelectEvents(_glfw.x11.display, _glfw.x11.root, &em, 1);
 }
 
+// Whether the X server delivers the touchpad gestures of XI 2.4
+//
+static bool
+hasGestureEvents(void) {
+#ifdef XI_GesturePinchBegin
+    return _glfw.x11.xi.available && (_glfw.x11.xi.major > 2 || (_glfw.x11.xi.major == 2 && _glfw.x11.xi.minor >= 4));
+#else
+    return false;
+#endif
+}
+
+// Select the events that arrive through the master pointer on a window: the
+// fingers on a touchscreen and the gestures on a touchpad. A selection replaces
+// the one made before for the same device on the window, so both go in one
+// request. A window that takes the fingers is not also sent the pointer events
+// the server would otherwise make from them, and the three events of a gesture
+// have to be selected together
+//
+static void
+selectMasterDeviceEvents(_GLFWwindow *window) {
+#ifdef XI_GesturePinchBegin
+    unsigned char mask[XIMaskLen(XI_GestureSwipeEnd)] = {0};
+#else
+    unsigned char mask[XIMaskLen(XI_TouchEnd)] = {0};
+#endif
+    XIEventMask em = {.deviceid = XIAllMasterDevices, .mask_len = sizeof(mask), .mask = mask};
+    const bool has_touch = _glfw.x11.xi.major > 2 || (_glfw.x11.xi.major == 2 && _glfw.x11.xi.minor >= 2);
+    if (!has_touch && !hasGestureEvents()) return;
+    for (int with_touch = has_touch && _glfw.x11.xi.num_touch_devices ? 1 : 0; with_touch >= 0; with_touch--) {
+        memset(mask, 0, sizeof(mask));
+        if (with_touch) {
+            XISetMask(mask, XI_TouchBegin);
+            XISetMask(mask, XI_TouchUpdate);
+            XISetMask(mask, XI_TouchEnd);
+        }
+#ifdef XI_GesturePinchBegin
+        if (hasGestureEvents()) {
+            XISetMask(mask, XI_GesturePinchBegin);
+            XISetMask(mask, XI_GesturePinchUpdate);
+            XISetMask(mask, XI_GesturePinchEnd);
+            XISetMask(mask, XI_GestureSwipeBegin);
+            XISetMask(mask, XI_GestureSwipeUpdate);
+            XISetMask(mask, XI_GestureSwipeEnd);
+        }
+#endif
+        // Only one client can take the touches of a window, so this can fail,
+        // and then the gestures are asked for alone. A refusal of those leaves
+        // the window without gestures, which is not an error
+        _glfwGrabErrorHandlerX11();
+        XISelectEvents(_glfw.x11.display, window->x11.handle, &em, 1);
+        _glfwReleaseErrorHandlerX11();
+        if (_glfw.x11.errorCode == Success) break;
+    }
+}
+
 // Select XI2 smooth scrolling events on a window if there are scroll devices,
-// otherwise deselect them
+// otherwise deselect them, and with them the events of the other devices,
+// since all of them are selected again when a device comes or goes
 //
 static void
 updateSmoothScrolling(_GLFWwindow *window) {
@@ -484,63 +540,7 @@ updateSmoothScrolling(_GLFWwindow *window) {
         XISelectEvents(_glfw.x11.display, window->x11.handle, &tem, 1);
     }
 
-    // The fingers on a touchscreen arrive through the master pointer it is
-    // attached to. A window that takes them is not also sent the pointer
-    // events the server would otherwise make from them
-    if (_glfw.x11.xi.major > 2 || _glfw.x11.xi.minor >= 2) {
-        unsigned char touch_mask[XIMaskLen(XI_TouchEnd)] = {0};
-        XIEventMask touch_em = {.deviceid = XIAllMasterDevices, .mask_len = sizeof(touch_mask), .mask = touch_mask};
-        if (_glfw.x11.xi.num_touch_devices) {
-            XISetMask(touch_mask, XI_TouchBegin);
-            XISetMask(touch_mask, XI_TouchUpdate);
-            XISetMask(touch_mask, XI_TouchEnd);
-        }
-        // Only one client can take the touches of a window, so this can fail
-        _glfwGrabErrorHandlerX11();
-        XISelectEvents(_glfw.x11.display, window->x11.handle, &touch_em, 1);
-        _glfwReleaseErrorHandlerX11();
-    }
-}
-
-// Whether the X server delivers the touchpad gestures of XI 2.4
-//
-static bool
-hasGestureEvents(void) {
-#ifdef XI_GesturePinchBegin
-    return _glfw.x11.xi.available && (_glfw.x11.xi.major > 2 || (_glfw.x11.xi.major == 2 && _glfw.x11.xi.minor >= 4));
-#else
-    return false;
-#endif
-}
-
-// Select the touchpad gesture events on a window. They are delivered through
-// the master pointer, and the three events of a gesture have to be selected
-// together
-//
-static void
-selectGestureEvents(_GLFWwindow *window) {
-#ifdef XI_GesturePinchBegin
-    if (!hasGestureEvents()) return;
-    XIEventMask em;
-    unsigned char mask[XIMaskLen(XI_GestureSwipeEnd)] = {0};
-
-    em.deviceid = XIAllMasterDevices;
-    em.mask_len = sizeof(mask);
-    em.mask = mask;
-    XISetMask(mask, XI_GesturePinchBegin);
-    XISetMask(mask, XI_GesturePinchUpdate);
-    XISetMask(mask, XI_GesturePinchEnd);
-    XISetMask(mask, XI_GestureSwipeBegin);
-    XISetMask(mask, XI_GestureSwipeUpdate);
-    XISetMask(mask, XI_GestureSwipeEnd);
-
-    // A refusal leaves the window without gestures, which is not an error
-    _glfwGrabErrorHandlerX11();
-    XISelectEvents(_glfw.x11.display, window->x11.handle, &em, 1);
-    _glfwReleaseErrorHandlerX11();
-#else
-    (void)window;
-#endif
+    selectMasterDeviceEvents(window);
 }
 
 // Return true if the core wheel button event was emulated by the X server from
@@ -956,7 +956,6 @@ createNativeWindow(_GLFWwindow *window, const _GLFWwndconfig *wndconfig, Visual 
 
     // Enable XI2 smooth scrolling if available
     updateSmoothScrolling(window);
-    selectGestureEvents(window);
 
     return true;
 }
