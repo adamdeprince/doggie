@@ -15,13 +15,17 @@ compares with the client's log.
 
 import argparse
 import json
+import os
 import socket
+import sys
 import time
 from collections.abc import Callable
 from typing import IO, Any
 
-BTN_LEFT, BTN_RIGHT, BTN_MIDDLE = 0x110, 0x111, 0x112
+BTN_LEFT, BTN_RIGHT, BTN_MIDDLE, BTN_SIDE, BTN_EXTRA = 0x110, 0x111, 0x112, 0x113, 0x114
 BTN_STYLUS3, BTN_STYLUS, BTN_STYLUS2 = 0x149, 0x14B, 0x14C
+SHIFT, CONTROL, ALT, SUPER = 1, 4, 8, 64  # the modifier masks of the default XKB keymap
+FINGER = 1  # the source of a ring or strip event, and of a scroll made on a touchpad
 
 # Tablets, tools and pads. A serial and a hardware id stay with the pen, whichever tablet it is used on
 DEVICES: dict[str, dict[str, Any]] = {
@@ -29,10 +33,11 @@ DEVICES: dict[str, dict[str, Any]] = {
     'tablet:intuos5': {'name': 'Wacom Intuos5 touch M Pen', 'vid': 0x56A, 'pid': 0x27, 'bustype': 3, 'paths': ['/dev/input/event90']},
     'tool:pen': {'type': 'pen', 'serial': 578837976, 'hwid': 0x802, 'caps': ['pressure', 'distance', 'tilt']},
     'tool:eraser': {'type': 'eraser', 'serial': 578837976, 'hwid': 0x80A, 'caps': ['pressure', 'distance', 'tilt']},
-    # the Art Pen turns, the Airbrush has a wheel, the lens cursor is a puck with a wheel
+    # the Art Pen turns, the Airbrush has a wheel, the lens cursor is a puck with buttons and a wheel
     'tool:artpen': {'type': 'pen', 'serial': 0x4100B0A1, 'hwid': 0x804, 'caps': ['pressure', 'distance', 'tilt', 'rotation']},
     'tool:airbrush': {'type': 'airbrush', 'serial': 0x4100B0A2, 'hwid': 0x902, 'caps': ['pressure', 'distance', 'tilt', 'slider']},
     'tool:lens': {'type': 'lens', 'serial': 0x4100B0A3, 'hwid': 0x96, 'caps': ['wheel']},
+    'tool:spare': {'type': 'pen', 'serial': 0x4100B0A4, 'hwid': 0x802, 'caps': ['pressure', 'distance', 'tilt']},
     'pad:intuos5': {'buttons': 9, 'paths': ['/dev/input/event91'], 'groups': [{'buttons': list(range(9)), 'rings': 1, 'modes': 4}]},
     # libinput: litest-device-wacom-intuos3-pad.c, the small Intuos3 has four keys and one strip
     'pad:intuos3': {'buttons': 4, 'paths': ['/dev/input/event92'], 'groups': [{'buttons': [0, 1, 2, 3], 'strips': 1, 'modes': 1}]},
@@ -42,6 +47,12 @@ DEVICES: dict[str, dict[str, Any]] = {
     'tablet:cintiq': {'name': 'Wacom Cintiq Pro 16 Pen', 'vid': 0x56A, 'pid': 0x350, 'bustype': 3, 'paths': ['/dev/input/event94']},
     'tool:propen': {'type': 'pen', 'serial': 297797542, 'hwid': 0x823, 'caps': ['pressure', 'distance', 'tilt']},
 }
+TOOL_NUMBERS = {'pen': 1, 'eraser': 2, 'brush': 3, 'pencil': 4, 'airbrush': 5, 'mouse': 6, 'lens': 7}
+VALID_BITS = {'pressure': 1, 'tilt': 2, 'rotation': 4, 'slider': 8, 'distance': 32, 'wheel': 64}
+
+
+class Died(Exception):
+    pass
 
 
 class Rig:
@@ -56,6 +67,8 @@ class Rig:
         self.sock.sendall(json.dumps(cmd).encode() + b'\n')
         ans: dict[str, Any] = json.loads(self.reader.readline())
         if not ans.pop('ok'):
+            if 'no client is connected' in ans['error']:
+                raise Died()
             raise RuntimeError(f'{cmd}: {ans["error"]}')
         return ans
 
@@ -65,7 +78,11 @@ class Rig:
     def expect(self, selector: str, note: str, **fields: Any) -> None:
         "A report the program should now get: the fields named must have these values, others are not looked at"
         if self.expectations:
-            self.expectations.write(json.dumps({'selector': selector, 'note': note, 'fields': {k: str(v) for k, v in fields.items()}}) + '\n')
+            self.mark(selector=selector, note=note, fields={k: str(v) for k, v in fields.items()})
+
+    def mark(self, **what: Any) -> None:
+        if self.expectations:
+            self.expectations.write(json.dumps({**what, 'at': time.monotonic()}) + '\n')
 
     def wait_for_window(self, timeout: float = 20) -> None:
         end = time.monotonic() + timeout
@@ -82,10 +99,9 @@ def px(v: float) -> int:
     return round(v * 256)
 
 
-# Sequences {{{
 def setup(rig: Rig) -> None:
     "The tablets and tools, and the keyboard and pointer focus a compositor gives the only window"
-    # Pads are plugged in by the sequences that use them, so that a terminal
+    # Pads are plugged in by the sequence that uses them, so that a terminal
     # that cannot cope with a pad still gets through the others
     for device, d in DEVICES.items():
         if not device.startswith('pad:'):
@@ -96,56 +112,60 @@ def setup(rig: Rig) -> None:
     time.sleep(0.2)
 
 
-def tool_stroke(rig: Rig, tool: str = 'pen', tablet: str = 'intuos5', kind: int = 1, extra: Callable[[int], list[list[Any]]] | None = None) -> None:
-    "A tool comes into proximity, hovers, draws a diagonal with rising pressure and changing tilt, and leaves"
+# Tools {{{
+def tool_number(tool: str) -> int:
+    return TOOL_NUMBERS[DEVICES[f'tool:{tool}']['type']]
+
+
+def tool_valid(tool: str) -> int:
+    return sum(VALID_BITS[c] for c in DEVICES[f'tool:{tool}']['caps'])
+
+
+def tool_axes(
+    tool: str, x: float, y: float, pressure: int = 0, distance: int = 0, tilt: tuple[float, float] = (0, 0), rotation: float = 0, slider: int = 0
+) -> tuple[list[list[Any]], dict[str, Any]]:
+    "The events for one sample of a tool, with the axes it has, and the fields of the report they make"
+    caps = DEVICES[f'tool:{tool}']['caps']
+    events: list[list[Any]] = [['motion', x, y]]
+    fields: dict[str, Any] = {'kind': 1, 'contact': 0, 'x': px(x), 'y': px(y), 'tool': tool_number(tool), 'valid': tool_valid(tool)}
+    if 'pressure' in caps:
+        events.append(['pressure', pressure])
+        fields['p'] = pressure
+    if 'distance' in caps:
+        events.append(['distance', distance])
+        fields['dist'] = distance
+    if 'tilt' in caps:
+        events.append(['tilt', *tilt])
+        fields['tx'], fields['ty'] = round(tilt[0] * 100), round(tilt[1] * 100)
+    if 'rotation' in caps:
+        events.append(['rotation', rotation])
+        fields['twist'] = round(rotation * 100) % 36000
+    if 'slider' in caps:
+        events.append(['slider', slider])
+        fields['tangent'] = slider
+    return events, fields
+
+
+def tool_stroke(rig: Rig, tool: str = 'pen', tablet: str = 'intuos5') -> None:
+    "A tool comes into proximity, hovers, draws a diagonal with every axis changing, and leaves"
     t = f'tool:{tool}'
-    tool_id = {'pen': 1, 'eraser': 2, 'brush': 3, 'pencil': 4, 'airbrush': 5, 'mouse': 6, 'lens': 7}[DEVICES[t]['type']]
-    caps = DEVICES[t]['caps']
-    has = {c: c in caps for c in ('pressure', 'distance', 'tilt')}
     x, y = 100.0, 100.0
 
-    def axes(pressure: int, distance: int, tx: float, ty: float) -> list[list[Any]]:
-        ans: list[list[Any]] = [['motion', x, y]]
-        if has['pressure']:
-            ans.append(['pressure', pressure])
-        if has['distance']:
-            ans.append(['distance', distance])
-        if has['tilt']:
-            ans.append(['tilt', tx, ty])
-        return ans
+    def sample(note: str, phase: int, buttons: int, *first: list[Any], **axes: Any) -> None:
+        events, fields = tool_axes(tool, x, y, **axes)
+        rig.play(t, *first, *events, ['frame', '$time'])
+        rig.expect('tablet-pointer', f'{tool}: {note}', phase=phase, buttons=buttons, **fields)
+        time.sleep(0.008)
 
-    def report(note: str, phase: int, buttons: int, pressure: int, distance: int, tx: float, ty: float) -> None:
-        f: dict[str, Any] = {'kind': 1, 'phase': phase, 'contact': 0, 'x': px(x), 'y': px(y), 'buttons': buttons, 'tool': tool_id}
-        if has['pressure']:
-            f['p'] = pressure
-        if has['distance']:
-            f['dist'] = distance
-        if has['tilt']:
-            f['tx'], f['ty'] = round(tx * 100), round(ty * 100)
-        rig.expect('tablet-pointer', f'{tool}: {note}', **f)
-
-    rig.play(t, ['proximity_in', '$serial', f'tablet:{tablet}', '$surface'], *axes(0, 40000, 0, 0), ['frame', '$time'])
-    report('enters proximity', 0, 0, 0, 40000, 0, 0)
+    sample('enters proximity', 0, 0, ['proximity_in', '$serial', f'tablet:{tablet}', '$surface'], distance=40000)
     for i in range(3):
-        time.sleep(0.008)
         x, y = x + 10, y + 5
-        rig.play(t, *axes(0, 30000 - 10000 * i, 0, 0), ['frame', '$time'])
-        report('hovers', 0, 0, 0, 30000 - 10000 * i, 0, 0)
-    time.sleep(0.008)
-    rig.play(t, ['down', '$serial'], *axes(5000, 0, 10, -5), ['frame', '$time'])
-    report('tip down', 1, 1, 5000, 0, 10, -5)
+        sample('hovers', 0, 0, distance=30000 - 10000 * i)
+    sample('tip down', 1, 1, ['down', '$serial'], pressure=5000, tilt=(10, -5), rotation=350, slider=-60000)
     for i in range(1, 11):
-        time.sleep(0.008)
         x, y = x + 20.25, y + 12.5
-        events = axes(5000 + 6000 * i, 0, 10 + 4 * i, -5 - 3 * i)
-        if extra:
-            events += extra(i)
-        rig.play(t, *events, ['frame', '$time'])
-        report(f'stroke point {i}', 2, 1, 5000 + 6000 * i, 0, 10 + 4 * i, -5 - 3 * i)
-    time.sleep(0.008)
-    rig.play(t, ['up'], *axes(0, 0, 50, -35), ['frame', '$time'])
-    report('tip up', 3, 0, 0, 0, 50, -35)
-    time.sleep(0.008)
+        sample(f'stroke point {i}', 2, 1, pressure=5000 + 6000 * i, tilt=(10 + 4 * i, -5 - 3 * i), rotation=(350 + 7.5 * i) % 360, slider=-60000 + 12000 * i)
+    sample('tip up', 3, 0, ['up'], tilt=(50, -35), rotation=65, slider=60000)
     rig.play(t, ['proximity_out'], ['frame', '$time'])
     rig.expect('tablet-pointer', f'{tool}: leaves proximity', kind=1, phase=5)
     time.sleep(0.1)
@@ -161,16 +181,7 @@ def tool_buttons(rig: Rig, tool: str = 'propen', tablet: str = 'cintiq') -> None
         rig.expect('tablet-pointer', f'{tool}: {note}', kind=1, phase=phase, x=px(x), y=px(y), buttons=buttons)
         time.sleep(0.02)
 
-    step(
-        'enters proximity',
-        0,
-        0,
-        ['proximity_in', '$serial', f'tablet:{tablet}', '$surface'],
-        ['motion', x, y],
-        ['pressure', 0],
-        ['distance', 20000],
-        ['tilt', 0, 0],
-    )
+    step('enters proximity', 0, 0, ['proximity_in', '$serial', f'tablet:{tablet}', '$surface'], *tool_axes(tool, x, y, distance=20000)[0])
     step('lower button while hovering', 0, 2, ['button', '$serial', BTN_STYLUS, 1])
     step('lower button released', 0, 0, ['button', '$serial', BTN_STYLUS, 0])
     step('tip down', 1, 1, ['down', '$serial'], ['pressure', 30000], ['distance', 0])
@@ -184,18 +195,41 @@ def tool_buttons(rig: Rig, tool: str = 'propen', tablet: str = 'cintiq') -> None
     time.sleep(0.1)
 
 
+def puck(rig: Rig, tool: str = 'lens', tablet: str = 'intuos5') -> None:
+    "A lens cursor: no tip, its left button draws, and it has a wheel and four more buttons"
+    t = f'tool:{tool}'
+    x, y = 500.0, 300.0
+    base = {'kind': 1, 'tool': tool_number(tool), 'valid': tool_valid(tool)}
+
+    def step(note: str, phase: int, buttons: int, *events: list[Any], wheel: int = 0, clicks: int = 0) -> None:
+        rig.play(t, *events, ['frame', '$time'])
+        rig.expect('tablet-pointer', f'{tool}: {note}', phase=phase, x=px(x), y=px(y), buttons=buttons, wheel=wheel, wclicks=clicks, **base)
+        time.sleep(0.02)
+
+    step('enters proximity', 0, 0, ['proximity_in', '$serial', f'tablet:{tablet}', '$surface'], ['motion', x, y])
+    step('right button while hovering', 0, 2, ['button', '$serial', BTN_RIGHT, 1])
+    step('right button released', 0, 0, ['button', '$serial', BTN_RIGHT, 0])
+    step('left button down', 1, 1, ['button', '$serial', BTN_LEFT, 1])
+    x += 16
+    step('moves with the left button', 2, 1, ['motion', x, y])
+    step('wheel, one click of 15 degrees', 2, 1, ['wheel', 15, 1], wheel=1500, clicks=1)
+    x += 16
+    step('moves on, the wheel is at rest again', 2, 1, ['motion', x, y])
+    step('wheel back two clicks', 2, 1, ['wheel', -30, -2], wheel=-3000, clicks=-2)
+    step('middle button', 2, 1 | 4, ['button', '$serial', BTN_MIDDLE, 1])
+    step('back button', 2, 1 | 4 | 8, ['button', '$serial', BTN_SIDE, 1])
+    step('forward button', 2, 1 | 4 | 8 | 16, ['button', '$serial', BTN_EXTRA, 1])
+    step('the three released', 2, 1, ['button', '$serial', BTN_MIDDLE, 0], ['button', '$serial', BTN_SIDE, 0], ['button', '$serial', BTN_EXTRA, 0])
+    step('left button up', 3, 0, ['button', '$serial', BTN_LEFT, 0])
+    rig.play(t, ['proximity_out'], ['frame', '$time'])
+    rig.expect('tablet-pointer', f'{tool}: leaves proximity', kind=1, phase=5)
+    time.sleep(0.1)
+
+
 def tool_burst(rig: Rig, tool: str = 'pen', tablet: str = 'intuos5') -> None:
     "Ten samples 5 ms apart that all arrive at once, as after a stall: their times must stay 5 ms apart"
     t = f'tool:{tool}'
-    rig.play(
-        t,
-        ['proximity_in', '$serial', f'tablet:{tablet}', '$surface'],
-        ['motion', 400, 400],
-        ['pressure', 0],
-        ['distance', 0],
-        ['tilt', 0, 0],
-        ['frame', '$time-60'],
-    )
+    rig.play(t, ['proximity_in', '$serial', f'tablet:{tablet}', '$surface'], *tool_axes(tool, 400, 400)[0], ['frame', '$time-60'])
     rig.expect('tablet-pointer', 'burst: enters proximity', kind=1, phase=0)
     events: list[list[Any]] = [['down', '$serial'], ['motion', 400, 400], ['pressure', 20000], ['frame', '$time-50']]
     for i in range(1, 10):
@@ -210,16 +244,225 @@ def tool_burst(rig: Rig, tool: str = 'pen', tablet: str = 'intuos5') -> None:
     time.sleep(0.1)
 
 
-def pen(rig: Rig) -> None:
-    tool_stroke(rig, 'pen')
+def tool_abort(rig: Rig, tool: str = 'pen', tablet: str = 'intuos5') -> None:
+    "Strokes that do not end the usual way: a pen flicked out of range, and a tablet unplugged under a pen"
+    t = f'tool:{tool}'
+    events, fields = tool_axes(tool, 600, 500, pressure=30000)
+    rig.play(t, ['proximity_in', '$serial', f'tablet:{tablet}', '$surface'], ['down', '$serial'], *events, ['frame', '$time'])
+    rig.expect('tablet-pointer', 'flick: tip down as the pen arrives', phase=1, buttons=1, **fields)
+    time.sleep(0.02)
+    # wlroots puts the tip going up and the tool leaving in one frame when libinput reports them together
+    rig.play(t, ['up'], ['pressure', 0], ['proximity_out'], ['frame', '$time'])
+    rig.expect('tablet-pointer', 'flick: the stroke ends, the tip did come up', kind=1, phase=3, buttons=0)
+    rig.expect('tablet-pointer', 'flick: leaves proximity', kind=1, phase=5)
+    time.sleep(0.05)
+
+    spare = 'tool:spare'
+    events, fields = tool_axes('spare', 620, 500, pressure=30000)
+    rig.play(spare, ['proximity_in', '$serial', f'tablet:{tablet}', '$surface'], ['down', '$serial'], *events, ['frame', '$time'])
+    rig.expect('tablet-pointer', 'unplug: another pen draws', phase=1, buttons=1, **fields)
+    time.sleep(0.02)
+    rig.play(spare, ['removed'])
+    rig.expect('tablet-pointer', 'unplug: its stroke is cancelled when the tablet goes away', kind=1, phase=4, buttons=0, p=0)
+    time.sleep(0.1)
 
 
-def eraser(rig: Rig) -> None:
-    tool_stroke(rig, 'eraser')
+def tool_mods(rig: Rig, tool: str = 'pen', tablet: str = 'intuos5') -> None:
+    "The keyboard modifiers held while a pen moves"
+    t = f'tool:{tool}'
+    rig.play(t, ['proximity_in', '$serial', f'tablet:{tablet}', '$surface'], *tool_axes(tool, 200, 600, distance=9000)[0], ['frame', '$time'])
+    rig.expect('tablet-pointer', 'mods: none held', kind=1, phase=0, mods=0)
+    for held, reported, names in ((SHIFT, 1, 'shift'), (SHIFT | CONTROL, 5, 'shift and control'), (ALT | SUPER, 10, 'alt and super'), (0, 0, 'none again')):
+        rig.play('keyboard', ['modifiers', '$serial', held, 0, 0, 0])
+        time.sleep(0.02)
+        rig.play(t, ['motion', 210, 600], ['frame', '$time'])
+        rig.expect('tablet-pointer', f'mods: {names}', kind=1, phase=0, mods=reported)
+        time.sleep(0.02)
+    rig.play(t, ['proximity_out'], ['frame', '$time'])
+    rig.expect('tablet-pointer', 'mods: leaves proximity', kind=1, phase=5)
+    time.sleep(0.1)
 
 
-SEQUENCES: dict[str, Callable[[Rig], None]] = {'pen': pen, 'eraser': eraser, 'buttons': tool_buttons, 'burst': tool_burst}
 # }}}
+
+
+# Pads {{{
+def pads(rig: Rig) -> None:
+    """Three pads are plugged in: keys and a ring with four modes, keys and a strip, a key and a dial.
+    The reports expected are those of the pad kind being added to the protocol: kind=3 with
+    button and state, ring and angle, strip and pos, dial and delta, group and mode"""
+    for device, d in DEVICES.items():
+        if device.startswith('pad:'):
+            rig.command(op='add', device=device, **d)
+    time.sleep(0.2)
+    rig.command(op='info')  # a terminal that drops its connection over a pad is found out here
+
+    def pad(name: str, note: str, *events: list[Any], to: str = '', **fields: Any) -> None:
+        rig.play(to or f'pad:{name}', *events)
+        if fields:
+            rig.expect('tablet-pointer', f'{name}: {note}', kind=3, **fields)
+        time.sleep(0.02)
+
+    pad('intuos5', 'enters the window', ['enter', '$serial', 'tablet:intuos5', '$surface'])
+    for b in range(9):
+        pad('intuos5', f'key {b} down', ['button', '$time', b, 1], button=b, state=1)
+        pad('intuos5', f'key {b} up', ['button', '$time', b, 0], button=b, state=0)
+    ring = 'ring:intuos5:0:0'
+    for angle in (0, 45.5, 90, 180, 355):
+        pad('intuos5', f'ring at {angle} degrees', ['source', FINGER], ['angle', angle], ['frame', '$time'], to=ring, ring=0, angle=round(angle * 100))
+    pad('intuos5', 'finger off the ring', ['stop'], ['frame', '$time'], to=ring, ring=0, stop=1)
+    pad('intuos5', 'mode 2 of 4', ['mode_switch', '$time', '$serial', 1], to='group:intuos5:0', group=0, mode=1)
+    pad('intuos5', 'key 0 in the new mode', ['button', '$time', 0, 1], ['button', '$time', 0, 0], button=0, state=1)
+    rig.expect('tablet-pointer', 'intuos5: key 0 up', kind=3, button=0, state=0)
+    pad('intuos5', 'leaves', ['leave', '$serial', '$surface'])
+
+    strip = 'strip:intuos3:0:0'
+    pad('intuos3', 'enters the window', ['enter', '$serial', 'tablet:intuos5', '$surface'])
+    for pos in (0, 16384, 32768, 65535):
+        pad('intuos3', f'strip at {pos}', ['source', FINGER], ['position', pos], ['frame', '$time'], to=strip, strip=0, pos=pos)
+    pad('intuos3', 'finger off the strip', ['stop'], ['frame', '$time'], to=strip, strip=0, stop=1)
+    pad('intuos3', 'leaves', ['leave', '$serial', '$surface'])
+
+    dial = 'dial:huion:0:0'
+    pad('huion', 'enters the window', ['enter', '$serial', 'tablet:intuos5', '$surface'])
+    for delta, what in ((120, 'one click'), (-240, 'two clicks back'), (30, 'a quarter of a click')):
+        pad('huion', f'dial {what}', ['delta', delta], ['frame', '$time'], to=dial, dial=0, delta=delta)
+    pad('huion', 'key down', ['button', '$time', 0, 1], button=0, state=1)
+    pad('huion', 'key up', ['button', '$time', 0, 0], button=0, state=0)
+    pad('huion', 'leaves', ['leave', '$serial', '$surface'])
+    time.sleep(0.1)
+
+
+# }}}
+
+
+# Fingers, gestures and scrolling {{{
+def touch(rig: Rig) -> None:
+    "A touchscreen: one finger draws, three fingers land, move and lift together, two fingers are cancelled"
+
+    def frame(note: str, *events: list[Any], expect: list[dict[str, Any]]) -> None:
+        rig.play('touch', *events, ['frame'])
+        for f in expect:
+            rig.expect('tablet-pointer', f'touch: {note}', kind=2, tool=0, **f)
+        rig.expect('tablet-pointer', f'touch: {note}, end of the group', kind=2, phase=6)
+        time.sleep(0.012)
+
+    frame(
+        'one finger down', ['down', '$serial', '$time', '$surface', 0, 200, 300], expect=[{'phase': 1, 'contact': 0, 'x': px(200), 'y': px(300), 'buttons': 1}]
+    )
+    for i in range(1, 5):
+        frame('it moves', ['motion', '$time', 0, 200 + 12.5 * i, 300], expect=[{'phase': 2, 'contact': 0, 'x': px(200 + 12.5 * i), 'y': px(300)}])
+    frame('it lifts', ['up', '$serial', '$time', 0], expect=[{'phase': 3, 'contact': 0, 'buttons': 0}])
+    time.sleep(0.05)
+
+    downs = [['down', '$serial', '$time', '$surface', i, 300 + 100 * i, 400] for i in range(3)]
+    shapes = [['shape', 0, 20, 12], ['orientation', 0, 45]]
+    frame(
+        'three fingers down, the first with a shape',
+        *downs,
+        *shapes,
+        expect=[
+            {'phase': 1, 'contact': 0, 'x': px(300), 'buttons': 1, 'valid': 128, 'major': px(20), 'minor': px(12), 'angle': 4500},
+            {'phase': 1, 'contact': 1, 'x': px(400), 'buttons': 1},
+            {'phase': 1, 'contact': 2, 'x': px(500), 'buttons': 1},
+        ],
+    )
+    for step in range(1, 4):
+        frame(
+            'all three move',
+            *[['motion', '$time', i, 300 + 100 * i, 400 + 10 * step] for i in range(3)],
+            expect=[{'phase': 2, 'contact': i, 'y': px(400 + 10 * step)} for i in range(3)],
+        )
+    frame('only the second moves', ['motion', '$time', 1, 410, 440], expect=[{'phase': 2, 'contact': 1, 'x': px(410), 'y': px(440)}])
+    frame('all three lift', *[['up', '$serial', '$time', i] for i in range(3)], expect=[{'phase': 3, 'contact': i} for i in range(3)])
+    time.sleep(0.05)
+
+    frame(
+        'two fingers down',
+        ['down', '$serial', '$time', '$surface', 0, 600, 200],
+        ['down', '$serial', '$time', '$surface', 1, 700, 200],
+        expect=[{'phase': 1, 'contact': 0}, {'phase': 1, 'contact': 1}],
+    )
+    rig.play('touch', ['cancel'])
+    rig.expect('tablet-pointer', 'touch: the compositor takes the fingers over, first finger', kind=2, phase=4, contact=0, buttons=0)
+    rig.expect('tablet-pointer', 'touch: the compositor takes the fingers over, second finger', kind=2, phase=4, contact=1, buttons=0)
+    rig.expect('tablet-pointer', 'touch: end of the cancelled group', kind=2, phase=6)
+    time.sleep(0.1)
+
+
+def gestures(rig: Rig) -> None:
+    "The gestures of a touchpad: a pinch that also turns, a swipe to the left, and a hold"
+    at = {'x': px(rig.width / 2), 'y': px(rig.height / 2)}
+    rig.play('pinch', ['begin', '$serial', '$time', '$surface', 2])
+    rig.expect('gesture', 'pinch begins', kind=1, phase=1, scale=0, total=1000, **at)
+    rig.expect('gesture', 'and the rotation that goes with it', kind=2, phase=1, angle=0, total=0, **at)
+    total = 0.0
+    for scale, turn in ((1.125, 5), (1.25, 5), (1.125, -2.5)):  # scales a 24.8 fixed point number holds exactly
+        time.sleep(0.012)
+        rig.play('pinch', ['update', '$time', 0, 0, scale, turn])
+        total += turn
+        rig.expect('gesture', f'pinch to {scale}', kind=1, phase=2, total=round(scale * 1000))
+        rig.expect('gesture', f'turned by {turn} degrees', kind=2, phase=2, angle=round(turn * 100), total=round(total * 100))
+    rig.play('pinch', ['end', '$serial', '$time', 0])
+    rig.expect('gesture', 'pinch ends', kind=1, phase=3)
+    rig.expect('gesture', 'rotation ends', kind=2, phase=3)
+    time.sleep(0.05)
+
+    rig.play('swipe', ['begin', '$serial', '$time', '$surface', 3])
+    for _ in range(5):
+        time.sleep(0.012)
+        rig.play('swipe', ['update', '$time', -20, 2])
+    rig.play('swipe', ['end', '$serial', '$time', 0])
+    rig.expect('gesture', 'a three finger swipe to the left begins', kind=3, phase=1, dx=-1, dy=0)
+    rig.expect('gesture', 'and ends', kind=3, phase=3, dx=-1, dy=0)
+    time.sleep(0.05)
+
+    # A hold has no report in version 1 of the gesture protocol, a kind for it is being added
+    rig.play('hold', ['begin', '$serial', '$time', '$surface', 2])
+    time.sleep(0.05)
+    rig.play('hold', ['end', '$serial', '$time', 0])
+    time.sleep(0.1)
+
+
+def scroll(rig: Rig) -> None:
+    "Two fingers scroll down on a touchpad and lift, then a wheel turns one notch each way"
+    at = {'x': round(rig.width / 2), 'y': round(rig.height / 2)}
+    for i in range(6):
+        rig.play('pointer', ['axis_source', FINGER], ['axis', '$time', 0, 4.5], ['frame'])
+        # the first report of a gesture says so where the terminal can tell, and silkie cannot tell yet on Wayland
+        rig.expect('scroll', f'finger scroll {i}, four and a half pixels down', dx=0, dy=450, src=1, **at)
+        time.sleep(0.012)
+    rig.play('pointer', ['axis_source', FINGER], ['axis_stop', '$time', 0], ['frame'])
+    time.sleep(1.0)  # the terminal's own momentum runs out
+    rig.mark(skip='scroll')
+
+    # the units of one notch are 120 from version 8 of wl_pointer, and one discrete step before it
+    for value, note in ((15, 'down'), (-15, 'up')):
+        notch = 1 if value > 0 else -1
+        rig.play('pointer', ['axis_source', 0], ['axis_value120', 0, 120 * notch], ['axis', '$time', 0, value], ['frame'])
+        rig.expect('scroll', f'a wheel notch {note}', dx=0, src=0, phase=0, **at)
+        time.sleep(0.3)
+    time.sleep(0.2)
+
+
+# }}}
+
+
+SEQUENCES: dict[str, Callable[[Rig], None]] = {
+    'pen': lambda rig: tool_stroke(rig, 'pen'),
+    'eraser': lambda rig: tool_stroke(rig, 'eraser'),
+    'artpen': lambda rig: tool_stroke(rig, 'artpen'),
+    'airbrush': lambda rig: tool_stroke(rig, 'airbrush'),
+    'buttons': tool_buttons,
+    'puck': puck,
+    'burst': tool_burst,
+    'abort': tool_abort,
+    'mods': tool_mods,
+    'touch': touch,
+    'gestures': gestures,
+    'scroll': scroll,
+    'pads': pads,
+}
 
 
 def main() -> None:
@@ -229,21 +472,23 @@ def main() -> None:
     p.add_argument('--wait', help='A file that appears when the program in the terminal is ready')
     p.add_argument('sequences', nargs='*', help=f'What to play, all by default: {", ".join(SEQUENCES)}')
     args = p.parse_args()
-    with open(args.expect, 'w', buffering=1) if args.expect else open('/dev/null', 'w') as f:
-        rig = Rig(args.control, f if args.expect else None)
+    with open(args.expect or os.devnull, 'w', buffering=1) as f:
+        rig = Rig(args.control, f)
         setup(rig)
-        if args.wait:
-            import os
-
-            end = time.monotonic() + 20
-            while not os.path.exists(args.wait):
-                if time.monotonic() > end:
-                    raise TimeoutError('the program in the terminal did not get ready')
-                time.sleep(0.05)
+        end = time.monotonic() + 20
+        while args.wait and not os.path.exists(args.wait):
+            if time.monotonic() > end:
+                raise TimeoutError('the program in the terminal did not get ready')
+            time.sleep(0.05)
         for name in args.sequences or SEQUENCES:
-            if f:
-                f.write(json.dumps({'sequence': name}) + '\n')
-            SEQUENCES[name](rig)
+            rig.mark(sequence=name)
+            try:
+                SEQUENCES[name](rig)
+                rig.command(op='info')
+            except Died:
+                rig.mark(died=name)
+                print(f'the terminal dropped its connection during {name}', file=sys.stderr)
+                sys.exit(3)
             time.sleep(0.2)
 
 

@@ -5,27 +5,34 @@
 # them playing the input devices, and compares what a program inside the
 # terminal receives with what was played. See README.rst.
 #
-#   rig/run.sh /path/to/built/tree [sequence ...]
+#   rig/run.sh /path/to/built/tree run-name [sequence ...]
+#
+# Everything the run writes is in /tmp/silkie-rig-<run-name>. Only one run
+# goes at a time: the directory /tmp/silkie-rig.lock is the lock.
 
 set -u
-if [ $# -lt 1 ] || [ ! -x "$1/kitty/launcher/kitty" ]; then
-    echo "usage: $0 /path/to/built/kitty/tree [sequence ...]" >&2
+if [ $# -lt 2 ] || [ ! -x "$1/kitty/launcher/kitty" ] || [[ ! $2 =~ ^[A-Za-z0-9._-]+$ ]]; then
+    echo "usage: $0 /path/to/built/kitty/tree run-name [sequence ...]" >&2
+    echo "the run name may hold letters, digits, dots, dashes and underscores" >&2
     exit 2
 fi
 tree=$(realpath "$1")
-shift
+run=/tmp/silkie-rig-$2
+shift 2
 here=$(dirname "$(realpath "$0")")
-run=$(mktemp -d /tmp/silkie-rig-run.XXXXXX)
-chmod 700 "$run"
+lock=/tmp/silkie-rig.lock
+locked=
 pids=()
 
 cleanup() {
     for pid in "${pids[@]}"; do kill "$pid" 2>/dev/null; done
     wait 2>/dev/null
     rm -f "$run"/wayland-* "$run"/control "$run"/sway-ipc.*
-    echo "logs are in $run"
+    [ -n "$locked" ] && rmdir "$lock"
+    locked=
 }
 trap cleanup EXIT
+trap 'exit 130' INT TERM HUP
 
 wait_for() { # a path, seconds
     for _ in $(seq $(($2 * 20))); do
@@ -35,6 +42,20 @@ wait_for() { # a path, seconds
     echo "timed out waiting for $1" >&2
     return 1
 }
+
+# Two runs at once would share the machine's time, and the reports are timed
+for i in $(seq 1800); do
+    mkdir "$lock" 2>/dev/null && locked=1 && break
+    [ "$i" = 1 ] && echo "another rig run holds $lock, waiting for up to half an hour" >&2
+    sleep 1
+done
+if [ -z "$locked" ]; then
+    echo "gave up waiting for $lock. If no rig is running, a run was killed before it could clean up: rmdir $lock" >&2
+    exit 1
+fi
+
+rm -rf "$run"
+mkdir -m 700 "$run" || exit 1
 
 # The compositor: no devices, no seat, no GPU. Everything it needs is in $run
 cat >"$run/sway.conf" <<EOF
@@ -61,7 +82,7 @@ env -u DISPLAY XDG_RUNTIME_DIR="$run" WAYLAND_DISPLAY=wayland-rig LIBGL_ALWAYS_S
     ${RIG_WAYLAND_DEBUG:+WAYLAND_DEBUG=1} $([ -e $mesa ] && echo __EGL_VENDOR_LIBRARY_FILENAMES=$mesa) \
     "$tree/kitty/launcher/kitty" --config NONE -o linux_display_server=wayland -o placement_strategy=top-left \
     -o window_padding_width=0 -o confirm_os_window_close=0 --debug-input \
-    python3 "$here/client.py" --log "$run/client.log" --ready "$run/ready" --stop "$run/stop" --duration 300 ${RIG_CLIENT_ARGS:-} \
+    python3 "$here/client.py" --log "$run/client.log" --ready "$run/ready" --stop "$run/stop" --duration 600 ${RIG_CLIENT_ARGS:-} \
     >"$run/kitty.log" 2>&1 &
 kitty=$!
 pids+=($kitty)
@@ -73,6 +94,16 @@ for _ in $(seq 100); do
     kill -0 $kitty 2>/dev/null || break
     sleep 0.05
 done
-[ $played = 0 ] || { echo "playing failed, see $run/proxy.log and $run/proxy.err" >&2; exit 1; }
-grep -E ' (error|warning) ' "$run/proxy.log"
-python3 "$here/check.py" "$run/client.log" "$run/expect.jsonl"
+status=0
+if [ $played = 3 ]; then
+    echo "the last lines of $run/kitty.log:" >&2
+    grep -v '^\[' "$run/kitty.log" | tail -4 >&2
+    status=1
+elif [ $played != 0 ]; then
+    echo "playing failed, see $run/proxy.log and $run/proxy.err" >&2
+    exit 1
+fi
+grep -E ' (error|warning) ' "$run/proxy.log" && status=1
+python3 "$here/check.py" "$run/client.log" "$run/expect.jsonl" || status=1
+echo "logs are in $run"
+exit $status
