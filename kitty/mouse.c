@@ -1694,6 +1694,7 @@ static void
 write_pointer_report(Screen *screen, const PointerReport *r) {
     char buf[512];
     int n = snprintf(buf, sizeof(buf), "777;tablet-pointer;v=1:op=event:kind=%d:phase=%d:device=%llu:t=%llu", r->kind, r->phase, (unsigned long long)r->device, r->t);
+    if (r->has_tu) n += snprintf(buf + n, sizeof(buf) - n, ":tu=%u", r->tu);
     if (r->phase != POINTER_FRAME) {
         n += snprintf(buf + n, sizeof(buf) - n, ":contact=%d:x=%d:y=%d:buttons=%u:mods=%d:tool=%d:valid=%u", r->contact, r->x, r->y, r->buttons, r->mods, r->tool, r->valid);
 #define F(bit, ...) if (r->valid & bit) n += snprintf(buf + n, sizeof(buf) - n, __VA_ARGS__)
@@ -1850,6 +1851,15 @@ pointer_window(int kind) {
 #define pointer_coord(v) (int)round(MIN(MAX((v) * 256, -1073741823.), 1073741823.))
 #define pointer_clamp(v, lo, hi) MIN(MAX(v, lo), hi)
 
+// Sets the t and tu of a report from the time of an event
+static void
+pointer_time(PointerReport *r, monotonic_t timestamp, bool is_fine) {
+    timestamp = MAX(0, timestamp);
+    r->t = (unsigned long long)(timestamp / MONOTONIC_T_1e6);
+    r->tu = (unsigned)(timestamp / MONOTONIC_T_1e3 % 1000);
+    r->has_tu = is_fine;
+}
+
 bool
 tablet_event(const GLFWTabletEvent *ev) {
     const OSWindow *osw = global_state.callback_os_window;
@@ -1869,7 +1879,6 @@ tablet_event(const GLFWTabletEvent *ev) {
         .pid = ev->product_id,
         .x = pointer_coord(osw->mouse_x - g->left),
         .y = pointer_coord(osw->mouse_y - g->top),
-        .t = monotonic_t_to_ms(ev->timestamp),
         .buttons = ev->buttons,
         .mods = pointer_mods(ev->keyboard_modifiers),
         .tool = ev->tool,
@@ -1884,6 +1893,7 @@ tablet_event(const GLFWTabletEvent *ev) {
         .wheel = (int)round(ev->wheel * 100),
         .wclicks = ev->wheel_clicks,
     };
+    pointer_time(&r, ev->timestamp, ev->timestamp_is_fine);
     if (ev->type == GLFW_TABLET_POINT) {
         const bool tip = ev->buttons & GLFW_TABLET_BUTTON_TIP;
         r.phase = tip ? (t->down ? POINTER_MOVE : POINTER_DOWN) : (t->down ? POINTER_UP : POINTER_HOVER);
@@ -1922,15 +1932,15 @@ touch_pointer_event(const GLFWTouchEvent *ev) {
     if (!w) return false;
     Screen *screen = w->render_data.screen;
     const WindowGeometry *g = &w->render_data.geometry;
-    const unsigned long long t = monotonic_t_to_ms(ev->timestamp);
     const int mods = pointer_mods(ev->keyboard_modifiers);
     bool reported = false;
     for (size_t i = 0; i < ev->num_points; i++) {
         const GLFWTouchPoint *p = ev->points + i;
         PointerReport r = {
-            .kind = POINTER_TOUCH, .contact = p->id, .t = t, .buttons = 1, .mods = mods, .src = ev->indirect,
+            .kind = POINTER_TOUCH, .contact = p->id, .buttons = 1, .mods = mods, .src = ev->indirect,
             .w = pointer_coord(ev->device_width), .h = pointer_coord(ev->device_height),
         };
+        pointer_time(&r, ev->timestamp, ev->timestamp_is_fine);
         switch (p->state) {
             case GLFW_TOUCH_POINT_PRESSED: r.phase = POINTER_DOWN; break;
             case GLFW_TOUCH_POINT_MOVED: r.phase = POINTER_MOVE; break;
@@ -1954,7 +1964,8 @@ touch_pointer_event(const GLFWTouchEvent *ev) {
     }
     if (ev->type == GLFW_TOUCH_CANCEL) screen_pointer_cancel(screen, POINTER_TOUCH);
     if (reported) {
-        PointerReport frame = {.kind = POINTER_TOUCH, .phase = POINTER_FRAME, .t = t};
+        PointerReport frame = {.kind = POINTER_TOUCH, .phase = POINTER_FRAME};
+        pointer_time(&frame, ev->timestamp, ev->timestamp_is_fine);
         screen_pointer_report(screen, &frame);
     }
     return true;
@@ -1966,14 +1977,16 @@ static PyObject *
 send_pointer_report(PyObject *self UNUSED, PyObject *args, PyObject *kw) {
     Screen *screen;
     PointerReport r = {.tool = 1};
+    int tu = -1;
     static const char *kwlist[] = {"screen", "kind",    "phase", "device", "contact", "x",    "y",      "buttons", "mods", "tool", "valid", "p",
                                    "tx",     "ty",      "twist", "tangent", "z",      "dist", "wheel",  "wclicks", "serial", "hwid", "vid", "pid",
-                                   "t",      "src",     "major", "minor",   "angle",  "w",    "h",      NULL};
+                                   "t",      "src",     "major", "minor",   "angle",  "w",    "h",      "tu",      NULL};
     if (!PyArg_ParseTupleAndKeywords(
-            args, kw, "O!iiKiii|IiiIiiiiiiiiiKKIIKiiiiii", (char **)kwlist, &Screen_Type, &screen, &r.kind, &r.phase, &r.device, &r.contact, &r.x, &r.y, &r.buttons, &r.mods,
+            args, kw, "O!iiKiii|IiiIiiiiiiiiiKKIIKiiiiiii", (char **)kwlist, &Screen_Type, &screen, &r.kind, &r.phase, &r.device, &r.contact, &r.x, &r.y, &r.buttons, &r.mods,
             &r.tool, &r.valid, &r.p, &r.tx, &r.ty, &r.twist, &r.tangent, &r.z, &r.dist, &r.wheel, &r.wclicks, &r.serial, &r.hwid, &r.vid, &r.pid,
-            &r.t, &r.src, &r.major, &r.minor, &r.angle, &r.w, &r.h))
+            &r.t, &r.src, &r.major, &r.minor, &r.angle, &r.w, &r.h, &tu))
         return NULL;
+    if (tu >= 0) r.tu = tu, r.has_tu = true;
     if (screen_pointer_report(screen, &r)) Py_RETURN_TRUE;
     Py_RETURN_FALSE;
 }

@@ -357,6 +357,9 @@ typedef struct GLFWTouchEvent {
     // can be delivered in bursts, so use this rather than the time of delivery to
     // measure taps, long presses and the velocity of flings
     monotonic_t timestamp;
+    // The system stamps these events more finely than a millisecond. When false
+    // only whole milliseconds of the differences between timestamps mean anything
+    bool timestamp_is_fine;
     // Every point that is down on the window, and the points that were released
     // in this event. At most 16 points are tracked, further simultaneous points
     // are ignored. The array is valid only during the callback
@@ -420,6 +423,7 @@ typedef struct GLFWTabletEvent {
     // for GLFWTouchEvent. A stroke's speed is measured with this, not with the
     // time of delivery
     monotonic_t timestamp;
+    bool timestamp_is_fine;  // as for GLFWTouchEvent
     unsigned buttons, axes;
     // In window content coordinates, the same as the cursor position
     double x, y;

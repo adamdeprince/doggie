@@ -32,6 +32,8 @@ typedef struct PointerReport {
     unsigned buttons, valid, vid, pid;
     uint64_t device, serial, hwid;
     unsigned long long t;
+    unsigned tu;  // microseconds past t, only meaningful with has_tu
+    bool has_tu;
 } PointerReport;
 
 typedef struct {

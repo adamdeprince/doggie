@@ -111,6 +111,9 @@ which defaults to ``1``:
                  the terminal's choosing, or of its delivery when the system
                  does not time stamp it, useful only for differences between
                  reports
+``tu``           Microseconds past ``t``, ``0`` to ``999``, present only when
+                 the system stamps events more finely than a millisecond. A
+                 report without it is on a grid of whole milliseconds
 ``contact``      Identifies one contact of a device, stable for its lifetime.
                  A pen is normally contact ``0``, fingers get the system's
                  touch ids, which it may reuse once a finger has lifted
@@ -172,7 +175,7 @@ Finger reports have ``kind=2``, ``tool=0``, ``buttons=1`` while down, one
 touch system delivers all the fingers that moved together before any of them
 is acted on, and the terminal keeps that grouping: after the reports of one
 such group it sends a frame report, which carries only ``kind=2``,
-``phase=6``, ``device`` and ``t``::
+``phase=6``, ``device`` and ``t``, with ``tu`` when the reports have it::
 
     <OSC> 777 ; tablet-pointer ; v=1 : op=event : kind=2 : phase=1 : device=0 : t=408211 : contact=0 : x=25600 : y=51200 : buttons=1 : mods=0 : tool=0 : valid=0 <ST>
     <OSC> 777 ; tablet-pointer ; v=1 : op=event : kind=2 : phase=1 : device=0 : t=408211 : contact=1 : x=38400 : y=51200 : buttons=1 : mods=0 : tool=0 : valid=0 <ST>

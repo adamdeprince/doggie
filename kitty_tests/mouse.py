@@ -517,6 +517,11 @@ class TestMouse(BaseTest):
         )
         self.assertTrue(report(1, 0, valid=1, p=5))
         self.ae(c.wtcbuf, ev('kind=1:phase=0:device=7:t=1000:contact=0:x=256:y=512:buttons=0:mods=0:tool=1:valid=1:p=5'))
+        # A time finer than a millisecond is followed by its microseconds, zero included
+        report(1, 0, t=1001, tu=0)
+        self.ae(c.wtcbuf, ev('kind=1:phase=0:device=7:t=1001:tu=0:contact=0:x=256:y=512:buttons=0:mods=0:tool=1:valid=0'))
+        report(2, 6, t=1001, tu=999)
+        self.ae(c.wtcbuf, ev('kind=2:phase=6:device=7:t=1001:tu=999'))
         s.reset()
         self.assertFalse(report(1, 1))
         # The contact table grows, so a touchscreen with many fingers down is not truncated

@@ -491,11 +491,23 @@ translateFlags(NSUInteger flags) {
 }
 
 // The time the system generated an event, as monotonic() time. Event
-// timestamps and systemUptime are on the same clock
+// timestamps are on the clock of systemUptime. Its offset from monotonic() is
+// measured once and kept while it stays right to within a millisecond, so that
+// the times of two events differ by exactly what their timestamps do, to the
+// microsecond, however late each one is delivered
 static monotonic_t
 eventTimestamp(NSEvent *event) {
-    const double age = [[NSProcessInfo processInfo] systemUptime] - [event timestamp];
-    return monotonic() - s_double_to_monotonic_t(MAX(0, age));
+    static monotonic_t offset = 0;
+    static bool have_offset = false;
+    const monotonic_t now = monotonic(), measured = now - s_double_to_monotonic_t([[NSProcessInfo processInfo] systemUptime]);
+    if (!have_offset || measured < offset || measured - offset > MONOTONIC_T_1e6) {
+        // Half a millisecond below the measurement, so that the clocks have
+        // room to drift either way
+        offset = measured - MONOTONIC_T_1e6 / 2;
+        have_offset = true;
+    }
+    const monotonic_t ans = s_double_to_monotonic_t([event timestamp]) + offset;
+    return MIN(ans, now);
 }
 
 // Tablet {{{
@@ -549,6 +561,7 @@ handleTabletEvent(_GLFWwindow *window, NSEvent *event) {
                 .tool = t->tool,
                 .keyboard_modifiers = translateFlags([event modifierFlags]),
                 .timestamp = eventTimestamp(event),
+                .timestamp_is_fine = true,
                 .device = t->device_id,
             };
             _glfwInputTablet(window, &ev);
@@ -566,6 +579,7 @@ handleTabletEvent(_GLFWwindow *window, NSEvent *event) {
         .tool = t ? t->tool : GLFW_TABLET_TOOL_PEN,
         .keyboard_modifiers = translateFlags([event modifierFlags]),
         .timestamp = eventTimestamp(event),
+        .timestamp_is_fine = true,
         .buttons = (held & NSEventButtonMaskPenTip ? GLFW_TABLET_BUTTON_TIP : 0) | (held & NSEventButtonMaskPenLowerSide ? GLFW_TABLET_BUTTON_BARREL : 0) |
                    (held & NSEventButtonMaskPenUpperSide ? GLFW_TABLET_BUTTON_BARREL2 : 0),
         .axes = !caps ? (GLFW_TABLET_PRESSURE | GLFW_TABLET_TILT)
@@ -1609,6 +1623,7 @@ handleTouches(_GLFWwindow *window, NSView *view, NSEvent *event, GLFWTouchEventT
         .type = type,
         .keyboard_modifiers = translateFlags([event modifierFlags]),
         .timestamp = eventTimestamp(event),
+        .timestamp_is_fine = true,
         .num_points = n,
         .points = points,
         .indirect = true,
