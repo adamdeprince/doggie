@@ -54,7 +54,11 @@ ids used for text::
 ``G=1`` is Display P3 and ``G=2`` is Rec. 2020. ``G=0``, any other value and
 no key at all are sRGB. As for text, the components are encoded with the sRGB
 transfer curve in every gamut. The key applies to RGB and RGBA data, ``f=24``
-and ``f=32``, and belongs in the first chunk of a chunked transmission.
+and ``f=32``, and belongs in the first chunk of a chunked transmission. It
+applies in the same way to the pixels of a GPU surface, ``t=g``. It is ignored
+for the two formats that have no gamut to choose: an HDR image, ``f=64``, is
+linear extended sRGB by definition, see the :doc:`hdr-protocol`, and the
+colors in the records of a vector image, ``f=200``, are sRGB.
 
 A PNG image, ``f=100``, says what its colors are by itself, and the key is
 ignored for it. A PNG is in Display P3 or Rec. 2020 when its embedded profile
@@ -133,6 +137,15 @@ kitty is, which can move a saturated untagged color by one step in 255 from
 what an sRGB window shows. A compositor that offers no gamma of 2.2 is given
 the sRGB curve instead. On a compositor without the protocol, and on X11, the
 window draws in sRGB.
+
+A window that also shows HDR, see :opt:`hdr` and the :doc:`hdr-protocol`, has
+a single description like any other, and it carries both: the primaries of
+the gamut chosen here, linear values in place of the gamma, and the
+luminances the contents reach. Colors are converted to the gamut of the window
+as above, and what is brighter than SDR white stays so in that gamut. When the
+compositor does not take linear values in the wide primaries, the window
+keeps its HDR and is drawn in sRGB; when the window cannot show HDR at all, it
+is a wide window as described above.
 
 The profile of a PNG is taken to be Display P3 or Rec. 2020 when each of its
 three primaries is within 0.005 in x and in y of the primary of that gamut,

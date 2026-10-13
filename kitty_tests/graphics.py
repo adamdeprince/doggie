@@ -752,6 +752,16 @@ class TestGraphics(BaseTest):
         self.ae((img['gamut'], img['data']), (2, b'abcdefgh'))
         # and sending the image again without one makes it sRGB again
         self.ae(sl('abcd', s=1, v=1)['gamut'], 0)
+        # An HDR image is linear extended sRGB by definition and the colors of a vector image are sRGB, so
+        # neither takes a gamut, and an image id that had one loses it when it becomes one of those
+        self.ae(sl('abcdefgh', s=1, v=1, f=64, G=1)['gamut'], 0)
+        self.ae(sl('abcd', s=1, v=1, G=2)['gamut'], 2)
+        self.ae(sl('abcdefgh', s=1, v=1, f=64, G=2)['gamut'], 0)
+        self.ae(pl('abcdefgh', s=1, v=1, a='q', f=64, G=1), 'OK')
+        self.ae(sl('abcd', s=1, v=1, G=1)['gamut'], 1)
+        self.ae(pl('p id=1 d=M0,0L1,0L1,1Z', s=4, v=4, f=200, G=1), 'OK')
+        self.ae(g.image_for_client_id(1)['gamut'], 0)
+        self.ae(sl('abcd', s=1, v=1)['gamut'], 0)
 
         # A PNG says it with its profile. One in a wide gamut stays there, any other is made sRGB
         rgba = bytes((255, 0, 0, 255, 10, 200, 30, 128, 200, 50, 50, 255, 128, 128, 128, 255))

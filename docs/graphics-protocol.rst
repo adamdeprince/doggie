@@ -1162,7 +1162,7 @@ Key      Value                 Default    Description
 ``T``    ``0, 1``              ``0``      Whether to compress the bright parts of an HDR image into the range the
                                           display can show, see the :doc:`hdr-protocol`.
 ``G``    ``0, 1, 2``           ``0``      The gamut the pixel data is in: sRGB, Display P3 or Rec. 2020, see
-                                          :doc:`wide-gamut-protocol`.
+                                          :doc:`wide-gamut-protocol`. Ignored for ``f=64``, ``f=100`` and ``f=200``.
 **Keys for image display**
 -----------------------------------------------------------
 ``x``    Positive integer      ``0``      The left edge (in pixels) of the image area to display

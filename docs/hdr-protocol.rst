@@ -76,7 +76,10 @@ compressed with ``o=z``, and it may be sent by any transmission medium.
 Animation frames of such an image must also be ``f=64`` (and ``f=64`` frames
 cannot be added to other images), the terminal responds with ``EINVAL``
 otherwise. Frames are blended in linear light, and the background color of a
-frame (the ``Y`` key) is taken as linear values, ``255`` being SDR white.
+frame (the ``Y`` key) is taken as linear values, ``255`` being SDR white. The
+gamut key of the :doc:`wide-gamut-protocol`, ``G``, is ignored for an HDR
+image: its colors are extended sRGB by definition, which reaches the colors
+outside sRGB with values below zero and above one.
 
 Pixel values larger than the headroom are shown at the headroom, which
 clips the bright parts of an image on a display with little headroom. An
@@ -152,6 +155,15 @@ display is switched into or out of it. A compositor that does not know the
 peak of a display, a virtual one for instance, reports the limit of the signal
 instead, which makes the headroom about ``49``; :opt:`hdr_max_headroom` is what
 keeps kitty from using that.
+
+The values of an HDR window on Wayland are in the sRGB primaries unless
+:opt:`wayland_colorspace` asks for a wider gamut, see
+:doc:`wide-gamut-protocol`. The compositor is then told of the wide primaries
+in the same description that says the values are linear and how bright they
+get, since a window has only one, and what is drawn is converted to those
+primaries. A compositor that takes linear values only in the sRGB primaries
+leaves the window an HDR window in sRGB. This combination has been checked
+against Mutter 50 in the same way and to the same extent as HDR itself.
 
 ``kitty --debug-rendering`` says whether a window got a floating point surface
 and what the compositor was told. The Wayland support has been run against
