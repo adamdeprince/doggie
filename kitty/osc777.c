@@ -12,7 +12,7 @@
 // protocol, see docs/capabilities-protocol.rst. A selector handled in
 // dispatch_osc() must also be listed here.
 static const struct { const char *selector; unsigned version; } extensions[] = {
-    {"caps", 1}, {"display", 1}, {"frame", 1}, {"gesture", 1}, {"haptic", 1}, {"latency", 1}, {"scroll", 1}, {"tablet-pointer", 1},
+    {"caps", 1}, {"display", 1}, {"frame", 1}, {"gesture", 1}, {"haptic", 1}, {"ink", 1}, {"latency", 1}, {"scroll", 1}, {"tablet-pointer", 1},
 };
 // The graphics protocol transmission media (the t key) and pixel formats (the
 // f key) this terminal accepts. A branch that adds one adds it here too.
@@ -52,6 +52,8 @@ screen_reset_extension_modes(Screen *self) {
     self->low_latency = false;
     // display
     self->display_events = false;
+    // ink
+    screen_ink_off(self);
 }
 
 void
