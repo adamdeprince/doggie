@@ -519,3 +519,13 @@ class TestMouse(BaseTest):
         self.ae(c.wtcbuf, ev('kind=1:phase=0:device=7:t=1000:contact=0:x=256:y=512:buttons=0:mods=0:tool=1:valid=1:p=5'))
         s.reset()
         self.assertFalse(report(1, 1))
+        # The contact table grows, so a touchscreen with many fingers down is not truncated
+        send('v=1:op=mode:mode=2')
+        for i in range(40):
+            self.assertTrue(report(2, 1, i, tool=0, buttons=1))
+            self.ae(c.wtcbuf, ev(f'kind=2:phase=1:device=7:t=1000:contact={i}:x=256:y=512:buttons=1:mods=0:tool=0:valid=0'))
+        self.assertTrue(report(2, 2, 39, tool=0, buttons=1, t=1001))
+        self.ae(c.wtcbuf, ev('kind=2:phase=2:device=7:t=1001:contact=39:x=256:y=512:buttons=1:mods=0:tool=0:valid=0'))
+        send('v=1:op=mode:mode=0')
+        self.ae(c.wtcbuf.count(b':phase=4:'), 40)
+        self.assertIn(ev('kind=2:phase=4:device=7:t=1001:contact=39:x=256:y=512:buttons=0:mods=0:tool=0:valid=0'), c.wtcbuf)
