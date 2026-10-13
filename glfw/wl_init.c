@@ -763,11 +763,20 @@ toolHandleFrame(void *data, struct zwp_tablet_tool_v2 *t UNUSED, uint32_t time) 
             if (tt->pressed & (1u << b)) _glfwInputMouseClick(window, b, GLFW_PRESS, tt->ev.keyboard_modifiers);
             if (tt->released & (1u << b)) _glfwInputMouseClick(window, b, GLFW_RELEASE, tt->ev.keyboard_modifiers);
         }
+        if (tt->ev.wheel != 0) {
+            // The wheel of a puck, which turns the way the scroll axis of a pointer does: 15 degrees are a notch
+            GLFWScrollEvent scroll = {.keyboard_modifiers = tt->ev.keyboard_modifiers, .offset_type = GLFW_SCROLL_OFFEST_V120};
+            scroll.unscaled.y = scroll.y_offset = -tt->ev.wheel * 120 / 15;
+            glfw_handle_scroll_event_for_momentum(window, &scroll, false, false);
+        }
         if (tt->left) _glfwInputCursorEnter(window, false);
     }
     if (tt->left) {
         tt->window = NULL;
         if (_glfw.wl.tablet_tool == tt) _glfw.wl.tablet_tool = NULL;
+        // A tool should come up before it leaves, but not every compositor says
+        // so, and it is not down when it comes back
+        tt->ev.buttons = 0;
     }
     tt->entered = tt->left = tt->moved = false;
     tt->pressed = tt->released = 0;

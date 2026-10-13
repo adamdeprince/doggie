@@ -2152,6 +2152,11 @@ tablet_event(const GLFWTabletEvent *ev) {
     } else {
         r.phase = t->down ? POINTER_CANCEL : POINTER_OUT;
         t->active = false;
+        if (t->down && ev->type == GLFW_TABLET_OUT) {
+            // The stroke is lost, and the system also said that the tool left
+            screen_pointer_report(w->render_data.screen, &r);
+            r.phase = POINTER_OUT;
+        }
     }
     screen_pointer_report(w->render_data.screen, &r);
     return true;
