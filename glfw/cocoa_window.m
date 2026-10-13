@@ -2622,6 +2622,12 @@ _glfwPlatformSetWindowHDRActive(_GLFWwindow *window, bool active) {
     if (layer && [layer respondsToSelector:@selector(setWantsExtendedDynamicRangeContent:)]) [layer setValue:@(active) forKey:@"wantsExtendedDynamicRangeContent"];
 }
 
+float
+_glfwPlatformSetWindowHDRRange(_GLFWwindow *window UNUSED, float peak UNUSED) {
+    // The system places SDR white at 1.0 in an extended range framebuffer and the values above it by itself
+    return 1.f;
+}
+
 int
 _glfwPlatformCreateWindow(
     _GLFWwindow *window, const _GLFWwndconfig *wndconfig, const _GLFWctxconfig *ctxconfig, const _GLFWfbconfig *fbconfig, const GLFWLayerShellConfig *lsc) {

@@ -1124,6 +1124,12 @@ render_os_window(OSWindow *w, monotonic_t now, bool scan_for_animated_images) {
         w->hdr_active = hdr_active;
         glfwSetWindowHDRActive(w->handle, hdr_active);
     }
+    // Where SDR white lies in the framebuffer can depend on how bright the contents get, so a change of it needs a new frame
+    const float hdr_white_level = glfwSetWindowHDRRange(w->handle, hdr_active ? effective_hdr_headroom(w) : 1.f);
+    if (hdr_white_level != w->hdr_white_level) {
+        w->hdr_white_level = hdr_white_level;
+        needs_render = true;
+    }
     if (w->last_active_window_id != active_window_id || w->last_active_tab != w->active_tab || w->focused_at_last_render != w->is_focused) needs_render = true;
     if (w->render_calls < 3 && background_image_for_os_window(w) != NULL) needs_render = true;
     if (needs_render) render_prepared_os_window(w, active_window_id, active_window_bg, num_visible_windows, all_windows_have_same_bg, now);

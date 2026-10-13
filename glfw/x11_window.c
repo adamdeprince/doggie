@@ -4118,3 +4118,8 @@ _glfwPlatformGetWindowHDRHeadroom(_GLFWwindow *window UNUSED) {
 
 void
 _glfwPlatformSetWindowHDRActive(_GLFWwindow *window UNUSED, bool active UNUSED) {}
+
+float
+_glfwPlatformSetWindowHDRRange(_GLFWwindow *window UNUSED, float peak UNUSED) {
+    return 1.f;
+}

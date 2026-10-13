@@ -875,6 +875,13 @@ typedef enum {
 #define GLFW_WAYLAND_APP_ID 0x00025001
 #define GLFW_WAYLAND_BGCOLOR 0x00025002
 #define GLFW_WAYLAND_WINDOW_TAG 0x00025003
+/*! @brief Wayland specific
+ *  [window hint](@ref GLFW_WAYLAND_HDR_hint). Use a floating point framebuffer
+ *  holding linear values, with 1.0 being SDR white, when the EGL driver has
+ *  one and the compositor can be told what it holds. Values above 1.0 are
+ *  then displayed brighter than SDR white, see glfwSetWindowHDRRange.
+ */
+#define GLFW_WAYLAND_HDR 0x00025004
 /*! @} */
 
 #define GLFW_NO_API 0
@@ -2312,6 +2319,10 @@ GFW_EXTERN glfwGetWindowHDRHeadroom_func glfwGetWindowHDRHeadroom_impl;
 typedef void (*glfwSetWindowHDRActive_func)(GLFWwindow*, bool);
 GFW_EXTERN glfwSetWindowHDRActive_func glfwSetWindowHDRActive_impl;
 #define glfwSetWindowHDRActive glfwSetWindowHDRActive_impl
+
+typedef float (*glfwSetWindowHDRRange_func)(GLFWwindow*, float);
+GFW_EXTERN glfwSetWindowHDRRange_func glfwSetWindowHDRRange_impl;
+#define glfwSetWindowHDRRange glfwSetWindowHDRRange_impl
 
 typedef bool (*glfwGetWindowPreferredColorDescription_func)(GLFWwindow*, GLFWcolordescription*);
 GFW_EXTERN glfwGetWindowPreferredColorDescription_func glfwGetWindowPreferredColorDescription_impl;
