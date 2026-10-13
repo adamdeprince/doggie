@@ -128,5 +128,32 @@ Configuration
 In kitty, HDR output is off by default and enabled with the :opt:`hdr` option.
 The user can cap how bright anything gets with :opt:`hdr_max_headroom`, which
 the terminal applies before clamping to the headroom of the display, and that
-cap is what the query above reports. Currently only macOS displays HDR
-content, on other platforms the headroom is always ``1``.
+cap is what the query above reports.
+
+HDR content is displayed on macOS, and on Wayland when two things hold:
+
+* The compositor implements the ``color-management-v1`` protocol with
+  parametric image descriptions, the extended linear transfer function and
+  settable luminances. Mutter 50 does. A window then draws linear values and
+  tells the compositor that they reach from black to as many times the
+  reference white of the display as the content gets bright.
+* The graphics driver has EGL window surfaces with floating point color
+  (``EGL_EXT_pixel_format_float``), since eight bits per channel cannot hold
+  values above white. Mesa's drivers for graphics hardware are expected to
+  have them, which is untested. The NVIDIA driver (version 595) does not, and
+  neither does Mesa when it renders in software, so there the window stays as
+  it is without :opt:`hdr`.
+
+The headroom on Wayland is the brightest luminance the compositor says the
+display of the window can show, divided by the luminance of its reference
+white. It is ``1`` on a display that is not in HDR mode and changes when the
+display is switched into or out of it. A compositor that does not know the
+peak of a display, a virtual one for instance, reports the limit of the signal
+instead, which makes the headroom about ``49``; :opt:`hdr_max_headroom` is what
+keeps kitty from using that.
+
+``kitty --debug-rendering`` says whether a window got a floating point surface
+and what the compositor was told. The Wayland support has been run against
+Mutter 50 with every step checked except the floating point surface itself,
+for want of a driver that has one, and it has not been seen on an HDR monitor.
+On X11 and on Wayland without the above the headroom is always ``1``.
