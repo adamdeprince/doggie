@@ -1952,13 +1952,14 @@ typedef struct GLFWdisplayinfo {
     /*! Bits per color channel.
      */
     int bits;
-    /*! Device pixels per logical pixel.
+    /*! The scale of the framebuffer the system asks for: physical pixels per
+     *  logical unit.
      */
     float scale;
     /*! Refresh period in microseconds.
      */
     unsigned period_us;
-    /*! Physical pixels per inch.
+    /*! Physical pixels per inch, the pixels being those of the framebuffer.
      */
     float ppi;
 } GLFWdisplayinfo;

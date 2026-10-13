@@ -3082,6 +3082,8 @@ _glfwPlatformGetWindowDisplayInfo(_GLFWwindow *window, GLFWdisplayinfo *info) {
     const CGSize mm = CGDisplayScreenSize(display);
     CGDisplayModeRef mode = CGDisplayCopyDisplayMode(display);
     if (mode) {
+        // The pixels of the mode are those of the framebuffer applications draw into, which is what a program
+        // measures in. At a scaled resolution the system resamples that framebuffer onto a panel with fewer pixels
         if (mm.width > 0) info->ppi = (float)(CGDisplayModeGetPixelWidth(mode) * 25.4 / mm.width);
         CGDisplayModeRelease(mode);
     }
