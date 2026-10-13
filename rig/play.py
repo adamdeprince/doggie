@@ -596,6 +596,7 @@ def handover(rig: Rig) -> None:
     rig.play(t, ['up'], ['pressure', 0], ['frame', '$time'])
     rig.expect('tablet-pointer', 'handover: lifts there', kind=1, phase=3)
     rig.play(t, ['proximity_out'], ['frame', '$time'])
+    rig.expect('tablet-pointer', 'handover: and leaves proximity out there', kind=1, phase=5)
     time.sleep(0.1)
     rig.play('pinch', ['begin', '$serial', '$time', '$surface', 2], ['update', '$time', 0, 0, 1.25, 0], ['end', '$serial', '$time', 0])
     for phase, note in ((1, 'begins'), (2, 'grows'), (3, 'ends')):
