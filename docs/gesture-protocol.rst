@@ -172,7 +172,8 @@ Implementations
 
 * silkie, this fork of kitty: pinch, rotate, swipe and smart zoom on macOS;
   pinch, rotate, swipe and hold, with the number of fingers, on Wayland;
-  nothing on X11. ``kitty --debug-input`` logs the gestures it sees.
+  pinch, rotate and swipe, with the number of fingers, on X11.
+  ``kitty --debug-input`` logs the gestures it sees.
 
 Implementation notes for silkie
 ----------------------------------
@@ -190,3 +191,8 @@ silkie passes on what the window system recognizes:
   rotation. A swipe is reported once it ends, as its dominant direction, and
   compositors keep most three finger swipes for themselves. A hold also
   stops kitty's own coasting scroll.
+* On X11, through the touchpad gestures of XInput 2.4, which needs version
+  21.1 or later of the X server and a driver that sends them, as the
+  libinput driver does. ``caps`` is zero when the server does not have
+  them. A pinch and a swipe are reported as on Wayland. X11 has no hold and
+  no smart zoom.

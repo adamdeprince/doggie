@@ -475,6 +475,47 @@ updateSmoothScrolling(_GLFWwindow *window) {
     XISelectEvents(_glfw.x11.display, window->x11.handle, &em, 1);
 }
 
+// Whether the X server delivers the touchpad gestures of XI 2.4
+//
+static bool
+hasGestureEvents(void) {
+#ifdef XI_GesturePinchBegin
+    return _glfw.x11.xi.available && (_glfw.x11.xi.major > 2 || (_glfw.x11.xi.major == 2 && _glfw.x11.xi.minor >= 4));
+#else
+    return false;
+#endif
+}
+
+// Select the touchpad gesture events on a window. They are delivered through
+// the master pointer, and the three events of a gesture have to be selected
+// together
+//
+static void
+selectGestureEvents(_GLFWwindow *window) {
+#ifdef XI_GesturePinchBegin
+    if (!hasGestureEvents()) return;
+    XIEventMask em;
+    unsigned char mask[XIMaskLen(XI_GestureSwipeEnd)] = {0};
+
+    em.deviceid = XIAllMasterDevices;
+    em.mask_len = sizeof(mask);
+    em.mask = mask;
+    XISetMask(mask, XI_GesturePinchBegin);
+    XISetMask(mask, XI_GesturePinchUpdate);
+    XISetMask(mask, XI_GesturePinchEnd);
+    XISetMask(mask, XI_GestureSwipeBegin);
+    XISetMask(mask, XI_GestureSwipeUpdate);
+    XISetMask(mask, XI_GestureSwipeEnd);
+
+    // A refusal leaves the window without gestures, which is not an error
+    _glfwGrabErrorHandlerX11();
+    XISelectEvents(_glfw.x11.display, window->x11.handle, &em, 1);
+    _glfwReleaseErrorHandlerX11();
+#else
+    (void)window;
+#endif
+}
+
 // Return true if the core wheel button event was emulated by the X server from
 // smooth scroll valuators that have already been handled via XI_Motion
 //
@@ -864,6 +905,7 @@ createNativeWindow(_GLFWwindow *window, const _GLFWwndconfig *wndconfig, Visual 
 
     // Enable XI2 smooth scrolling if available
     updateSmoothScrolling(window);
+    selectGestureEvents(window);
 
     return true;
 }
@@ -1409,6 +1451,78 @@ handle_xi_motion_event(_GLFWwindow *window, XIDeviceEvent *de) {
     }
 }
 
+#ifdef XI_GesturePinchBegin
+static void
+input_xi_gesture(Window event_window, double x, double y, int state, GLFWGestureKind kind, GLFWGesturePhase phase, double delta, int dx, int dy, int fingers) {
+    _GLFWwindow *window = NULL;
+    if (XFindContext(_glfw.x11.display, event_window, _glfw.x11.context, (XPointer *)&window) != 0) return;
+    GLFWGestureEvent ev = {
+        .kind = kind,
+        .phase = phase,
+        .keyboard_modifiers = translateState(state),
+        .x = x,
+        .y = y,
+        .delta = delta,
+        .dx = dx,
+        .dy = dy,
+        .fingers = fingers > 0 ? (unsigned)fingers : 0,
+    };
+    _glfwInputGesture(window, &ev);
+}
+
+// The touchpad gestures of XI 2.4, reported the way the Wayland backend reports
+// them: a pinch carries both scale and rotation and becomes the two gestures
+// macOS recognizes separately, and a swipe is reported once it ends, as its
+// dominant direction
+static void
+handle_xi_gesture_event(int evtype, void *data) {
+    switch (evtype) {
+        case XI_GesturePinchBegin:
+        case XI_GesturePinchUpdate:
+        case XI_GesturePinchEnd: {
+            const XIGesturePinchEvent *pe = data;
+#define pinch(kind, phase, delta, fingers) input_xi_gesture(pe->event, pe->event_x, pe->event_y, pe->mods.effective, kind, phase, delta, 0, 0, fingers)
+            if (evtype == XI_GesturePinchBegin) {
+                _glfw.x11.xi.pinch_scale = 1;
+                pinch(GLFW_GESTURE_PINCH, GLFW_GESTURE_BEGIN, 0, pe->detail);
+                pinch(GLFW_GESTURE_ROTATE, GLFW_GESTURE_BEGIN, 0, pe->detail);
+            } else if (evtype == XI_GesturePinchUpdate) {
+                // The scale is relative to the start of the gesture, the angle to the previous event
+                if (pe->scale > 0 && _glfw.x11.xi.pinch_scale > 0) pinch(GLFW_GESTURE_PINCH, GLFW_GESTURE_UPDATE, pe->scale / _glfw.x11.xi.pinch_scale - 1, 0);
+                _glfw.x11.xi.pinch_scale = pe->scale;
+                if (pe->delta_angle != 0) pinch(GLFW_GESTURE_ROTATE, GLFW_GESTURE_UPDATE, pe->delta_angle, 0);
+            } else {
+                const GLFWGesturePhase phase = pe->flags & XIGesturePinchEventCancelled ? GLFW_GESTURE_CANCEL : GLFW_GESTURE_END;
+                pinch(GLFW_GESTURE_PINCH, phase, 0, 0);
+                pinch(GLFW_GESTURE_ROTATE, phase, 0, 0);
+            }
+#undef pinch
+        } break;
+        case XI_GestureSwipeBegin:
+        case XI_GestureSwipeUpdate:
+        case XI_GestureSwipeEnd: {
+            const XIGestureSwipeEvent *se = data;
+            if (evtype == XI_GestureSwipeBegin) {
+                _glfw.x11.xi.swipe_dx = 0;
+                _glfw.x11.xi.swipe_dy = 0;
+                _glfw.x11.xi.swipe_fingers = se->detail;
+            } else if (evtype == XI_GestureSwipeUpdate) {
+                _glfw.x11.xi.swipe_dx += se->delta_x;
+                _glfw.x11.xi.swipe_dy += se->delta_y;
+            } else {
+                const double ax = fabs(_glfw.x11.xi.swipe_dx), ay = fabs(_glfw.x11.xi.swipe_dy);
+                if ((se->flags & XIGestureSwipeEventCancelled) || (ax < 1 && ay < 1)) break;
+                const int dx = ax >= ay ? (_glfw.x11.xi.swipe_dx > 0 ? 1 : -1) : 0, dy = ax < ay ? (_glfw.x11.xi.swipe_dy > 0 ? 1 : -1) : 0;
+#define swipe(phase, fingers) input_xi_gesture(se->event, se->event_x, se->event_y, se->mods.effective, GLFW_GESTURE_SWIPE, phase, 0, dx, dy, fingers)
+                swipe(GLFW_GESTURE_BEGIN, _glfw.x11.xi.swipe_fingers);
+                swipe(GLFW_GESTURE_END, 0);
+#undef swipe
+            }
+        } break;
+    }
+}
+#endif
+
 #define dnd _glfw.x11.xdnd
 // Dropping of data onto window {{{
 
@@ -1844,6 +1958,12 @@ processEvent(XEvent *event) {
                         }
                     }
                 }
+#ifdef XI_GesturePinchBegin
+                // Handle the touchpad gestures of XI 2.4
+                else if (event->xcookie.evtype >= XI_GesturePinchBegin && event->xcookie.evtype <= XI_GestureSwipeEnd) {
+                    handle_xi_gesture_event(event->xcookie.evtype, event->xcookie.data);
+                }
+#endif
                 XFreeEventData(_glfw.x11.display, &event->xcookie);
             }
         }
@@ -2673,7 +2793,9 @@ _glfwPlatformWindowBell(_GLFWwindow *window) {
 
 unsigned
 _glfwPlatformSupportedGestures(void) {
-    return 0;
+    // XI 2.4 has the pinch, which carries the rotation, and the swipe
+    if (!hasGestureEvents()) return 0;
+    return _GLFW_GESTURE_BIT(GLFW_GESTURE_PINCH) | _GLFW_GESTURE_BIT(GLFW_GESTURE_ROTATE) | _GLFW_GESTURE_BIT(GLFW_GESTURE_SWIPE);
 }
 
 void
