@@ -1423,15 +1423,19 @@ def send_gesture_report(
 def send_pointer_report(
     screen: Screen, kind: int, phase: int, device: int, contact: int, x: int, y: int, buttons: int = 0, mods: int = 0, tool: int = 1, valid: int = 0,
     p: int = 0, tx: int = 0, ty: int = 0, twist: int = 0, tangent: int = 0, z: int = 0, dist: int = 0, wheel: int = 0, wclicks: int = 0,
-    t: int = 0, src: int = 0, major: int = 0, minor: int = 0, angle: int = 0, w: int = 0, h: int = 0, tu: int = -1, stage: int = -1
+    t: int = 0, src: int = 0, major: int = 0, minor: int = 0, angle: int = 0, w: int = 0, h: int = 0, tu: int = -1, stage: int = -1,
+    rx: int = 0, ry: int = 0, grip: int = 0, conf: int = -1
 ) -> bool: ...
 def send_pointer_action(
-    screen: Screen, action: int, device: int = 0, state: int = -1, x: int = 0, y: int = 0, mods: int = 0, t: int = 0, tu: int = -1
+    screen: Screen, action: int, device: int = 0, state: int = -1, x: int = 0, y: int = 0, mods: int = 0, t: int = 0, tu: int = -1,
+    dx: int = 0, dy: int = 0
 ) -> bool: ...
 def send_pointer_device(
     screen: Screen, device: int, kind: int = 1, tool: int = 1, axes: int = 0, name: str | None = None, serial: int = 0, hwid: int = 0, vid: int = 0,
     pid: int = 0, buttons: int = 0, rings: int = 0, strips: int = 0, dials: int = 0, num_modes: Sequence[int] | None = None,
-    modes: Sequence[int] | None = None
+    modes: Sequence[int] | None = None, tablet: int = 0, w: int = 0, h: int = 0, direct: int = -1, bat: int = -1, pcolor: int = -1,
+    pwidth: int = -1, pstyle: int = 0, bgroups: Sequence[int | None] | None = None, rgroups: Sequence[int | None] | None = None,
+    sgroups: Sequence[int | None] | None = None, dgroups: Sequence[int | None] | None = None
 ) -> bool: ...
 def send_pointer_pad(
     screen: Screen, device: int, control: int, index: int, value: int = 0, stop: bool = False, src: bool = False, mods: int = 0, t: int = 0, tu: int = -1

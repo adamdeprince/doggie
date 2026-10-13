@@ -40,6 +40,7 @@
 #include <stdio.h>
 #include <locale.h>
 #include <fcntl.h>
+#include <math.h>
 #include <unistd.h>
 
 
@@ -173,11 +174,49 @@ tablet_tool_from_name(const char *name) {
     return GLFW_TABLET_TOOL_UNKNOWN;
 }
 
+// The server puts the position of a tool through a matrix that maps the tablet
+// to the screen or to a part of it, which the user can change at any time, and
+// the position in an event is the result. The matrix is read here so that it
+// can be undone, which is how the place on the tablet is had. The caller has
+// to have grabbed the error handler, since the device may be gone
+void
+read_xi_tablet_mapping(XITabletDevice *td) {
+    td->has_unmap = false;
+    if (td->x.number < 0 || td->y.number < 0) return;
+    Atom type = None;
+    int format = 0;
+    unsigned long nitems = 0, bytes_after = 0;
+    unsigned char *data = NULL;
+    XIGetProperty(
+        _glfw.x11.display, td->deviceid, _glfw.x11.xi.COORDINATE_TRANSFORMATION_MATRIX, 0, 9, False, _glfw.x11.xi.FLOAT, &type, &format, &nitems, &bytes_after,
+        &data);
+    if (!data) return;
+    if (type == _glfw.x11.xi.FLOAT && format == 32 && nitems == 9) {
+        float f[9];
+        memcpy(f, data, sizeof(f));
+        const double m[9] = {f[0], f[1], f[2], f[3], f[4], f[5], f[6], f[7], f[8]};
+        const double det = m[0] * (m[4] * m[8] - m[5] * m[7]) - m[1] * (m[3] * m[8] - m[5] * m[6]) + m[2] * (m[3] * m[7] - m[4] * m[6]);
+        if (fabs(det) > 1e-9) {
+            const double inverse[9] = {
+                (m[4] * m[8] - m[5] * m[7]) / det, (m[2] * m[7] - m[1] * m[8]) / det, (m[1] * m[5] - m[2] * m[4]) / det,
+                (m[5] * m[6] - m[3] * m[8]) / det, (m[0] * m[8] - m[2] * m[6]) / det, (m[2] * m[3] - m[0] * m[5]) / det,
+                (m[3] * m[7] - m[4] * m[6]) / det, (m[1] * m[6] - m[0] * m[7]) / det, (m[0] * m[4] - m[1] * m[3]) / det,
+            };
+            memcpy(td->unmap, inverse, sizeof(inverse));
+            td->has_unmap = true;
+        }
+    }
+    XFree(data);
+}
+
 // The libinput, wacom and Xwayland drivers name tablet tools by their type
 // and give them a pressure axis
 static void
 read_xi_tablet_device(const XIDeviceInfo *device) {
     XITabletDevice td = {.deviceid = device->deviceid, .tool = tablet_tool_from_name(device->name)};
+    // Xwayland has no tablet to speak of: the position of its tools is one on
+    // the desktop and the resolution of their axes is made up
+    const bool has_tablet = strncmp(device->name, "xwayland-", 9) != 0;
     const char *serial = strstr(device->name, "(0x");
     if (serial) td.serial = strtoull(serial + 1, NULL, 16);
     XITabletAxis *axes[] = {&td.pressure, &td.tilt_x, &td.tilt_y, &td.wheel, &td.distance, &td.rotation};
@@ -192,10 +231,12 @@ read_xi_tablet_device(const XIDeviceInfo *device) {
         }
         // The first two valuators are the position. See handle_xi_tablet_event() for why it is wanted
         if (device->use == XISlavePointer && vi->mode == XIModeAbsolute && vi->max > vi->min && (vi->number == 0 || vi->number == 1)) {
-            *(vi->number ? &td.y : &td.x) = (XITabletAxis){.number = vi->number, .min = vi->min, .max = vi->max, .value = vi->value};
+            *(vi->number ? &td.y : &td.x) = (XITabletAxis){
+                .number = vi->number, .min = vi->min, .max = vi->max, .value = vi->value, .resolution = has_tablet ? vi->resolution : 0};
         }
     }
     snprintf(td.name, sizeof(td.name), "%s", device->name);
+    if (has_tablet) read_xi_tablet_mapping(&td);
     if (td.tool != GLFW_TABLET_TOOL_UNKNOWN && td.pressure.number >= 0 && _glfw.x11.xi.num_tablet_devices < arraysz(_glfw.x11.xi.tablet_devices)) {
         _glfw.x11.xi.tablet_devices[_glfw.x11.xi.num_tablet_devices++] = td;
     }
@@ -588,6 +629,8 @@ initExtensions(void) {
 
     _glfw.x11.xi.LIBINPUT_SCROLL_METHOD_ENABLED = XInternAtom(_glfw.x11.display, "libinput Scroll Method Enabled", False);
     _glfw.x11.xi.LIBINPUT_TAPPING = XInternAtom(_glfw.x11.display, "libinput Tapping Enabled", False);
+    _glfw.x11.xi.COORDINATE_TRANSFORMATION_MATRIX = XInternAtom(_glfw.x11.display, "Coordinate Transformation Matrix", False);
+    _glfw.x11.xi.FLOAT = XInternAtom(_glfw.x11.display, "FLOAT", False);
     _glfw.x11.xi.label_pressure = XInternAtom(_glfw.x11.display, "Abs Pressure", False);
     _glfw.x11.xi.label_tilt_x = XInternAtom(_glfw.x11.display, "Abs Tilt X", False);
     _glfw.x11.xi.label_tilt_y = XInternAtom(_glfw.x11.display, "Abs Tilt Y", False);

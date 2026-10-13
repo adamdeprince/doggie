@@ -560,6 +560,7 @@ static const struct wl_touch_listener touchListener = {
 // What a tablet says about itself, which its tools pass on
 typedef struct TabletInfo {
     uint32_t vid, pid;
+    uint64_t number;  // from one, in the order the tablets were attached
     char name[128];
 } TabletInfo;
 
@@ -666,6 +667,7 @@ toolHandleProximityIn(void *data, struct zwp_tablet_tool_v2 *t, uint32_t serial,
     tt->entered = true;
     tt->ev.vendor_id = info ? info->vid : 0;
     tt->ev.product_id = info ? info->pid : 0;
+    tt->ev.tablet = info ? info->number : 0;
     snprintf(tt->tablet_name, sizeof(tt->tablet_name), "%s", info ? info->name : "");
     tt->ev.name = tt->tablet_name[0] ? tt->tablet_name : NULL;
     if (_glfw.wl.wp_cursor_shape_manager_v1 && !tt->cursor_shape_device) {
@@ -843,7 +845,10 @@ static const struct zwp_tablet_tool_v2_listener toolListener = {
 
 static void
 tabletSeatHandleTabletAdded(void *data UNUSED, struct zwp_tablet_seat_v2 *seat UNUSED, struct zwp_tablet_v2 *tablet) {
-    zwp_tablet_v2_add_listener(tablet, &tabletListener, calloc(1, sizeof(TabletInfo)));
+    static uint64_t tablet_count = 0;
+    TabletInfo *info = calloc(1, sizeof(TabletInfo));
+    if (info) info->number = ++tablet_count;
+    zwp_tablet_v2_add_listener(tablet, &tabletListener, info);
 }
 
 static void
@@ -868,11 +873,28 @@ padSendEvent(_GLFWWaylandTabletPad *pad, GLFWTabletPadEvent *ev, const uint32_t 
     _GLFWwindow *window = _glfwWindowForId(pad->window_id);
     if (!window) return;
     unsigned num_modes[arraysz(pad->groups)], modes[arraysz(pad->groups)];
+    // The group of each button, and of each ring, strip and dial by the place it has among the controls of its kind
+    int button_groups[64], control_groups[arraysz(pad->controls)];
+    const unsigned num_grouped = MIN(pad->num_buttons, (unsigned)arraysz(button_groups));
+    for (unsigned i = 0; i < num_grouped; i++) button_groups[i] = -1;
     bool modes_known = pad->num_groups > 0;
     for (size_t i = 0; i < pad->num_groups; i++) {
-        num_modes[i] = MAX(1u, pad->groups[i]->num_modes);  // a group with a single mode does not say how many it has
-        modes[i] = pad->groups[i]->mode;
-        modes_known = modes_known && pad->groups[i]->has_mode_serial;
+        const _GLFWWaylandTabletPadGroup *g = pad->groups[i];
+        num_modes[i] = MAX(1u, g->num_modes);  // a group with a single mode does not say how many it has
+        modes[i] = g->mode;
+        modes_known = modes_known && g->has_mode_serial;
+        for (size_t b = 0; b < g->num_buttons; b++) {
+            if (g->buttons[b] < num_grouped) button_groups[g->buttons[b]] = (int)i;
+        }
+    }
+    // The controls are kept in the order they were announced, which numbers
+    // each kind from zero, so the rings come first here, then the strips, then
+    // the dials, each kind in the order of its numbers
+    unsigned first[3] = {0, pad->num_rings, pad->num_rings + pad->num_strips};
+    for (size_t i = 0; i < pad->num_controls; i++) {
+        const _GLFWWaylandTabletPadControl *c = pad->controls[i];
+        const unsigned kind = c->type == GLFW_TABLET_PAD_RING ? 0 : (c->type == GLFW_TABLET_PAD_STRIP ? 1 : 2);
+        control_groups[first[kind] + c->index] = (int)c->group->index;
     }
     ev->keyboard_modifiers = _glfw.wl.xkb.states.modifiers;
     ev->timestamp = time ? event_time_to_monotonic(*time) : monotonic();
@@ -884,6 +906,12 @@ padSendEvent(_GLFWWaylandTabletPad *pad, GLFWTabletPadEvent *ev, const uint32_t 
     ev->num_groups = pad->num_groups;
     ev->num_modes = num_modes;
     ev->modes = modes_known ? modes : NULL;
+    // A pad with more buttons than there is room for here says nothing of their groups
+    ev->button_groups = pad->num_buttons <= arraysz(button_groups) ? button_groups : NULL;
+    ev->ring_groups = control_groups;
+    ev->strip_groups = control_groups + first[1];
+    ev->dial_groups = control_groups + first[2];
+    ev->tablet = pad->tablet;
     ev->name = pad->tablet_name[0] ? pad->tablet_name : NULL;
     ev->vendor_id = pad->vendor_id;
     ev->product_id = pad->product_id;
@@ -1052,9 +1080,15 @@ padGroupHandleButtons(void *data, struct zwp_tablet_pad_group_v2 *group UNUSED, 
     free(pg->buttons);
     pg->num_buttons = 0;
     pg->buttons = buttons->size ? malloc(buttons->size) : NULL;
-    if (!pg->buttons) return;
-    memcpy(pg->buttons, buttons->data, buttons->size);
-    pg->num_buttons = buttons->size / sizeof(uint32_t);
+    if (pg->buttons) {
+        memcpy(pg->buttons, buttons->data, buttons->size);
+        pg->num_buttons = buttons->size / sizeof(uint32_t);
+    }
+    // A compositor may take buttons out of a group for its own use, or give
+    // them back, while the pad is in use, and says so by listing the buttons
+    // of the group again. Nothing is reported of a pad that has no focus
+    GLFWTabletPadEvent ev = {.type = GLFW_TABLET_PAD_CHANGED};
+    padSendEvent(pg->pad, &ev, NULL);
 }
 
 static void
@@ -1168,6 +1202,7 @@ padHandleEnter(void *data, struct zwp_tablet_pad_v2 *pad UNUSED, uint32_t serial
     pp->enter_serial = serial;
     pp->vendor_id = info ? info->vid : 0;
     pp->product_id = info ? info->pid : 0;
+    pp->tablet = info ? info->number : 0;
     snprintf(pp->tablet_name, sizeof(pp->tablet_name), "%s", info ? info->name : "");
     // The modes are from before the pad had the focus here, and so are their serials
     for (size_t i = 0; i < pp->num_groups; i++) pp->groups[i]->has_mode_serial = false;

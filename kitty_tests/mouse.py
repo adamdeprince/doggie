@@ -864,3 +864,108 @@ class TestMouse(BaseTest):
             self.assertIsNone(label(bad), bad)
         send(f'v=2:op=label:device=9:button=2:text={b64("Undo")}')
         self.assertIsNone(take_pointer_pad_label())
+
+    def test_tablet_hardware_facts(self):
+        # What hardware reports and the protocol had no place for at first: every one of these is left out when it is not known
+        s = self.create_screen()
+        c = s.callbacks
+
+        def send(body):
+            c.clear()
+            parse_bytes(s, f'\x1b]777;tablet-pointer;{body}\x1b\\'.encode())
+
+        def report(kind, phase, contact=0, **kw):
+            c.clear()
+            kw.setdefault('t', 1000)
+            return send_pointer_report(s, kind, phase, 7, contact, 256, 512, **kw)
+
+        def ev(fields):
+            return f'\x1b]777;tablet-pointer;v=1:op=event:{fields}\x1b\\'.encode()
+
+        def device(dev=7, **kw):
+            c.clear()
+            return send_pointer_device(s, dev, **kw)
+
+        def frame(fields):
+            return f'\x1b]777;tablet-pointer;v=1:op=device:{fields}\x1b\\'.encode()
+
+        def action(*a, **kw):
+            c.clear()
+            kw.setdefault('t', 1000)
+            return send_pointer_action(s, *a, **kw)
+
+        send('v=1:op=mode:mode=23')
+        # Whether a finger is meant: said only when the system judges, and it can change while the finger is down
+        self.assertTrue(report(2, 1, 3, tool=0, buttons=1))
+        self.ae(c.wtcbuf, ev('kind=2:phase=1:device=7:t=1000:contact=3:x=256:y=512:buttons=1:mods=0:tool=0:valid=0'))
+        self.assertTrue(report(2, 2, 3, tool=0, buttons=1, conf=1))
+        self.ae(c.wtcbuf, ev('kind=2:phase=2:device=7:t=1000:contact=3:x=256:y=512:buttons=1:mods=0:tool=0:valid=0:conf=1'))
+        self.assertTrue(report(2, 2, 3, tool=0, buttons=1, conf=0, src=1, w=100, h=50))
+        self.ae(c.wtcbuf, ev('kind=2:phase=2:device=7:t=1000:contact=3:x=256:y=512:buttons=1:mods=0:tool=0:valid=0:conf=0:src=1:w=100:h=50'))
+        # A contact that is not meant is still one until it lifts or is cancelled, and a cancel says what was last said of it
+        send('v=1:op=mode:mode=21')
+        self.ae(c.wtcbuf, ev('kind=2:phase=4:device=7:t=1000:contact=3:x=256:y=512:buttons=0:mods=0:tool=0:valid=0:conf=0:src=1:w=100:h=50'))
+
+        # Where a tool is on its tablet and how hard its barrel is held, each with a bit of valid
+        self.assertTrue(report(1, 1, buttons=1, valid=1 | 256, p=100, rx=65535, ry=0, grip=9))
+        self.ae(c.wtcbuf, ev('kind=1:phase=1:device=7:t=1000:contact=0:x=256:y=512:buttons=1:mods=0:tool=1:valid=257:p=100:rx=65535:ry=0'))
+        self.assertTrue(report(1, 2, buttons=1, valid=1 | 512, p=100, rx=1, ry=2, grip=65535))
+        self.ae(c.wtcbuf, ev('kind=1:phase=2:device=7:t=1000:contact=0:x=256:y=512:buttons=1:mods=0:tool=1:valid=513:p=100:grip=65535'))
+        self.assertTrue(report(1, 3, valid=64 | 256 | 512, wheel=-1500, wclicks=-1, rx=32768, ry=40000, grip=0))
+        self.ae(c.wtcbuf, ev(
+            'kind=1:phase=3:device=7:t=1000:contact=0:x=256:y=512:buttons=0:mods=0:tool=1:valid=832:wheel=-1500:wclicks=-1:rx=32768:ry=40000:grip=0'))
+        # The longest report there is fits
+        self.assertTrue(report(
+            1, 1, 2147483647, tool=7, buttons=4294967295, mods=15, valid=1023, p=65535, tx=-9000, ty=-9000, twist=35999, tangent=-65535, z=-1000000,
+            dist=65535, wheel=-2147483647, wclicks=-2147483647, major=2147483647, minor=2147483647, angle=-2147483647, rx=65535, ry=65535, grip=65535,
+            stage=2, conf=1, src=1, w=2147483647, h=2147483647, t=18446744073709551615, tu=999))
+        self.assertTrue(c.wtcbuf.endswith(b':rx=65535:ry=65535:grip=65535:stage=2:conf=1:src=1:w=2147483647:h=2147483647\x1b\\'), c.wtcbuf)
+        send('v=1:op=mode:mode=21')
+
+        # The tablet a tool is on, its surface, and what is stored in the tool
+        self.assertTrue(device(axes=1 | 256, tablet=2, w=57344, h=37888, direct=1))
+        self.ae(c.wtcbuf, frame('device=7:kind=1:tool=1:axes=257:w=57344:h=37888:direct=1:tablet=2'))
+        self.assertTrue(device(tablet=1, w=57344, direct=0))  # a size is both lengths or neither
+        self.ae(c.wtcbuf, frame('device=7:kind=1:tool=1:axes=0:direct=0:tablet=1'))
+        self.assertTrue(device(bat=0, pcolor=0, pwidth=0, pstyle=3))
+        self.ae(c.wtcbuf, frame('device=7:kind=1:tool=1:axes=0:bat=0:pcolor=000000:pwidth=0:pstyle=3'))
+        self.assertTrue(device(bat=250, pcolor=0xff8000, pwidth=128, name='USI', serial=5))
+        self.ae(c.wtcbuf, frame('device=7:kind=1:tool=1:axes=0:bat=100:pcolor=ff8000:pwidth=128:name=VVNJ'))
+        # The tablet is not a hardware identifier, and comes before those
+        send('v=1:op=mode:mode=29')
+        self.assertTrue(device(tablet=3, serial=5, vid=1386, pid=855))
+        self.ae(c.wtcbuf, frame('device=7:kind=1:tool=1:axes=0:tablet=3:serial=5:vid=1386:pid=855'))
+        send('v=1:op=mode:mode=21')
+
+        # A pad says which tablet it belongs to and which group each of its controls is in
+        self.assertTrue(device(9, kind=3, buttons=6, rings=1, strips=1, num_modes=(3, 2), modes=(0, 1), tablet=2,
+                               bgroups=(0, 0, 0, None, 1, 1), rgroups=(0,), sgroups=(1,)))
+        self.ae(c.wtcbuf, frame('device=9:kind=3:buttons=6:rings=1:strips=1:dials=0:groups=2:modes=3,2:mode=0,1:bgroups=0,0,0,-,1,1:rgroups=0:sgroups=1:tablet=2'))
+        # A kind of control the pad has none of has no list, nor has one whose groups are not known
+        self.assertTrue(device(9, kind=3, buttons=2, dials=2, num_modes=(1,), dgroups=(0, None)))
+        self.ae(c.wtcbuf, frame('device=9:kind=3:buttons=2:rings=0:strips=0:dials=2:groups=1:modes=1:dgroups=0,-'))
+        # A control in a group the pad does not have is in none
+        self.assertTrue(device(9, kind=3, buttons=3, num_modes=(1,), bgroups=(0, 1, -5)))
+        self.ae(c.wtcbuf, frame('device=9:kind=3:buttons=3:rings=0:strips=0:dials=0:groups=1:modes=1:bgroups=0,-,-'))
+        self.assertRaises(ValueError, device, 9, kind=3, buttons=3, num_modes=(1,), bgroups=(0, 0))
+        # The longest device frame there is fits
+        many = tuple(15 for i in range(64))
+        self.assertTrue(device(18446744073709551615, kind=3, buttons=64, rings=64, strips=64, dials=64, num_modes=(4294967295,) * 16, modes=(4294967295,) * 16,
+                               bgroups=many, rgroups=many, sgroups=many, dgroups=many, tablet=18446744073709551615, name='é' * 64,
+                               serial=18446744073709551615, hwid=18446744073709551615, vid=4294967295, pid=4294967295))
+        self.assertIn(b':dgroups=' + b','.join(b'15' for i in range(64)) + b':tablet=18446744073709551615:name=', c.wtcbuf)
+        self.assertTrue(c.wtcbuf.endswith(b'\x1b\\'))
+        self.assertLess(len(c.wtcbuf), 2048)
+
+        # A tool put into its holder and taken out of it does not last, and has no position worth more than the pointer's
+        self.assertTrue(action(6, 7))
+        self.ae(c.wtcbuf, ev('kind=4:device=7:t=1000:action=6:x=0:y=0:mods=0'))
+        self.assertTrue(action(7, 7))
+        self.ae(c.wtcbuf, ev('kind=4:device=7:t=1000:action=7:x=0:y=0:mods=0'))
+        # A tool moved through the air with its button held: how far is said only between the beginning and the end
+        self.assertTrue(action(8, 7, state=1, x=256, y=512, dx=5, dy=5))
+        self.ae(c.wtcbuf, ev('kind=4:device=7:t=1000:action=8:state=1:x=256:y=512:mods=0'))
+        self.assertTrue(action(8, 7, state=2, x=256, y=512, dx=-120, dy=40000, t=1008, tu=250))
+        self.ae(c.wtcbuf, ev('kind=4:device=7:t=1008:tu=250:action=8:state=2:dx=-120:dy=32767:x=256:y=512:mods=0'))
+        self.assertTrue(action(8, 7, state=0, x=256, y=512, t=1016))
+        self.ae(c.wtcbuf, ev('kind=4:device=7:t=1016:action=8:state=0:x=256:y=512:mods=0'))

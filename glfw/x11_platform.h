@@ -264,6 +264,7 @@ typedef struct XIScrollDevice {
 typedef struct XITabletAxis {
     int number;  // -1 when the device lacks the axis
     double min, max, value;
+    int resolution;  // units to the metre, zero when the driver does not say
 } XITabletAxis;
 
 typedef struct XITabletDevice {
@@ -275,6 +276,11 @@ typedef struct XITabletDevice {
     // Where the tool is on the tablet, for a tool that is attached to the core
     // pointer and reports absolute positions; the number is -1 otherwise
     XITabletAxis x, y;
+    // The inverse of the matrix by which the server maps the tablet to the
+    // screen, which gets the place on the tablet back from x and y. Only with
+    // has_unmap, which is unset when the matrix cannot be read or undone
+    double unmap[9];
+    bool has_unmap;
     char name[128];
 } XITabletDevice;
 
@@ -518,7 +524,7 @@ typedef struct _GLFWlibraryX11 {
         // The touchpad gestures in progress, see handle_xi_gesture_event()
         double pinch_scale, swipe_dx, swipe_dy;
         int swipe_fingers;
-        Atom LIBINPUT_SCROLL_METHOD_ENABLED, LIBINPUT_TAPPING;
+        Atom LIBINPUT_SCROLL_METHOD_ENABLED, LIBINPUT_TAPPING, COORDINATE_TRANSFORMATION_MATRIX, FLOAT;
         XITabletDevice tablet_devices[8];
         unsigned num_tablet_devices;
         // Server timestamp of the last tablet event the application consumed.
@@ -606,4 +612,5 @@ void _glfwInputErrorX11(int error, const char *message);
 void _glfwGetSystemContentScaleX11(float *xscale, float *yscale, bool bypass_cache);
 void _glfwPushSelectionToManagerX11(void);
 void read_xi_scroll_devices(void);
+void read_xi_tablet_mapping(XITabletDevice *td);
 void free_dnd_data(void);

@@ -1931,7 +1931,7 @@ send_gesture_report(PyObject *self UNUSED, PyObject *args, PyObject *kw) {
 
 static void
 write_pointer_report(Screen *screen, const PointerReport *r) {
-    char buf[512];
+    char buf[1024];  // more than the longest report there can be
     int n = snprintf(buf, sizeof(buf), "777;tablet-pointer;v=1:op=event:kind=%d:phase=%d:device=%llu:t=%llu", r->kind, r->phase, (unsigned long long)r->device, r->t);
     if (r->has_tu) n += snprintf(buf + n, sizeof(buf) - n, ":tu=%u", r->tu);
     if (r->phase != POINTER_FRAME) {
@@ -1945,8 +1945,11 @@ write_pointer_report(Screen *screen, const PointerReport *r) {
         F(32, ":dist=%d", r->dist);
         F(64, ":wheel=%d:wclicks=%d", r->wheel, r->wclicks);
         F(128, ":major=%d:minor=%d:angle=%d", r->major, r->minor, r->angle);
+        F(256, ":rx=%d:ry=%d", r->rx, r->ry);
+        F(512, ":grip=%d", r->grip);
 #undef F
         if (r->has_stage) n += snprintf(buf + n, sizeof(buf) - n, ":stage=%d", r->stage);
+        if (r->has_conf) n += snprintf(buf + n, sizeof(buf) - n, ":conf=%d", r->conf);
         if (r->src) n += snprintf(buf + n, sizeof(buf) - n, ":src=%d", r->src);
         if (r->w > 0 && r->h > 0) n += snprintf(buf + n, sizeof(buf) - n, ":w=%d:h=%d", r->w, r->h);
         if (r->ink) snprintf(buf + n, sizeof(buf) - n, ":ink=%u", r->ink);
@@ -1963,6 +1966,7 @@ screen_pointer_action(Screen *screen, const PointerAction *a) {
     if (a->has_tu) n += snprintf(buf + n, sizeof(buf) - n, ":tu=%u", a->tu);
     n += snprintf(buf + n, sizeof(buf) - n, ":action=%d", a->action);
     if (a->state >= 0) n += snprintf(buf + n, sizeof(buf) - n, ":state=%d", a->state);
+    if (a->state == 2) n += snprintf(buf + n, sizeof(buf) - n, ":dx=%d:dy=%d", MIN(MAX(a->dx, -32767), 32767), MIN(MAX(a->dy, -32767), 32767));
     snprintf(buf + n, sizeof(buf) - n, ":x=%d:y=%d:mods=%d", a->x, a->y, a->mods);
     write_escape_code_to_child(screen, ESC_OSC, buf);
     return true;
@@ -1981,37 +1985,64 @@ utf8_prefix_length(const char *s, size_t max) {
     return n;
 }
 
+// The most controls of one kind whose groups a device frame lists
+#define POINTER_MAX_GROUPED 64
+
 // Describes a tool or a pad to the program, which it is before the first of
-// its reports. The hardware identifiers go only to a program that asked for them
+// its reports and again when what was said of it changes. The hardware
+// identifiers go only to a program that asked for them
 bool
 screen_pointer_device(Screen *screen, const PointerDevice *d) {
     if (!(screen->pointer.mode & (d->kind == POINTER_PAD ? POINTER_MODE_PADS : d->kind))) return false;
-    char buf[512];
+    char buf[2048];  // more than the longest frame there can be
     int n;
+#define A(...) n += snprintf(buf + n, sizeof(buf) - n, __VA_ARGS__)
     if (d->kind == POINTER_PAD) {
         n = snprintf(
             buf, sizeof(buf), "777;tablet-pointer;v=1:op=device:device=%llu:kind=%d:buttons=%u:rings=%u:strips=%u:dials=%u:groups=%u",
             (unsigned long long)d->device, d->kind, d->num_buttons, d->num_rings, d->num_strips, d->num_dials, d->num_groups);
         const unsigned num_groups = MIN(d->num_groups, 16u);
-        for (unsigned i = 0; i < num_groups && d->num_modes; i++) n += snprintf(buf + n, sizeof(buf) - n, "%s%u", i ? "," : ":modes=", d->num_modes[i]);
-        for (unsigned i = 0; i < num_groups && d->modes; i++) n += snprintf(buf + n, sizeof(buf) - n, "%s%u", i ? "," : ":mode=", d->modes[i]);
+        for (unsigned i = 0; i < num_groups && d->num_modes; i++) A("%s%u", i ? "," : ":modes=", MIN(d->num_modes[i], 9999u));
+        for (unsigned i = 0; i < num_groups && d->modes; i++) A("%s%u", i ? "," : ":mode=", MIN(d->modes[i], 9999u));
+        // The group of every control of a kind, or nothing: a list that stopped short would put the controls after it in no group.
+        // A control in a group the frame does not describe is in none
+#define G(key, groups, count)                                                                         \
+    if (d->groups && d->count && d->count <= POINTER_MAX_GROUPED) {                                   \
+        for (unsigned i = 0; i < d->count; i++) {                                                     \
+            if (d->groups[i] < 0 || d->groups[i] >= (int)num_groups) A("%s-", i ? "," : ":" key "="); \
+            else A("%s%d", i ? "," : ":" key "=", d->groups[i]);                                      \
+        }                                                                                             \
+    }
+        G("bgroups", button_groups, num_buttons)
+        G("rgroups", ring_groups, num_rings)
+        G("sgroups", strip_groups, num_strips)
+        G("dgroups", dial_groups, num_dials)
+#undef G
     } else {
         n = snprintf(
             buf, sizeof(buf), "777;tablet-pointer;v=1:op=device:device=%llu:kind=%d:tool=%d:axes=%u", (unsigned long long)d->device, d->kind, d->tool, d->axes);
+        if (d->w && d->h) A(":w=%u:h=%u", d->w, d->h);
+        if (d->direct) A(":direct=%d", d->direct > 0);
+        if (d->has_bat) A(":bat=%u", MIN(d->bat, 100u));
+        if (d->has_pcolor) A(":pcolor=%06x", d->pcolor & 0xffffff);
+        if (d->has_pwidth) A(":pwidth=%u", d->pwidth);
+        if (d->pstyle) A(":pstyle=%u", d->pstyle);
     }
+    if (d->tablet) A(":tablet=%llu", (unsigned long long)d->tablet);
     if (d->name && d->name[0]) {
         unsigned char name[192];
         size_t sz = sizeof(name) - 1;
         if (base64_encode8((const unsigned char *)d->name, utf8_prefix_length(d->name, 127), name, &sz, true)) {
             name[sz] = 0;
-            n += snprintf(buf + n, sizeof(buf) - n, ":name=%s", name);
+            A(":name=%s", name);
         }
     }
     if (screen->pointer.mode & POINTER_MODE_IDS) {
-        if (d->serial) n += snprintf(buf + n, sizeof(buf) - n, ":serial=%llu", (unsigned long long)d->serial);
-        if (d->hwid) n += snprintf(buf + n, sizeof(buf) - n, ":hwid=%llu", (unsigned long long)d->hwid);
-        if (d->vid || d->pid) snprintf(buf + n, sizeof(buf) - n, ":vid=%u:pid=%u", d->vid, d->pid);
+        if (d->serial) A(":serial=%llu", (unsigned long long)d->serial);
+        if (d->hwid) A(":hwid=%llu", (unsigned long long)d->hwid);
+        if (d->vid || d->pid) A(":vid=%u:pid=%u", d->vid, d->pid);
     }
+#undef A
     write_escape_code_to_child(screen, ESC_OSC, buf);
     return true;
 }
@@ -2160,6 +2191,7 @@ typedef struct TabletTool {
     uint64_t device;
     id_type window_id;     // the window that captured the stroke
     id_type described_to;  // the window whose program was sent the device frame
+    uint64_t described;    // the signature of what that frame said
 } TabletTool;
 static TabletTool tablet_tools[8];
 
@@ -2168,6 +2200,7 @@ typedef struct TabletPad {
     uint64_t device;
     id_type window_id;     // the window that got its last report, and so knows of its held buttons
     id_type described_to;  // the window whose program was sent the device frame
+    uint64_t described;    // the signature of what that frame said
 } TabletPad;
 static TabletPad tablet_pads[8];
 
@@ -2317,6 +2350,29 @@ pointer_window(int bit) {
         (r)->has_tu = is_fine;                                             \
     }
 
+// A number that is another one when what a device frame says of a device is.
+// The modes the groups of a pad are in are left out, a change of mode being
+// reported by itself
+static uint64_t
+pointer_device_signature(const PointerDevice *d) {
+    uint64_t h = 0xcbf29ce484222325ull;
+#define H(v) h = (h ^ (uint64_t)(v)) * 0x100000001b3ull
+#define HG(groups, count) \
+    H(d->count);          \
+    for (unsigned i = 0; i < d->count && d->groups; i++) H(d->groups[i] + 2)
+    H(d->kind), H(d->tool), H(d->axes), H(d->vid), H(d->pid), H(d->serial), H(d->hwid), H(d->tablet), H(d->w), H(d->h), H(d->direct + 1);
+    H(d->has_bat ? d->bat + 1 : 0), H(d->has_pcolor ? d->pcolor + 1 : 0), H(d->has_pwidth ? d->pwidth + 1 : 0), H(d->pstyle);
+    for (const char *c = d->name ? d->name : ""; *c; c++) H((unsigned char)*c);
+    HG(num_modes, num_groups);
+    HG(button_groups, num_buttons);
+    HG(ring_groups, num_rings);
+    HG(strip_groups, num_strips);
+    HG(dial_groups, num_dials);
+#undef HG
+#undef H
+    return h;
+}
+
 // An action goes to the window that has the stroke of its tool, or else to the
 // window under the pointer
 static bool
@@ -2359,12 +2415,21 @@ tablet_event(const GLFWTabletEvent *ev) {
         return false;
     }
     const WindowGeometry *g = &w->render_data.geometry;
-    if (t->described_to != w->id) {
-        const PointerDevice d = {
-            .kind = POINTER_PEN, .tool = ev->tool, .axes = ev->axes, .device = ev->device, .name = ev->name,
-            .serial = ev->serial, .hwid = ev->hardware_id, .vid = ev->vendor_id, .pid = ev->product_id,
-        };
-        if (screen_pointer_device(w->render_data.screen, &d)) t->described_to = w->id;
+    const bool has_size = ev->tablet_width > 0 && ev->tablet_height > 0;
+    const PointerDevice d = {
+        .kind = POINTER_PEN, .tool = ev->tool, .axes = ev->axes, .device = ev->device, .name = ev->name,
+        .serial = ev->serial, .hwid = ev->hardware_id, .vid = ev->vendor_id, .pid = ev->product_id, .tablet = ev->tablet,
+        .w = has_size ? (unsigned)pointer_clamp(round(ev->tablet_width * 256), 1., 1073741823.) : 0,
+        .h = has_size ? (unsigned)pointer_clamp(round(ev->tablet_height * 256), 1., 1073741823.) : 0,
+    };
+    // A tool is described again when what was said of it is no longer so. Only
+    // a point has all there is to say, the event of a tool that left may not
+    const uint64_t signature = ev->type == GLFW_TABLET_POINT ? pointer_device_signature(&d) : t->described;
+    if (t->described_to != w->id || t->described != signature) {
+        if (screen_pointer_device(w->render_data.screen, &d)) {
+            t->described_to = w->id;
+            t->described = signature;
+        }
     }
     PointerReport r = {
         .kind = POINTER_PEN,
@@ -2384,6 +2449,8 @@ tablet_event(const GLFWTabletEvent *ev) {
         .dist = pointer_clamp((int)round(ev->distance * 65535), 0, 65535),
         .wheel = (int)round(ev->wheel * 100),
         .wclicks = ev->wheel_clicks,
+        .rx = pointer_clamp((int)round(ev->tablet_x * 65535), 0, 65535),
+        .ry = pointer_clamp((int)round(ev->tablet_y * 65535), 0, 65535),
     };
     pointer_time(&r, ev->timestamp, ev->timestamp_is_fine);
     if (ev->type == GLFW_TABLET_POINT) {
@@ -2435,13 +2502,19 @@ tablet_pad_event(const GLFWTabletPadEvent *ev) {
     if (ev->type == GLFW_TABLET_PAD_LEAVE) pad->active = false;
     if (!w) return false;
     Screen *screen = w->render_data.screen;
-    if (pad->described_to != w->id) {
-        const PointerDevice d = {
-            .kind = POINTER_PAD, .device = ev->device, .name = ev->name, .vid = ev->vendor_id, .pid = ev->product_id,
-            .num_buttons = ev->num_buttons, .num_rings = ev->num_rings, .num_strips = ev->num_strips, .num_dials = ev->num_dials,
-            .num_groups = ev->num_groups, .num_modes = ev->num_modes, .modes = ev->modes,
-        };
-        if (screen_pointer_device(screen, &d)) pad->described_to = w->id;
+    const PointerDevice d = {
+        .kind = POINTER_PAD, .device = ev->device, .name = ev->name, .vid = ev->vendor_id, .pid = ev->product_id, .tablet = ev->tablet,
+        .num_buttons = ev->num_buttons, .num_rings = ev->num_rings, .num_strips = ev->num_strips, .num_dials = ev->num_dials,
+        .num_groups = ev->num_groups, .num_modes = ev->num_modes, .modes = ev->modes,
+        .button_groups = ev->button_groups, .ring_groups = ev->ring_groups, .strip_groups = ev->strip_groups, .dial_groups = ev->dial_groups,
+    };
+    // A pad is described again when what was said of it is no longer so
+    const uint64_t signature = pointer_device_signature(&d);
+    if (pad->described_to != w->id || pad->described != signature) {
+        if (screen_pointer_device(screen, &d)) {
+            pad->described_to = w->id;
+            pad->described = signature;
+        }
     }
     PointerPad p = {
         .device = ev->device, .mods = pointer_mods(ev->keyboard_modifiers), .index = (int)ev->index, .stop = ev->stopped, .from_finger = ev->from_finger,
@@ -2468,7 +2541,7 @@ tablet_pad_event(const GLFWTabletPadEvent *ev) {
             p.control = PAD_GROUP;
             p.value = (int)ev->mode;
             break;
-        default: return true;  // the pad got the focus, and has been described
+        default: return true;  // the pad got the focus or changed, and has been described
     }
     pad->window_id = w->id;
     screen_pointer_pad(screen, &p);
@@ -2554,17 +2627,18 @@ send_pointer_report(PyObject *self UNUSED, PyObject *args, PyObject *kw) {
     Screen *screen;
     PointerReport r = {.tool = 1};
     int tu = -1;
-    int stage = -1;
+    int stage = -1, conf = -1;
     static const char *kwlist[] = {"screen", "kind",  "phase",   "device", "contact", "x",    "y",     "buttons", "mods", "tool",  "valid", "p",     "tx", "ty",
                                    "twist",  "tangent", "z",     "dist",   "wheel",   "wclicks", "t",  "src",     "major", "minor", "angle", "w",     "h",  "tu",
-                                   "stage",  NULL};
+                                   "stage",  "rx",      "ry",    "grip",   "conf",    NULL};
     if (!PyArg_ParseTupleAndKeywords(
-            args, kw, "O!iiKiii|IiiIiiiiiiiiiKiiiiiiii", (char **)kwlist, &Screen_Type, &screen, &r.kind, &r.phase, &r.device, &r.contact, &r.x, &r.y, &r.buttons, &r.mods,
-            &r.tool, &r.valid, &r.p, &r.tx, &r.ty, &r.twist, &r.tangent, &r.z, &r.dist, &r.wheel, &r.wclicks, &r.t, &r.src, &r.major, &r.minor, &r.angle, &r.w,
-            &r.h, &tu, &stage))
+            args, kw, "O!iiKiii|IiiIiiiiiiiiiKiiiiiiiiiiii", (char **)kwlist, &Screen_Type, &screen, &r.kind, &r.phase, &r.device, &r.contact, &r.x, &r.y, &r.buttons,
+            &r.mods, &r.tool, &r.valid, &r.p, &r.tx, &r.ty, &r.twist, &r.tangent, &r.z, &r.dist, &r.wheel, &r.wclicks, &r.t, &r.src, &r.major, &r.minor, &r.angle,
+            &r.w, &r.h, &tu, &stage, &r.rx, &r.ry, &r.grip, &conf))
         return NULL;
     if (tu >= 0) r.tu = tu, r.has_tu = true;
     if (stage >= 0) r.stage = stage, r.has_stage = true;
+    if (conf >= 0) r.conf = conf != 0, r.has_conf = true;
     if (screen_pointer_report(screen, &r)) Py_RETURN_TRUE;
     Py_RETURN_FALSE;
 }
@@ -2574,8 +2648,9 @@ send_pointer_action(PyObject *self UNUSED, PyObject *args, PyObject *kw) {
     Screen *screen;
     PointerAction a = {.state = -1};
     int tu = -1;
-    static const char *kwlist[] = {"screen", "action", "device", "state", "x", "y", "mods", "t", "tu", NULL};
-    if (!PyArg_ParseTupleAndKeywords(args, kw, "O!i|KiiiiKi", (char **)kwlist, &Screen_Type, &screen, &a.action, &a.device, &a.state, &a.x, &a.y, &a.mods, &a.t, &tu))
+    static const char *kwlist[] = {"screen", "action", "device", "state", "x", "y", "mods", "t", "tu", "dx", "dy", NULL};
+    if (!PyArg_ParseTupleAndKeywords(
+            args, kw, "O!i|KiiiiKiii", (char **)kwlist, &Screen_Type, &screen, &a.action, &a.device, &a.state, &a.x, &a.y, &a.mods, &a.t, &tu, &a.dx, &a.dy))
         return NULL;
     if (tu >= 0) a.tu = tu, a.has_tu = true;
     if (screen_pointer_action(screen, &a)) Py_RETURN_TRUE;
@@ -2594,17 +2669,45 @@ unsigned_sequence(PyObject *src, unsigned *dest, size_t max) {
     return PyErr_Occurred() ? -1 : (int)n;
 }
 
+// Fills dest with the group of each control from a sequence in which None is a
+// control in no group. Returns false with an exception set when it is anything
+// else. *groups is left NULL for no sequence, which is groups that are not known
+static bool
+group_sequence(PyObject *src, int *dest, size_t max, const int **groups, unsigned count) {
+    if (!src || src == Py_None) return true;
+    PyObject *fast = PySequence_Fast(src, "expected a sequence of group numbers");
+    if (!fast) return false;
+    const Py_ssize_t n = PySequence_Fast_GET_SIZE(fast);
+    if (n != (Py_ssize_t)count || (size_t)n > max) {
+        Py_DECREF(fast);
+        PyErr_SetString(PyExc_ValueError, "a pad needs a group for every one of its controls");
+        return false;
+    }
+    for (Py_ssize_t i = 0; i < n; i++) {
+        PyObject *item = PySequence_Fast_GET_ITEM(fast, i);
+        dest[i] = item == Py_None ? -1 : (int)PyLong_AsLong(item);
+    }
+    Py_DECREF(fast);
+    if (PyErr_Occurred()) return false;
+    *groups = dest;
+    return true;
+}
+
 static PyObject *
 send_pointer_device(PyObject *self UNUSED, PyObject *args, PyObject *kw) {
     Screen *screen;
     PointerDevice d = {.kind = POINTER_PEN, .tool = 1};
-    PyObject *num_modes = NULL, *modes = NULL;
+    PyObject *num_modes = NULL, *modes = NULL, *bgroups = NULL, *rgroups = NULL, *sgroups = NULL, *dgroups = NULL;
     unsigned num_modes_buf[16], modes_buf[16];
-    static const char *kwlist[] = {"screen", "device", "kind", "tool", "axes",  "name",  "serial",    "hwid",  "vid",
-                                   "pid",    "buttons", "rings", "strips", "dials", "num_modes", "modes", NULL};
+    int groups_buf[4][POINTER_MAX_GROUPED];
+    int direct = -1, bat = -1, pcolor = -1, pwidth = -1;
+    static const char *kwlist[] = {"screen", "device", "kind",  "tool",  "axes",      "name",  "serial", "hwid", "vid", "pid",    "buttons", "rings",
+                                   "strips", "dials",  "num_modes", "modes", "tablet", "w",   "h",      "direct", "bat", "pcolor", "pwidth",  "pstyle",
+                                   "bgroups", "rgroups", "sgroups", "dgroups", NULL};
     if (!PyArg_ParseTupleAndKeywords(
-            args, kw, "O!K|iiIzKKIIIIIIOO", (char **)kwlist, &Screen_Type, &screen, &d.device, &d.kind, &d.tool, &d.axes, &d.name, &d.serial, &d.hwid, &d.vid,
-            &d.pid, &d.num_buttons, &d.num_rings, &d.num_strips, &d.num_dials, &num_modes, &modes))
+            args, kw, "O!K|iiIzKKIIIIIIOOKIIiiiiIOOOO", (char **)kwlist, &Screen_Type, &screen, &d.device, &d.kind, &d.tool, &d.axes, &d.name, &d.serial, &d.hwid,
+            &d.vid, &d.pid, &d.num_buttons, &d.num_rings, &d.num_strips, &d.num_dials, &num_modes, &modes, &d.tablet, &d.w, &d.h, &direct, &bat, &pcolor, &pwidth,
+            &d.pstyle, &bgroups, &rgroups, &sgroups, &dgroups))
         return NULL;
     // A pad has as many groups as it is given numbers of modes
     const int num_groups = unsigned_sequence(num_modes, num_modes_buf, arraysz(num_modes_buf)), num = unsigned_sequence(modes, modes_buf, arraysz(modes_buf));
@@ -2612,6 +2715,15 @@ send_pointer_device(PyObject *self UNUSED, PyObject *args, PyObject *kw) {
     d.num_groups = num_groups;
     d.num_modes = num_modes_buf;
     if (num && num == num_groups) d.modes = modes_buf;
+    if (!group_sequence(bgroups, groups_buf[0], POINTER_MAX_GROUPED, &d.button_groups, d.num_buttons)) return NULL;
+    if (!group_sequence(rgroups, groups_buf[1], POINTER_MAX_GROUPED, &d.ring_groups, d.num_rings)) return NULL;
+    if (!group_sequence(sgroups, groups_buf[2], POINTER_MAX_GROUPED, &d.strip_groups, d.num_strips)) return NULL;
+    if (!group_sequence(dgroups, groups_buf[3], POINTER_MAX_GROUPED, &d.dial_groups, d.num_dials)) return NULL;
+    // -1 is what is not known, and for direct 0 is a surface that is not a display
+    d.direct = direct < 0 ? 0 : (direct ? 1 : -1);
+    if (bat >= 0) d.bat = bat, d.has_bat = true;
+    if (pcolor >= 0) d.pcolor = pcolor, d.has_pcolor = true;
+    if (pwidth >= 0) d.pwidth = pwidth, d.has_pwidth = true;
     if (screen_pointer_device(screen, &d)) Py_RETURN_TRUE;
     Py_RETURN_FALSE;
 }
