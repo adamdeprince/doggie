@@ -53,7 +53,7 @@ var (
 	tablet_cap_names  = bit_names{"tools", "fingers on a touchscreen", "fingers on a touchpad", "the shape of a finger contact", "pads", "tool actions", "hardware identifiers", "estimated and predicted samples"}
 	tablet_mode_names = bit_names{"tools", "fingers", "pads", "hardware identifiers", "tool actions", "estimated and predicted samples"}
 	tablet_mode_short = bit_names{"tools", "fingers", "pads", "ids", "actions", "estimates"}
-	measurement_names = bit_names{"pressure", "tilt", "twist", "tangent", "z", "distance", "wheel", "shape"}
+	measurement_names = bit_names{"pressure", "tilt", "twist", "tangent", "z", "distance", "wheel", "shape", "place", "grip"}
 	button_names      = bit_names{"tip", "barrel", "barrel2", "back", "forward", "barrel3"}
 	modifier_names    = bit_names{"shift", "alt", "ctrl", "super"}
 	gesture_cap_names = bit_names{"pinch", "rotate", "swipe", "smart zoom", "hold"}
@@ -65,13 +65,16 @@ var (
 	report_kinds    = value_names{"", "tool", "finger", "pad", "action"}
 	contact_phases  = value_names{"hover", "down", "move", "up", "cancel", "out", "frame", "correction"}
 	tool_names      = value_names{"finger", "pen", "eraser", "brush", "pencil", "airbrush", "mouse", "lens", "totem"}
-	action_names    = value_names{"", "double-tap", "squeeze", "tail-click", "tail-double-click", "tail-hold"}
+	action_names    = value_names{"", "double-tap", "squeeze", "tail-click", "tail-double-click", "tail-hold", "docked", "undocked", "air-motion"}
 	gesture_kinds   = value_names{"", "pinch", "rotate", "swipe", "smart-zoom", "hold"}
 	gesture_phases  = value_names{"", "begin", "update", "end", "cancel"}
 	scroll_sources  = value_names{"wheel", "precise"}
 	scroll_phases   = value_names{"", "began", "moving", "ended", "coasting-began", "coasting", "coasting-ended", "cancelled"}
 	pad_button_text = value_names{"released", "pressed"}
-	action_states   = value_names{"ended", "began"}
+	action_states   = value_names{"ended", "began", "moving"}
+	confidence      = value_names{"accidental", "meant"}
+	surface_kinds   = value_names{"not-a-display", "display"}
+	line_styles     = value_names{"", "ink", "pencil", "highlighter", "chisel-marker", "brush"}
 )
 
 // The size of the cell area and of a cell in pixels, zero when unknown
@@ -369,6 +372,15 @@ func (self *decoder) contact(r *reader, kind string) []string {
 		}
 		parts = append(parts, shape)
 	}
+	// Where the tool is on its tablet, whatever the system made of that for the pointer
+	if x, y, ok := r.take_pair("rx", "ry"); ok {
+		parts = append(parts, fmt.Sprintf("on-tablet=%.1f%%,%.1f%%", float64(x)/655.35, float64(y)/655.35))
+	}
+	if v, ok := r.take_int("grip"); ok {
+		parts = append(parts, "grip="+fraction(v, 65535))
+	}
+	// Whether the system takes a finger to be meant or to be a palm
+	parts = add(parts, named(r, "conf", confidence))
 	// Which of the measurements are estimates the terminal may correct later
 	if v, ok := r.take_int("est"); ok {
 		parts = append(parts, "estimated="+measurement_names.describe(v, "+", "none"))
@@ -435,6 +447,10 @@ func (self *decoder) action(r *reader) []string {
 	}
 	// An action that lasts, as a squeeze does, begins and ends
 	parts = add(parts, named(r, "action", action_names), named(r, "state", action_states))
+	// How far a tool moved through the air, in units of its own
+	if x, y, ok := r.take_pair("dx", "dy"); ok {
+		parts = append(parts, fmt.Sprintf("moved=%+d,%+d", x, y))
+	}
 	if x, y, ok := r.take_pair("x", "y"); ok {
 		parts = add(parts, "x="+pixels(x)+"px", "y="+pixels(y)+"px", self.cell(x, y))
 	}
@@ -465,6 +481,27 @@ func (self *decoder) device(r *reader) []string {
 	}
 	if v, ok := r.take_int("bat"); ok {
 		parts = append(parts, fmt.Sprintf("battery=%d%%", v))
+	}
+	// The tablet the tool is on or the pad belongs to, and its active surface
+	if v, ok := r.take_int("tablet"); ok {
+		parts = append(parts, fmt.Sprintf("tablet=%d", v))
+	}
+	if w, h, ok := r.take_pair("w", "h"); ok {
+		parts = append(parts, fmt.Sprintf("surface=%.1fx%.1fmm", float64(w)/256, float64(h)/256))
+	}
+	parts = add(parts, named(r, "direct", surface_kinds))
+	// What is stored in the pen itself
+	if i := r.index("pcolor"); i >= 0 {
+		if v := r.frame.Fields[i].Value; len(v) == 6 && strings.Trim(v, "0123456789abcdefABCDEF") == "" {
+			r.used[i] = true
+			parts = append(parts, "color=#"+strings.ToLower(v))
+		}
+	}
+	if v, ok := r.take_int("pwidth"); ok {
+		parts = append(parts, fmt.Sprintf("width=%.2fmm", float64(v)/256))
+	}
+	if name := named(r, "pstyle", line_styles); name != "" {
+		parts = append(parts, "style="+name)
 	}
 	return append(parts, self.ids(r)...)
 }
