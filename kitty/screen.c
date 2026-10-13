@@ -3820,6 +3820,8 @@ shell_prompt_marking(Screen *self, char *buf) {
         switch (ch) {
             case 'A': {
                 PromptKind pk = PROMPT_START;
+                // A shell is prompting, so the program that set the extension modes is gone
+                screen_reset_extension_modes(self);
                 self->prompt_settings.val = 0;
                 self->prompt_settings.redraws_prompts_at_all = 1;
                 parse_prompt_mark(self, buf + 1, &pk);
