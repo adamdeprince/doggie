@@ -272,6 +272,7 @@ typedef struct XITabletDevice {
     uint64_t serial;
     GLFWid window_id;  // the window it last reported to
     XITabletAxis pressure, tilt_x, tilt_y, wheel, distance, rotation;
+    char name[128];
 } XITabletDevice;
 
 typedef struct XdndSelectionRequest {

@@ -533,15 +533,24 @@ static const struct wl_touch_listener touchListener = {
 #define BTN_STYLUS3 0x149
 #endif
 
+// What a tablet says about itself, which its tools pass on
+typedef struct TabletInfo {
+    uint32_t vid, pid;
+    char name[128];
+} TabletInfo;
+
 static void
-tabletHandleName(void *data UNUSED, struct zwp_tablet_v2 *tablet UNUSED, const char *name UNUSED) {}
+tabletHandleName(void *data, struct zwp_tablet_v2 *tablet UNUSED, const char *name) {
+    TabletInfo *info = data;
+    if (info) snprintf(info->name, sizeof(info->name), "%s", name);
+}
 
 static void
 tabletHandleId(void *data, struct zwp_tablet_v2 *tablet UNUSED, uint32_t vid, uint32_t pid) {
-    uint32_t *ids = data;
-    if (!ids) return;
-    ids[0] = vid;
-    ids[1] = pid;
+    TabletInfo *info = data;
+    if (!info) return;
+    info->vid = vid;
+    info->pid = pid;
 }
 
 static void
@@ -622,12 +631,14 @@ static void
 toolHandleProximityIn(void *data, struct zwp_tablet_tool_v2 *t, uint32_t serial, struct zwp_tablet_v2 *tablet, struct wl_surface *surface) {
     _GLFWwindow *window = get_window_from_surface(surface);
     if (!window || surface != window->wl.surface) return;
-    const uint32_t *ids = zwp_tablet_v2_get_user_data(tablet);
+    const TabletInfo *info = zwp_tablet_v2_get_user_data(tablet);
     tt->window = window;
     tt->serial = serial;
     tt->entered = true;
-    tt->ev.vendor_id = ids ? ids[0] : 0;
-    tt->ev.product_id = ids ? ids[1] : 0;
+    tt->ev.vendor_id = info ? info->vid : 0;
+    tt->ev.product_id = info ? info->pid : 0;
+    snprintf(tt->tablet_name, sizeof(tt->tablet_name), "%s", info ? info->name : "");
+    tt->ev.name = tt->tablet_name[0] ? tt->tablet_name : NULL;
     if (_glfw.wl.wp_cursor_shape_manager_v1 && !tt->cursor_shape_device) {
         tt->cursor_shape_device = wp_cursor_shape_manager_v1_get_tablet_tool_v2(_glfw.wl.wp_cursor_shape_manager_v1, t);
     }
@@ -771,7 +782,7 @@ static const struct zwp_tablet_tool_v2_listener toolListener = {
 
 static void
 tabletSeatHandleTabletAdded(void *data UNUSED, struct zwp_tablet_seat_v2 *seat UNUSED, struct zwp_tablet_v2 *tablet) {
-    zwp_tablet_v2_add_listener(tablet, &tabletListener, calloc(2, sizeof(uint32_t)));
+    zwp_tablet_v2_add_listener(tablet, &tabletListener, calloc(1, sizeof(TabletInfo)));
 }
 
 static void

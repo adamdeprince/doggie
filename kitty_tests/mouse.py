@@ -1,6 +1,7 @@
 #!/usr/bin/env python
 # License: GPL v3 Copyright: 2016, Kovid Goyal <kovid at kovidgoyal.net>
 
+from base64 import standard_b64encode
 from functools import partial
 
 from kitty.fast_data_types import (
@@ -12,6 +13,7 @@ from kitty.fast_data_types import (
     create_mock_window,
     mock_mouse_selection,
     send_mock_mouse_event_to_window,
+    send_pointer_device,
     send_pointer_report,
 )
 
@@ -462,7 +464,7 @@ class TestMouse(BaseTest):
 
         s = self.create_screen()
         c = s.callbacks
-        caps = 5 if is_macos else 1
+        caps = 69 if is_macos else 65
 
         def send(body):
             c.clear()
@@ -486,13 +488,13 @@ class TestMouse(BaseTest):
         self.ae(c.wtcbuf, b'\x1b]777;tablet-pointer;v=1:op=mode:mode=1\x1b\\')
         send('v=1:op=query:id=43')
         self.ae(c.wtcbuf, f'\x1b]777;tablet-pointer;v=1:op=cap:id=43:caps={caps}:mode=1:w=50:h=100:cw=10:ch=20\x1b\\'.encode())
-        self.assertTrue(report(1, 1, buttons=1, tool=2, valid=3, p=100, tx=-10, ty=20, serial=99))
-        self.ae(c.wtcbuf, ev('kind=1:phase=1:device=7:t=1000:contact=0:x=256:y=512:buttons=1:mods=0:tool=2:valid=3:p=100:tx=-10:ty=20:serial=99'))
+        self.assertTrue(report(1, 1, buttons=1, tool=2, valid=3, p=100, tx=-10, ty=20))
+        self.ae(c.wtcbuf, ev('kind=1:phase=1:device=7:t=1000:contact=0:x=256:y=512:buttons=1:mods=0:tool=2:valid=3:p=100:tx=-10:ty=20'))
         # Fingers are not reported while only tool reports are on
         self.assertFalse(report(2, 1, 3, tool=0))
         # Turning the mode off cancels the stroke, whose remaining reports are then dropped
         send('v=1:op=mode:mode=0')
-        self.ae(c.wtcbuf, ev('kind=1:phase=4:device=7:t=1000:contact=0:x=256:y=512:buttons=0:mods=0:tool=2:valid=3:p=0:tx=-10:ty=20:serial=99'))
+        self.ae(c.wtcbuf, ev('kind=1:phase=4:device=7:t=1000:contact=0:x=256:y=512:buttons=0:mods=0:tool=2:valid=3:p=0:tx=-10:ty=20'))
         send('v=1:op=mode:mode=1')
         self.assertFalse(report(1, 3))
         # Finger reports have their own mode bit
@@ -524,6 +526,37 @@ class TestMouse(BaseTest):
         self.ae(c.wtcbuf, ev('kind=2:phase=6:device=7:t=1001:tu=999'))
         s.reset()
         self.assertFalse(report(1, 1))
+
+        # A tool is described before its reports, and only to a program that takes tools
+        def device(**kw):
+            c.clear()
+            return send_pointer_device(s, 7, **kw)
+
+        def frame(fields):
+            return f'\x1b]777;tablet-pointer;v=1:op=device:{fields}\x1b\\'.encode()
+
+        self.assertFalse(device(tool=2))
+        send('v=1:op=mode:mode=2')
+        self.assertFalse(device(tool=2))
+        send('v=1:op=mode:mode=1')
+        self.assertTrue(device(tool=2, axes=3, name='Wacom Intuos Pro M', serial=99, hwid=2082, vid=1386, pid=855))
+        self.ae(c.wtcbuf, frame('device=7:kind=1:tool=2:axes=3:name=V2Fjb20gSW50dW9zIFBybyBN'))
+        self.assertTrue(device())
+        self.ae(c.wtcbuf, frame('device=7:kind=1:tool=1:axes=0'))
+        # The hardware identifiers are sent only when asked for
+        send('v=1:op=mode:mode=9')
+        self.assertTrue(device(tool=2, axes=3, name='Wacom Intuos Pro M', serial=99, hwid=2082, vid=1386, pid=855))
+        self.ae(c.wtcbuf, frame('device=7:kind=1:tool=2:axes=3:name=V2Fjb20gSW50dW9zIFBybyBN:serial=99:hwid=2082:vid=1386:pid=855'))
+        self.assertTrue(device(serial=99))
+        self.ae(c.wtcbuf, frame('device=7:kind=1:tool=1:axes=0:serial=99'))
+        # A name is cut between characters, never inside one
+        self.assertTrue(device(name='é' * 64))
+        self.ae(c.wtcbuf, frame('device=7:kind=1:tool=1:axes=0:name=' + standard_b64encode(('é' * 63).encode()).decode()))
+        # Bits of the mode this terminal does not know are dropped, so reading it back shows what took
+        send('v=1:op=mode:mode=1023')
+        send('v=1:op=mode')
+        self.ae(c.wtcbuf, b'\x1b]777;tablet-pointer;v=1:op=mode:mode=11\x1b\\')
+        send('v=1:op=mode:mode=0')
         # The contact table grows, so a touchscreen with many fingers down is not truncated
         send('v=1:op=mode:mode=2')
         for i in range(40):

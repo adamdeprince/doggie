@@ -348,6 +348,7 @@ typedef struct _GLFWWaylandTabletTool {
     _GLFWwindow *window;
     uint32_t serial;
     GLFWTabletEvent ev;
+    char tablet_name[128];  // of the tablet it is in proximity over
     // The changes since the last frame, which become pointer events when the
     // application does not consume the tablet event
     bool entered, left, moved;

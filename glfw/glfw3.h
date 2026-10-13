@@ -696,6 +696,9 @@ typedef struct GLFWTabletEvent {
     // when the system does not report them
     uint64_t device, serial, hardware_id;
     unsigned vendor_id, product_id;
+    // The name of the tablet the tool is on, or of the tool's own device, NULL
+    // when the system has none. Valid only during the callback
+    const char *name;
 } GLFWTabletEvent;
 
 /*! @defgroup joysticks Joysticks

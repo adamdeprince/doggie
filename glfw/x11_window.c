@@ -1475,6 +1475,7 @@ handle_xi_tablet_event(_GLFWwindow *window, XITabletDevice *d, XIDeviceEvent *de
         .tangent = 2 * norm(d->wheel) - 1,
         .device = (uint64_t)d->deviceid,
         .serial = d->serial,
+        .name = d->name[0] ? d->name : NULL,
     };
 #undef norm
     d->window_id = window->id;
