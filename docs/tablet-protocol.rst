@@ -478,8 +478,8 @@ Implementations
 -------------------
 
 * silkie, this fork of kitty: tools on macOS, Wayland and X11; fingers on
-  the touchpad on macOS and on touchscreens, with contact shape, on Wayland;
-  pads on Wayland; tool actions on macOS. ``kitty --debug-input`` logs the
+  the touchpad on macOS and on touchscreens on Wayland, with contact shape,
+  and on X11, without; pads on Wayland; tool actions on macOS. ``kitty --debug-input`` logs the
   tablet, pad and touch events it sees.
 * Inkline, Goblin Skiff and GoblinView carry a codec for an earlier draft of
   this protocol and are being brought up to this specification.
@@ -539,5 +539,15 @@ and touch events in whole milliseconds.
   axis. The X server does not report a tool leaving proximity, so phase
   ``5`` arrives only when the device goes away. Xwayland's tablet devices
   are recognised too, but under GNOME no motion reached them in testing; use
-  the Wayland backend there. Fingers are not reported on X11, and neither
-  are pads: the wacom driver has a device for the pad, which is not read.
+  the Wayland backend there. Fingers on a touchscreen come through the touch
+  events of XInput 2.2, and ``caps`` claims them when the server has that
+  version. X reports each finger in an event of its own, so every finger
+  report is followed by a frame report of its own and fingers that moved
+  together are not grouped. There is no contact shape, a touch the system
+  takes over ends with an ordinary ``up`` since the server does not say that
+  it was taken, and the fingers on a touchpad are not reported. The server
+  also moves the pointer to where the first finger lands, which is not passed
+  on as mouse reports. This was tried against Xwayland, which makes these
+  events from the touches of its compositor, not with a touchscreen. Pads
+  are not reported on X11: the wacom driver has a device for the pad, which
+  is not read.

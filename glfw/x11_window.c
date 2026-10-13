@@ -483,6 +483,23 @@ updateSmoothScrolling(_GLFWwindow *window) {
         XISetMask(tmask, XI_ButtonRelease);
         XISelectEvents(_glfw.x11.display, window->x11.handle, &tem, 1);
     }
+
+    // The fingers on a touchscreen arrive through the master pointer it is
+    // attached to. A window that takes them is not also sent the pointer
+    // events the server would otherwise make from them
+    if (_glfw.x11.xi.major > 2 || _glfw.x11.xi.minor >= 2) {
+        unsigned char touch_mask[XIMaskLen(XI_TouchEnd)] = {0};
+        XIEventMask touch_em = {.deviceid = XIAllMasterDevices, .mask_len = sizeof(touch_mask), .mask = touch_mask};
+        if (_glfw.x11.xi.num_touch_devices) {
+            XISetMask(touch_mask, XI_TouchBegin);
+            XISetMask(touch_mask, XI_TouchUpdate);
+            XISetMask(touch_mask, XI_TouchEnd);
+        }
+        // Only one client can take the touches of a window, so this can fail
+        _glfwGrabErrorHandlerX11();
+        XISelectEvents(_glfw.x11.display, window->x11.handle, &touch_em, 1);
+        _glfwReleaseErrorHandlerX11();
+    }
 }
 
 // Return true if the core wheel button event was emulated by the X server from
@@ -499,6 +516,22 @@ isEmulatedScrollButton(const XButtonEvent *event) {
 static bool
 isConsumedTabletEvent(Time time) {
     return _glfw.x11.xi.num_tablet_devices && _glfw.x11.xi.last_tablet_time != CurrentTime && time == _glfw.x11.xi.last_tablet_time;
+}
+
+// Return true if the core event was made by the X server from a touch that
+// was reported as a touch
+//
+static bool
+isEmulatedFromTouch(Time time) {
+    return _glfw.x11.xi.num_touch_devices && _glfw.x11.xi.last_touch_time != CurrentTime && time == _glfw.x11.xi.last_touch_time;
+}
+
+static bool
+isTouchscreen(int deviceid) {
+    for (unsigned i = 0; i < _glfw.x11.xi.num_touch_devices; i++) {
+        if (_glfw.x11.xi.touch_devices[i] == deviceid) return true;
+    }
+    return false;
 }
 
 static void
@@ -1484,6 +1517,100 @@ handle_xi_tablet_event(_GLFWwindow *window, XITabletDevice *d, XIDeviceEvent *de
     return true;
 }
 
+// Fingers on a touchscreen {{{
+// XInput 2.2 reports each finger in events of its own, with no grouping of the
+// fingers that moved together, so every event becomes a touch event that
+// holds the finger it is about and, unchanged, the others on the same window
+
+static void
+send_xi_touch_event(
+    GLFWid window_id, GLFWTouchEventType type, int deviceid, int changed_id, GLFWTouchPointState changed_state, int mods, monotonic_t timestamp) {
+    _GLFWwindow *window = _glfwWindowForId(window_id);
+    if (!window) return;
+    GLFWTouchPoint points[arraysz(_glfw.x11.xi.touch_points)];
+    size_t n = 0;
+    for (unsigned i = 0; i < _glfw.x11.xi.num_touch_points; i++) {
+        if (_glfw.x11.xi.touch_points[i].window_id != window_id) continue;
+        const bool changed = _glfw.x11.xi.touch_points[i].deviceid == deviceid && (type == GLFW_TOUCH_CANCEL || _glfw.x11.xi.touch_points[i].id == changed_id);
+        if (type == GLFW_TOUCH_CANCEL && !changed) continue;
+        points[n++] = (GLFWTouchPoint){
+            .id = _glfw.x11.xi.touch_points[i].id,
+            .state = changed ? changed_state : GLFW_TOUCH_POINT_STATIONARY,
+            .x = _glfw.x11.xi.touch_points[i].x,
+            .y = _glfw.x11.xi.touch_points[i].y,
+        };
+    }
+    if (!n) return;
+    GLFWTouchEvent ev = {.type = type, .keyboard_modifiers = mods, .timestamp = timestamp, .num_points = n, .points = points};
+    _glfwInputTouch(window, &ev);
+}
+
+// The fingers of a touchscreen that went away will never lift, so the windows
+// they are on are told that their touches are void
+static void
+cancel_xi_touches(int deviceid) {
+    for (unsigned i = 0; i < _glfw.x11.xi.num_touch_points;) {
+        if (_glfw.x11.xi.touch_points[i].deviceid != deviceid) {
+            i++;
+            continue;
+        }
+        // One event for all the fingers of the device on this window, which are then forgotten
+        const GLFWid window_id = _glfw.x11.xi.touch_points[i].window_id;
+        send_xi_touch_event(window_id, GLFW_TOUCH_CANCEL, deviceid, 0, GLFW_TOUCH_POINT_RELEASED, 0, monotonic());
+        unsigned kept = 0;
+        for (unsigned k = 0; k < _glfw.x11.xi.num_touch_points; k++) {
+            if (_glfw.x11.xi.touch_points[k].window_id == window_id && _glfw.x11.xi.touch_points[k].deviceid == deviceid) continue;
+            _glfw.x11.xi.touch_points[kept++] = _glfw.x11.xi.touch_points[k];
+        }
+        _glfw.x11.xi.num_touch_points = kept;
+        i = 0;
+    }
+}
+
+static void
+handle_xi_touch_event(XIDeviceEvent *de) {
+    if (!isTouchscreen(de->sourceid)) return;
+    unsigned idx = 0;
+    while (idx < _glfw.x11.xi.num_touch_points) {
+        if (_glfw.x11.xi.touch_points[idx].id == de->detail && _glfw.x11.xi.touch_points[idx].deviceid == de->sourceid) break;
+        idx++;
+    }
+    const bool known = idx < _glfw.x11.xi.num_touch_points;
+    const int mods = translateState(de->mods.effective);
+    const monotonic_t timestamp = event_time_to_monotonic((uint32_t)de->time);
+    _glfw.x11.xi.last_touch_time = de->time;
+    if (de->evtype == XI_TouchBegin) {
+        _GLFWwindow *window = NULL;
+        if (known || idx >= arraysz(_glfw.x11.xi.touch_points)) return;
+        if (XFindContext(_glfw.x11.display, de->event, _glfw.x11.context, (XPointer *)&window) != 0 || !window) return;
+        // A sequence begins with the first finger on a window and ends when the last one lifts
+        bool others = false;
+        for (unsigned i = 0; i < _glfw.x11.xi.num_touch_points && !others; i++) others = _glfw.x11.xi.touch_points[i].window_id == window->id;
+        _glfw.x11.xi.touch_points[idx].id = de->detail;
+        _glfw.x11.xi.touch_points[idx].deviceid = de->sourceid;
+        _glfw.x11.xi.touch_points[idx].window_id = window->id;
+        _glfw.x11.xi.touch_points[idx].x = de->event_x;
+        _glfw.x11.xi.touch_points[idx].y = de->event_y;
+        _glfw.x11.xi.num_touch_points++;
+        send_xi_touch_event(window->id, others ? GLFW_TOUCH_UPDATE : GLFW_TOUCH_BEGIN, de->sourceid, de->detail, GLFW_TOUCH_POINT_PRESSED, mods, timestamp);
+        return;
+    }
+    if (!known) return;
+    const GLFWid window_id = _glfw.x11.xi.touch_points[idx].window_id;
+    // The window a finger landed on keeps it, and its position stays relative to that window
+    _glfw.x11.xi.touch_points[idx].x = de->event_x;
+    _glfw.x11.xi.touch_points[idx].y = de->event_y;
+    if (de->evtype == XI_TouchUpdate) {
+        send_xi_touch_event(window_id, GLFW_TOUCH_UPDATE, de->sourceid, de->detail, GLFW_TOUCH_POINT_MOVED, mods, timestamp);
+        return;
+    }
+    bool others = false;
+    for (unsigned i = 0; i < _glfw.x11.xi.num_touch_points && !others; i++) others = i != idx && _glfw.x11.xi.touch_points[i].window_id == window_id;
+    send_xi_touch_event(window_id, others ? GLFW_TOUCH_UPDATE : GLFW_TOUCH_END, de->sourceid, de->detail, GLFW_TOUCH_POINT_RELEASED, mods, timestamp);
+    _glfw.x11.xi.touch_points[idx] = _glfw.x11.xi.touch_points[--_glfw.x11.xi.num_touch_points];
+}
+// }}}
+
 #define dnd _glfw.x11.xdnd
 // Dropping of data onto window {{{
 
@@ -1897,7 +2024,9 @@ processEvent(XEvent *event) {
                 // Handle XI_Motion for smooth scrolling and, with the buttons, tablet tools
                 else if (event->xcookie.evtype == XI_Motion || event->xcookie.evtype == XI_ButtonPress || event->xcookie.evtype == XI_ButtonRelease) {
                     XIDeviceEvent *de = (XIDeviceEvent *)event->xcookie.data;
-                    if (de->deviceid != _glfw.x11.xi.master_pointer_id) {
+                    // The server moves the pointer to where a finger lands on a touchscreen. The finger is reported as a touch
+                    const bool from_touch = (de->flags & XIPointerEmulated) && isTouchscreen(de->sourceid);
+                    if (de->deviceid != _glfw.x11.xi.master_pointer_id && !from_touch) {
                         // Find the window for this event
                         _GLFWwindow *window = NULL;
                         XITabletDevice *td = tablet_device_for_id(de->deviceid);
@@ -1907,14 +2036,19 @@ processEvent(XEvent *event) {
                         }
                     }
                 }
+                // The fingers on a touchscreen
+                else if (event->xcookie.evtype == XI_TouchBegin || event->xcookie.evtype == XI_TouchUpdate || event->xcookie.evtype == XI_TouchEnd) {
+                    handle_xi_touch_event((XIDeviceEvent *)event->xcookie.data);
+                }
                 // Handle XI_HierarchyChanged for device hotplug
                 else if (event->xcookie.evtype == XI_HierarchyChanged) {
                     XIHierarchyEvent *he = (XIHierarchyEvent *)event->xcookie.data;
                     // Check if any devices were added or removed
                     for (int i = 0; i < he->num_info; i++) {
                         if (he->info[i].flags & (XISlaveAdded | XISlaveRemoved | XIMasterAdded | XIMasterRemoved | XIDeviceEnabled | XIDeviceDisabled)) {
-                            // A tablet tool that goes away has left proximity
+                            // A tablet tool that goes away has left proximity, and the fingers on a touchscreen that does are void
                             for (int j = 0; j < he->num_info; j++) {
+                                if (he->info[j].flags & (XISlaveRemoved | XIDeviceDisabled)) cancel_xi_touches(he->info[j].deviceid);
                                 XITabletDevice *d = he->info[j].flags & (XISlaveRemoved | XIDeviceDisabled) ? tablet_device_for_id(he->info[j].deviceid) : NULL;
                                 _GLFWwindow *w = d ? _glfwWindowForId(d->window_id) : NULL;
                                 if (w) {
@@ -2046,7 +2180,7 @@ processEvent(XEvent *event) {
         }
 
         case ButtonPress: {
-            if (isConsumedTabletEvent(event->xbutton.time)) return;
+            if (isConsumedTabletEvent(event->xbutton.time) || isEmulatedFromTouch(event->xbutton.time)) return;
             const int mods = translateState(event->xbutton.state);
 
 #define cancel_momentum()               \
@@ -2093,7 +2227,7 @@ processEvent(XEvent *event) {
         }
 
         case ButtonRelease: {
-            if (isConsumedTabletEvent(event->xbutton.time)) return;
+            if (isConsumedTabletEvent(event->xbutton.time) || isEmulatedFromTouch(event->xbutton.time)) return;
             const int mods = translateState(event->xbutton.state);
 
             // Handle drag drop on button release
@@ -2146,7 +2280,7 @@ processEvent(XEvent *event) {
         }
 
         case MotionNotify: {
-            if (isConsumedTabletEvent(event->xmotion.time)) return;
+            if (isConsumedTabletEvent(event->xmotion.time) || isEmulatedFromTouch(event->xmotion.time)) return;
             // Handle drag motion
             if (_glfw.x11.drag.active) {
                 int root_x, root_y;
@@ -2441,6 +2575,11 @@ _glfwPlatformCreateWindow(
 void
 _glfwPlatformDestroyWindow(_GLFWwindow *window) {
     if (_glfw.x11.disabledCursorWindow == window) _glfw.x11.disabledCursorWindow = NULL;
+    // The fingers that are on the window have nowhere to be reported to
+    for (unsigned i = 0; i < _glfw.x11.xi.num_touch_points;) {
+        if (_glfw.x11.xi.touch_points[i].window_id == window->id) _glfw.x11.xi.touch_points[i] = _glfw.x11.xi.touch_points[--_glfw.x11.xi.num_touch_points];
+        else i++;
+    }
 
     if (window->monitor) releaseMonitor(window);
 

@@ -201,6 +201,7 @@ read_xi_scroll_devices(void) {
 #define xi _glfw.x11.xi
     xi.num_scroll_devices = 0;
     xi.num_tablet_devices = 0;
+    xi.num_touch_devices = 0;
     // Require XI2.1 or later for smooth scrolling
     if (!xi.available || xi.major < 2 || (xi.major == 2 && xi.minor < 1) || !xi.LIBINPUT_SCROLL_METHOD_ENABLED) return;
 #undef xi
@@ -222,6 +223,14 @@ read_xi_scroll_devices(void) {
             continue;
         }
         if (device->use != XISlavePointer) continue;
+        // A touchscreen. The touches of a touchpad are not at any place in a window
+        for (int j = 0; j < device->num_classes; j++) {
+            if (device->classes[j]->type != XITouchClass || ((XITouchClassInfo *)device->classes[j])->mode != XIDirectTouch) continue;
+            if (_glfw.x11.xi.num_touch_devices < arraysz(_glfw.x11.xi.touch_devices)) {
+                _glfw.x11.xi.touch_devices[_glfw.x11.xi.num_touch_devices++] = device->deviceid;
+            }
+            break;
+        }
         Atom actual_type;
         int actual_format;
         unsigned long nitems, bytes_after;
@@ -379,8 +388,11 @@ initExtensions(void) {
         glfw_dlsym(_glfw.x11.xi.GetProperty, _glfw.x11.xi.handle, "XIGetProperty");
 
         if (XQueryExtension(_glfw.x11.display, "XInputExtension", &_glfw.x11.xi.majorOpcode, &_glfw.x11.xi.eventBase, &_glfw.x11.xi.errorBase)) {
+            // The newest version this code speaks. The server answers with
+            // the older of this and its own, 2.2 being where the touch
+            // events are
             _glfw.x11.xi.major = 2;
-            _glfw.x11.xi.minor = 1;
+            _glfw.x11.xi.minor = 2;
 
             if (XIQueryVersion(_glfw.x11.display, &_glfw.x11.xi.major, &_glfw.x11.xi.minor) == Success) { _glfw.x11.xi.available = true; }
         }
