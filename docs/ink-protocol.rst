@@ -197,13 +197,13 @@ that mirrors the scene, arrives at the same numbers. They are real numbers,
 computed in double precision; a difference in the last digit is of no
 account.
 
-Let ``x``, ``y`` be the position in the report, in 1/256 pixel from the top
-left of the cell area. Let the placement the stroke began in be shown in the
-rectangle with its top left corner ``L``, ``T`` pixels from the top left of
-the cell area, ``W`` pixels wide and ``H`` high, and let it show the part of
-the image with its top left corner at ``sx``, ``sy`` and the size ``sw`` by
-``sh``, in the user units of the image, which is the whole image unless the
-placement was made with a source rectangle. The position in the user units of
+Let ``x``, ``y`` be the position in the report, in 1/256 of a physical pixel
+from the top left of the cell area. Let the placement the stroke began in be
+shown in the rectangle with its top left corner ``L``, ``T`` physical pixels
+from the top left of the cell area, ``W`` wide and ``H`` high, and let it show
+the part of the image with its top left corner at ``sx``, ``sy`` and the size
+``sw`` by ``sh``, in the user units of the image, which is the whole image
+unless the placement was made with a source rectangle. The position in the user units of
 the image is::
 
     X = sx + (x / 256 - L) * sw / W
