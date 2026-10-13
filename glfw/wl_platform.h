@@ -344,8 +344,9 @@ typedef struct _GLFWWaylandTouchPoint {
 typedef struct _GLFWWaylandTabletTool {
     struct zwp_tablet_tool_v2 *tool;
     struct wp_cursor_shape_device_v1 *cursor_shape_device;
-    // The window the tool is in proximity over, and the serial of its proximity_in
-    _GLFWwindow *window;
+    // The window the tool is in proximity over, by id since the window can be
+    // closed under the tool, and the serial of its proximity_in
+    GLFWid window_id;
     uint32_t serial;
     GLFWTabletEvent ev;
     char tablet_name[128];  // of the tablet it is in proximity over

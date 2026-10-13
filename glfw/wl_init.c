@@ -82,7 +82,7 @@ get_window_from_surface(struct wl_surface *surface) {
 // own events are enough, so the pointer is ignored while a tool is over the window
 static bool
 toolOver(_GLFWwindow *window) {
-    return _glfw.wl.tablet_tool && _glfw.wl.tablet_tool->window == window;
+    return _glfw.wl.tablet_tool && _glfw.wl.tablet_tool->window_id == window->id;
 }
 
 static void
@@ -621,10 +621,11 @@ toolHandleDone(void *data UNUSED, struct zwp_tablet_tool_v2 *t UNUSED) {}
 
 static void
 toolHandleRemoved(void *data, struct zwp_tablet_tool_v2 *t) {
-    if (tt->window) {
+    _GLFWwindow *window = _glfwWindowForId(tt->window_id);
+    if (window) {
         tt->ev.type = GLFW_TABLET_CANCEL;
         tt->ev.timestamp = monotonic();
-        _glfwInputTablet(tt->window, &tt->ev);
+        _glfwInputTablet(window, &tt->ev);
     }
     if (_glfw.wl.tablet_tool == tt) _glfw.wl.tablet_tool = NULL;
     if (tt->cursor_shape_device) wp_cursor_shape_device_v1_destroy(tt->cursor_shape_device);
@@ -637,7 +638,7 @@ toolHandleProximityIn(void *data, struct zwp_tablet_tool_v2 *t, uint32_t serial,
     _GLFWwindow *window = get_window_from_surface(surface);
     if (!window || surface != window->wl.surface) return;
     const TabletInfo *info = zwp_tablet_v2_get_user_data(tablet);
-    tt->window = window;
+    tt->window_id = window->id;
     tt->serial = serial;
     tt->entered = true;
     tt->ev.vendor_id = info ? info->vid : 0;
@@ -734,8 +735,18 @@ toolHandleButton(void *data, struct zwp_tablet_tool_v2 *t UNUSED, uint32_t seria
 
 static void
 toolHandleFrame(void *data, struct zwp_tablet_tool_v2 *t UNUSED, uint32_t time) {
-    _GLFWwindow *window = tt->window;
-    if (!window) return;
+    _GLFWwindow *window = _glfwWindowForId(tt->window_id);
+    if (!window) {
+        // Not over a window, or over one that was closed under the tool
+        if (tt->window_id && _glfw.wl.tablet_tool == tt) _glfw.wl.tablet_tool = NULL;
+        tt->window_id = 0;
+        tt->ev.buttons = 0;
+        tt->entered = tt->left = tt->moved = false;
+        tt->pressed = tt->released = 0;
+        tt->ev.wheel = 0;
+        tt->ev.wheel_clicks = 0;
+        return;
+    }
     tt->ev.keyboard_modifiers = _glfw.wl.xkb.states.modifiers;
     tt->ev.timestamp = event_time_to_monotonic(time);
     // A tool that is flicked off the tablet lifts and leaves in one frame. The
@@ -772,7 +783,7 @@ toolHandleFrame(void *data, struct zwp_tablet_tool_v2 *t UNUSED, uint32_t time) 
         if (tt->left) _glfwInputCursorEnter(window, false);
     }
     if (tt->left) {
-        tt->window = NULL;
+        tt->window_id = 0;
         if (_glfw.wl.tablet_tool == tt) _glfw.wl.tablet_tool = NULL;
         // A tool should come up before it leaves, but not every compositor says
         // so, and it is not down when it comes back

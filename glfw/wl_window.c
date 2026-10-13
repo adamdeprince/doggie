@@ -2192,14 +2192,15 @@ isPointerLocked(_GLFWwindow *window) {
 
 void
 _glfwWaylandSetTabletToolCursor(_GLFWWaylandTabletTool *tool) {
-    if (!tool->window || !tool->cursor_shape_device) return;
-    wayland_cursor_shape s = glfw_cursor_shape_to_wayland_cursor_shape(tool->window->cursor ? tool->window->cursor->wl.shape : GLFW_DEFAULT_CURSOR);
+    const _GLFWwindow *window = _glfwWindowForId(tool->window_id);
+    if (!window || !tool->cursor_shape_device) return;
+    wayland_cursor_shape s = glfw_cursor_shape_to_wayland_cursor_shape(window->cursor ? window->cursor->wl.shape : GLFW_DEFAULT_CURSOR);
     if (s.which > -1) wp_cursor_shape_device_v1_set_shape(tool->cursor_shape_device, tool->serial, (uint32_t)s.which);
 }
 
 void
 _glfwPlatformSetCursor(_GLFWwindow *window, _GLFWcursor *cursor) {
-    if (_glfw.wl.tablet_tool && _glfw.wl.tablet_tool->window == window) _glfwWaylandSetTabletToolCursor(_glfw.wl.tablet_tool);
+    if (_glfw.wl.tablet_tool && _glfw.wl.tablet_tool->window_id == window->id) _glfwWaylandSetTabletToolCursor(_glfw.wl.tablet_tool);
     if (!_glfw.wl.pointer) return;
 
     window->wl.currentCursor = cursor;
