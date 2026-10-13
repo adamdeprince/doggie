@@ -24,6 +24,7 @@ import (
 	"github.com/kovidgoyal/kitty/kittens/remote_file"
 	"github.com/kovidgoyal/kitty/kittens/resize_window"
 	"github.com/kovidgoyal/kitty/kittens/show_key"
+	"github.com/kovidgoyal/kitty/kittens/show_pointer"
 	"github.com/kovidgoyal/kitty/kittens/ssh"
 	"github.com/kovidgoyal/kitty/kittens/themes"
 	"github.com/kovidgoyal/kitty/kittens/transfer"
@@ -79,6 +80,8 @@ func KittyToolEntryPoints(root *cli.Command) {
 	unicode_input.EntryPoint(root)
 	// show_key
 	show_key.EntryPoint(root)
+	// show_pointer
+	show_pointer.EntryPoint(root)
 	// desktop_ui
 	desktop_ui.EntryPoint(root)
 	// mouse_demo
