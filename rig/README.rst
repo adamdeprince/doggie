@@ -191,6 +191,48 @@ each with one, ``{"ok": true}`` or an error:
     Whether the terminal is connected, the size of its window, the objects
     that can be played to and the version of each interface it bound.
 
+The X11 half
+---------------
+
+::
+
+    rig/xrun.sh /path/to/built/tree run-name [sequence ...]
+
+does the same for the X11 backend, with the same client, checker, lock and
+run directory. Here nothing has to be invented: the X server has a test
+driver, ``inputtest``, whose devices take their events from a socket.
+``xrun.sh`` starts an X server of its own with the dummy video driver, no
+devices from the kernel and one ``inputtest`` device per kind of hardware,
+and ``x11.py`` plays to them. The server runs as the user, on a free display
+from ``:70`` up, without a window manager.
+
+It needs ``Xorg`` 21.1 with its ``dummy`` video driver and ``inputtest`` input
+driver (``xserver-xorg-core`` and ``xserver-xorg-video-dummy`` on Debian and
+Ubuntu).
+
+================ ====================================================================
+``stylus``,      A pen, or its eraser, hovers, draws a diagonal with rising pressure
+``eraser``       and lifts. The driver's tablet device has pressure and no tilt, and
+                 kitty takes the tool from the device's name
+``buttons``      The side buttons of a pen and the back and forward buttons
+``touch``        A touchscreen through XInput 2.2: one finger, then two
+``gestures``     The gestures of XInput 2.4: pinches and a swipe
+``scroll``       The scroll axis: a notch each way, then a notch in ten steps
+``mouse``        A mouse moves in eight steps and stops. Nothing is checked: run the
+                 client with ``--mouse`` and read the ``csi`` lines of its log
+================ ====================================================================
+
+``RIG_XINPUT_TEST=1`` also records what ``xinput test-xi2 --root`` sees in
+``xi2.log``. With a window over the root that is only the raw events; to see
+the events a window gets, with the positions the X server puts in them, run
+``xinput test-xi2`` on the server without a terminal.
+
+The X server stamps an event that comes from a device attached to the core
+pointer with the pointer position from before that event, and only the copy
+of the event that comes from the core pointer itself has the new position.
+The expected reports have the position that was played, so a terminal that
+takes positions from the device's own events is one event late throughout.
+
 Limits
 ---------
 
@@ -201,4 +243,5 @@ Limits
   belong to sees.
 * The terminal has to be the only client of the proxy, and sway must have no
   input devices of its own.
-* Only the Wayland backend is covered.
+* On X11 a tool has a position, a pressure and buttons, nothing else, and
+  there is no pad: that is all the test driver of the X server has.
