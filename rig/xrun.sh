@@ -54,7 +54,7 @@ if [ -z "$locked" ]; then
 fi
 
 rm -rf "$run"
-mkdir -m 700 "$run" "$run/devices" || exit 1
+mkdir -m 700 "$run" "$run/devices" "$run/cache" "$run/config" || exit 1
 
 # The X server: the dummy video driver, no devices from the kernel, and one
 # device of the inputtest driver for each kind of hardware. A device with the
@@ -140,7 +140,9 @@ if [ -n "${RIG_XINPUT_TEST:-}" ]; then # what the X server itself reports, to te
     pids+=($!)
 fi
 
+# kitty's caches and Mesa's stay out of the home directory
 env -u WAYLAND_DISPLAY DISPLAY=:$display LIBGL_ALWAYS_SOFTWARE=1 __GLX_VENDOR_LIBRARY_NAME=mesa \
+    KITTY_CACHE_DIRECTORY="$run/cache" KITTY_CONFIG_DIRECTORY="$run/config" MESA_SHADER_CACHE_DISABLE=true \
     $([ -e /usr/share/glvnd/egl_vendor.d/50_mesa.json ] && echo __EGL_VENDOR_LIBRARY_FILENAMES=/usr/share/glvnd/egl_vendor.d/50_mesa.json) \
     "$tree/kitty/launcher/kitty" --config NONE -o linux_display_server=x11 -o placement_strategy=top-left \
     -o window_padding_width=0 -o confirm_os_window_close=0 -o remember_window_size=no \

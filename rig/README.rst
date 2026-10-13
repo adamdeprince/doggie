@@ -26,6 +26,9 @@ of them are played, in the order of the table below. The script prints how
 what a program inside the terminal received differs from what it should have
 received, and exits with zero when nothing differs.
 
+Nothing is written outside that directory: the terminal runs with no
+configuration file and keeps its caches there.
+
 Only one run goes at a time, since the reports are timed and two runs would
 share the machine. The lock is the directory ``/tmp/silkie-rig.lock``: a run
 waits up to half an hour for it and removes it when it ends, however it ends.

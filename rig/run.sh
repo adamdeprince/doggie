@@ -55,7 +55,7 @@ if [ -z "$locked" ]; then
 fi
 
 rm -rf "$run"
-mkdir -m 700 "$run" || exit 1
+mkdir -m 700 "$run" "$run/cache" "$run/config" || exit 1
 
 # The compositor: no devices, no seat, no GPU. Everything it needs is in $run
 cat >"$run/sway.conf" <<EOF
@@ -78,7 +78,9 @@ wait_for "$run/control" 10 || exit 1
 
 # The terminal, drawing in software since the compositor does. The client inside it logs what it is sent
 mesa=/usr/share/glvnd/egl_vendor.d/50_mesa.json
+# kitty's caches and Mesa's stay out of the home directory
 env -u DISPLAY XDG_RUNTIME_DIR="$run" WAYLAND_DISPLAY=wayland-rig LIBGL_ALWAYS_SOFTWARE=1 \
+    KITTY_CACHE_DIRECTORY="$run/cache" KITTY_CONFIG_DIRECTORY="$run/config" MESA_SHADER_CACHE_DISABLE=true \
     ${RIG_WAYLAND_DEBUG:+WAYLAND_DEBUG=1} $([ -e $mesa ] && echo __EGL_VENDOR_LIBRARY_FILENAMES=$mesa) \
     "$tree/kitty/launcher/kitty" --config NONE -o linux_display_server=wayland -o placement_strategy=top-left \
     -o window_padding_width=0 -o confirm_os_window_close=0 --debug-input \
