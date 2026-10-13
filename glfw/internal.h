@@ -375,6 +375,7 @@ struct _GLFWfbconfig {
     bool stereo;
     int samples;
     bool sRGB;
+    bool floatColor;  // 16 bit floating point color components, EGL only
     bool doublebuffer;
     bool transparent;
     uintptr_t handle;

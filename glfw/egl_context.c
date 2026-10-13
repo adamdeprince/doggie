@@ -91,19 +91,29 @@ chooseEGLConfig(const _GLFWctxconfig *ctxconfig, const _GLFWfbconfig *desired, E
     if (desired->samples > 0) ATTR(EGL_SAMPLES, desired->samples);
     if (desired->depthBits > 0) ATTR(EGL_DEPTH_SIZE, desired->depthBits);
     if (desired->stencilBits > 0) ATTR(EGL_STENCIL_SIZE, desired->stencilBits);
-    if (desired->redBits > 0) ATTR(EGL_RED_SIZE, desired->redBits);
-    if (desired->greenBits > 0) ATTR(EGL_GREEN_SIZE, desired->greenBits);
-    if (desired->blueBits > 0) ATTR(EGL_BLUE_SIZE, desired->blueBits);
-    if (desired->alphaBits > 0) ATTR(EGL_ALPHA_SIZE, desired->alphaBits);
+    if (desired->floatColor) {
+        // Half floats, the only floating point color a window surface comes in
+        ATTR(EGL_COLOR_COMPONENT_TYPE_EXT, EGL_COLOR_COMPONENT_TYPE_FLOAT_EXT);
+        ATTR(EGL_RED_SIZE, 16);
+        ATTR(EGL_GREEN_SIZE, 16);
+        ATTR(EGL_BLUE_SIZE, 16);
+        if (desired->alphaBits > 0) ATTR(EGL_ALPHA_SIZE, 16);
+    } else {
+        if (desired->redBits > 0) ATTR(EGL_RED_SIZE, desired->redBits);
+        if (desired->greenBits > 0) ATTR(EGL_GREEN_SIZE, desired->greenBits);
+        if (desired->blueBits > 0) ATTR(EGL_BLUE_SIZE, desired->blueBits);
+        if (desired->alphaBits > 0) ATTR(EGL_ALPHA_SIZE, desired->alphaBits);
+    }
     ATTR(EGL_NONE, EGL_NONE);
 #undef ATTR
+    // Few drivers have floating point window surfaces, so finding none is not an error
     if (!eglChooseConfig(_glfw.egl.display, attributes, configs, sizeof(configs) / sizeof(configs[0]), &nativeCount)) {
-        _glfwInputError(GLFW_API_UNAVAILABLE, "EGL: eglChooseConfig failed");
+        if (!desired->floatColor) _glfwInputError(GLFW_API_UNAVAILABLE, "EGL: eglChooseConfig failed");
         return false;
     }
 
     if (!nativeCount) {
-        _glfwInputError(GLFW_API_UNAVAILABLE, "EGL: No EGLConfigs returned");
+        if (!desired->floatColor) _glfwInputError(GLFW_API_UNAVAILABLE, "EGL: No EGLConfigs returned");
         return false;
     }
 
@@ -340,6 +350,7 @@ _glfwInitEGL(void) {
     _glfw.egl.KHR_get_all_proc_addresses = extensionSupportedEGL("EGL_KHR_get_all_proc_addresses");
     _glfw.egl.KHR_context_flush_control = extensionSupportedEGL("EGL_KHR_context_flush_control");
     _glfw.egl.EXT_present_opaque = extensionSupportedEGL("EGL_EXT_present_opaque");
+    _glfw.egl.EXT_pixel_format_float = extensionSupportedEGL("EGL_EXT_pixel_format_float");
 
     return true;
 }
@@ -366,10 +377,8 @@ _glfwTerminateEGL(void) {
         attribs[index++] = v;                                               \
     }
 
-// Create the OpenGL or OpenGL ES context
-//
-bool
-_glfwCreateContextEGL(_GLFWwindow *window, const _GLFWctxconfig *ctxconfig, const _GLFWfbconfig *fbconfig) {
+static bool
+createContextEGL(_GLFWwindow *window, const _GLFWctxconfig *ctxconfig, const _GLFWfbconfig *fbconfig) {
     EGLint attribs[40];
     EGLConfig config;
     EGLContext share = NULL;
@@ -458,7 +467,8 @@ _glfwCreateContextEGL(_GLFWwindow *window, const _GLFWctxconfig *ctxconfig, cons
     // Set up attributes for surface creation
     index = 0;
 
-    if (fbconfig->sRGB) {
+    // A floating point surface holds linear values, there is no sRGB encoding to ask for
+    if (fbconfig->sRGB && !fbconfig->floatColor) {
         if (_glfw.egl.KHR_gl_colorspace) setAttrib(EGL_GL_COLORSPACE_KHR, EGL_GL_COLORSPACE_SRGB_KHR);
     }
     // Disabled because it prevents transparency from working on NVIDIA drivers under Wayland
@@ -484,6 +494,7 @@ _glfwCreateContextEGL(_GLFWwindow *window, const _GLFWctxconfig *ctxconfig, cons
     }
 
     window->context.egl.config = config;
+    window->context.egl.floatColor = fbconfig->floatColor;
 
     EGLint a = EGL_MIN_SWAP_INTERVAL;
     if (!eglGetConfigAttrib(_glfw.egl.display, config, a, &a)) {
@@ -561,6 +572,34 @@ _glfwCreateContextEGL(_GLFWwindow *window, const _GLFWctxconfig *ctxconfig, cons
     window->context.destroy = destroyContextEGL;
 
     return true;
+}
+
+// Does the driver have window surfaces with floating point color for a
+// framebuffer that is otherwise like fbconfig
+//
+bool
+_glfwHasFloatColorEGL(const _GLFWctxconfig *ctxconfig, const _GLFWfbconfig *fbconfig) {
+    if (!_glfw.egl.display || !_glfw.egl.EXT_pixel_format_float) return false;
+    _GLFWfbconfig wanted = *fbconfig;
+    wanted.floatColor = true;
+    EGLConfig config;
+    return chooseEGLConfig(ctxconfig, &wanted, &config);
+}
+
+// Create the OpenGL or OpenGL ES context
+//
+bool
+_glfwCreateContextEGL(_GLFWwindow *window, const _GLFWctxconfig *ctxconfig, const _GLFWfbconfig *fbconfig) {
+    if (!fbconfig->floatColor) return createContextEGL(window, ctxconfig, fbconfig);
+    // Floating point color is a wish. Where the driver has no such window
+    // surfaces, or cannot make one after all, the window gets an ordinary one
+    if (_glfwHasFloatColorEGL(ctxconfig, fbconfig)) {
+        if (createContextEGL(window, ctxconfig, fbconfig)) return true;
+        destroyContextEGL(window);
+    }
+    _GLFWfbconfig fixed = *fbconfig;
+    fixed.floatColor = false;
+    return createContextEGL(window, ctxconfig, &fixed);
 }
 
 #undef setAttrib
