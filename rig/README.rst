@@ -101,12 +101,19 @@ Sequences
                  leaving are in one frame, as wlroots sends them; and a tablet
                  unplugged in the middle of a stroke
 ``mods``         Keyboard modifiers held while a pen moves
+``pair``         A pen and the puck on the tablet at the same time, each with a
+                 stroke of its own
+``outside``      A stroke dragged out of the window on three sides and ended there
 ``touch``        A touchscreen: one finger draws; three fingers land, move and lift
                  together, one of them with a contact shape; two fingers are taken
-                 over by the compositor
-``gestures``     A pinch that also rotates, a three finger swipe, a hold
+                 over by the compositor; a tap that begins and ends in one frame
+``gestures``     A pinch that also rotates, a pinch the compositor takes over,
+                 swipes in the four directions, a hold
 ``scroll``       Two fingers scroll on a touchpad and lift, then a wheel turns a
                  notch each way
+``handover``     A pen leaves over the edge of the window, then the touchpad is
+                 pinched and scrolled with the pointer resting in the middle, as
+                 on a compositor where tablets have a cursor of their own
 ``pads``         The three pads are plugged in while the terminal runs, then every
                  key, the ring with a finger lift, a mode switch, the strip, the dial
 ================ ====================================================================

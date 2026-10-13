@@ -84,6 +84,13 @@ class Rig:
         if self.expectations:
             self.expectations.write(json.dumps({**what, 'at': time.monotonic()}) + '\n')
 
+    def alive(self) -> dict[str, Any]:
+        "What the proxy knows of the terminal, which must still be connected"
+        info = self.command(op='info')
+        if not info.get('connected'):
+            raise Died()
+        return info
+
     def wait_for_window(self, timeout: float = 20) -> dict[str, Any]:
         end = time.monotonic() + timeout
         seen = 0.0
@@ -101,6 +108,12 @@ class Rig:
 
 def px(v: float) -> int:
     return round(v * 256)
+
+
+def point(rig: Rig, x: float, y: float) -> None:
+    "Moves the pointer, as a hand on the mouse or touchpad does before it scrolls or pinches"
+    rig.play('pointer', ['motion', '$time', x, y], ['frame'])
+    time.sleep(0.02)
 
 
 def setup(rig: Rig) -> None:
@@ -289,6 +302,57 @@ def tool_mods(rig: Rig, tool: str = 'pen', tablet: str = 'intuos5') -> None:
     time.sleep(0.1)
 
 
+def tool_pair(rig: Rig, tablet: str = 'intuos5') -> None:
+    "A pen and a puck on the tablet at the same time, each drawing its own stroke"
+    pen, lens = 'tool:pen', 'tool:lens'
+    one = {'kind': 1, 'tool': tool_number('pen')}
+    two = {'kind': 1, 'tool': tool_number('lens')}
+    rig.play(pen, ['proximity_in', '$serial', f'tablet:{tablet}', '$surface'], *tool_axes('pen', 100, 700, distance=9000)[0], ['frame', '$time'])
+    rig.expect('tablet-pointer', 'pair: the pen arrives', phase=0, x=px(100), y=px(700), **one)
+    rig.play(lens, ['proximity_in', '$serial', f'tablet:{tablet}', '$surface'], ['motion', 900, 700], ['frame', '$time'])
+    rig.expect('tablet-pointer', 'pair: the puck arrives', phase=0, x=px(900), y=px(700), **two)
+    time.sleep(0.02)
+    rig.play(pen, ['down', '$serial'], ['pressure', 30000], ['distance', 0], ['frame', '$time'])
+    rig.expect('tablet-pointer', 'pair: the pen touches', phase=1, x=px(100), buttons=1, **one)
+    rig.play(lens, ['button', '$serial', BTN_LEFT, 1], ['frame', '$time'])
+    rig.expect('tablet-pointer', 'pair: the puck presses', phase=1, x=px(900), buttons=1, **two)
+    for i in range(1, 4):
+        time.sleep(0.01)
+        rig.play(pen, ['motion', 100 + 10 * i, 700], ['frame', '$time'])
+        rig.expect('tablet-pointer', f'pair: the pen moves {i}', phase=2, x=px(100 + 10 * i), buttons=1, p=30000, **one)
+        rig.play(lens, ['motion', 900 - 10 * i, 700], ['frame', '$time'])
+        rig.expect('tablet-pointer', f'pair: the puck moves {i}', phase=2, x=px(900 - 10 * i), buttons=1, **two)
+    rig.play(pen, ['up'], ['pressure', 0], ['frame', '$time'])
+    rig.expect('tablet-pointer', 'pair: the pen lifts, the puck is still down', phase=3, x=px(130), **one)
+    rig.play(lens, ['motion', 860, 700], ['frame', '$time'])
+    rig.expect('tablet-pointer', 'pair: the puck goes on', phase=2, x=px(860), buttons=1, **two)
+    rig.play(lens, ['button', '$serial', BTN_LEFT, 0], ['frame', '$time'])
+    rig.expect('tablet-pointer', 'pair: the puck releases', phase=3, **two)
+    rig.play(pen, ['proximity_out'], ['frame', '$time'])
+    rig.expect('tablet-pointer', 'pair: the pen leaves', phase=5, **one)
+    rig.play(lens, ['proximity_out'], ['frame', '$time'])
+    rig.expect('tablet-pointer', 'pair: the puck leaves', phase=5, **two)
+    time.sleep(0.1)
+
+
+def tool_outside(rig: Rig, tool: str = 'pen', tablet: str = 'intuos5') -> None:
+    "A stroke that starts in the window and is dragged out of it on two sides: it stays captured, coordinates are not clamped"
+    t = f'tool:{tool}'
+    rig.play(
+        t, ['proximity_in', '$serial', f'tablet:{tablet}', '$surface'], ['down', '$serial'], *tool_axes(tool, 20, 20, pressure=20000)[0], ['frame', '$time']
+    )
+    rig.expect('tablet-pointer', 'outside: tip down near the corner', kind=1, phase=1, x=px(20), y=px(20))
+    for x, y, where in ((-30.5, -12.25, 'above and left of the window'), (rig.width + 40, 50, 'right of the window'), (60, rig.height + 25, 'below it')):
+        time.sleep(0.01)
+        rig.play(t, ['motion', x, y], ['frame', '$time'])
+        rig.expect('tablet-pointer', f'outside: {where}', kind=1, phase=2, x=px(x), y=px(y), buttons=1)
+    rig.play(t, ['up'], ['pressure', 0], ['frame', '$time'])
+    rig.expect('tablet-pointer', 'outside: tip up out there', kind=1, phase=3, x=px(60), y=px(rig.height + 25))
+    rig.play(t, ['proximity_out'], ['frame', '$time'])
+    rig.expect('tablet-pointer', 'outside: leaves proximity', kind=1, phase=5)
+    time.sleep(0.1)
+
+
 # }}}
 
 
@@ -301,7 +365,7 @@ def pads(rig: Rig) -> None:
         if device.startswith('pad:'):
             rig.command(op='add', device=device, **d)
     time.sleep(0.2)
-    named = rig.command(op='info')['named']  # a terminal that drops its connection over a pad is found out here
+    named = rig.alive()['named']  # a terminal that drops its connection over a pad is found out here
 
     def pad(name: str, note: str, *events: list[Any], to: str = '', **fields: Any) -> None:
         rig.play(to or f'pad:{name}', *events)
@@ -394,12 +458,21 @@ def touch(rig: Rig) -> None:
     rig.expect('tablet-pointer', 'touch: the compositor takes the fingers over, first finger', kind=2, phase=4, contact=0, buttons=0)
     rig.expect('tablet-pointer', 'touch: the compositor takes the fingers over, second finger', kind=2, phase=4, contact=1, buttons=0)
     rig.expect('tablet-pointer', 'touch: end of the cancelled group', kind=2, phase=6)
+    time.sleep(0.05)
+
+    # a tap so short that the finger lands and lifts between two frames: the program must still see it land first
+    rig.play('touch', ['down', '$serial', '$time', '$surface', 7, 800, 600], ['up', '$serial', '$time', 7], ['frame'])
+    rig.expect('tablet-pointer', 'touch: a tap within one frame lands', kind=2, phase=1, contact=7, x=px(800), y=px(600), buttons=1)
+    rig.expect('tablet-pointer', 'touch: end of that group', kind=2, phase=6)
+    rig.expect('tablet-pointer', 'touch: and lifts', kind=2, phase=3, contact=7, buttons=0)
+    rig.expect('tablet-pointer', 'touch: end of that group', kind=2, phase=6)
     time.sleep(0.1)
 
 
 def gestures(rig: Rig) -> None:
     "The gestures of a touchpad: a pinch that also turns, a swipe to the left, and a hold"
     at = {'x': px(rig.width / 2), 'y': px(rig.height / 2)}
+    point(rig, rig.width / 2, rig.height / 2)
     rig.play('pinch', ['begin', '$serial', '$time', '$surface', 2])
     rig.expect('gesture', 'pinch begins', kind=1, phase=1, scale=0, total=1000, **at)
     rig.expect('gesture', 'and the rotation that goes with it', kind=2, phase=1, angle=0, total=0, **at)
@@ -424,6 +497,31 @@ def gestures(rig: Rig) -> None:
     rig.expect('gesture', 'and ends', kind=3, phase=3, dx=-1, dy=0)
     time.sleep(0.05)
 
+    rig.play('pinch', ['begin', '$serial', '$time', '$surface', 2])
+    rig.expect('gesture', 'a second pinch begins', kind=1, phase=1)
+    rig.expect('gesture', 'with its rotation', kind=2, phase=1)
+    rig.play('pinch', ['update', '$time', 0, 0, 0.75, 0])
+    rig.expect('gesture', 'pinched in to three quarters', kind=1, phase=2, scale=-250, total=750)
+    rig.play('pinch', ['end', '$serial', '$time', 1])
+    rig.expect('gesture', 'the compositor takes the pinch over', kind=1, phase=4)
+    rig.expect('gesture', 'and the rotation', kind=2, phase=4)
+    time.sleep(0.05)
+
+    for fingers, dx, dy, where in ((4, 30, -3, 'right'), (3, 2, -25, 'up'), (3, -4, 40, 'down')):
+        rig.play(
+            'swipe',
+            ['begin', '$serial', '$time', '$surface', fingers],
+            ['update', '$time', dx, dy],
+            ['update', '$time', dx, dy],
+            ['end', '$serial', '$time', 0],
+        )
+        want = {'dx': (dx > 0) - (dx < 0) if abs(dx) > abs(dy) else 0, 'dy': (dy > 0) - (dy < 0) if abs(dy) > abs(dx) else 0}
+        rig.expect('gesture', f'a swipe {where} begins', kind=3, phase=1, **want)
+        rig.expect('gesture', 'and ends', kind=3, phase=3, **want)
+        time.sleep(0.05)
+    rig.play('swipe', ['begin', '$serial', '$time', '$surface', 3], ['update', '$time', -30, 0], ['end', '$serial', '$time', 1])
+    time.sleep(0.05)  # a swipe the compositor took over is not a swipe
+
     # A hold has no report in version 1 of the gesture protocol, a kind for it is being added
     rig.play('hold', ['begin', '$serial', '$time', '$surface', 2])
     time.sleep(0.05)
@@ -434,6 +532,7 @@ def gestures(rig: Rig) -> None:
 def scroll(rig: Rig) -> None:
     "Two fingers scroll down on a touchpad and lift, then a wheel turns one notch each way"
     at = {'x': round(rig.width / 2), 'y': round(rig.height / 2)}
+    point(rig, rig.width / 2, rig.height / 2)
     for i in range(6):
         rig.play('pointer', ['axis_source', FINGER], ['axis', '$time', 0, 4.5], ['frame'])
         # the first report of a gesture says so where the terminal can tell, and silkie cannot tell yet on Wayland
@@ -452,6 +551,37 @@ def scroll(rig: Rig) -> None:
     time.sleep(0.2)
 
 
+def handover(rig: Rig) -> None:
+    """The pointer rests in the middle of the window while a pen draws, is dragged out over the edge and leaves
+    there. Then, without the pointer moving, two fingers pinch and scroll on the touchpad. A compositor that gives
+    tablets a cursor of their own, as GNOME does, sends just this, and the pinch and the scroll belong where the
+    pointer is, not where the pen was last"""
+    middle = rig.width / 2, rig.height / 2
+    point(rig, *middle)
+    t = 'tool:pen'
+    rig.play(
+        t, ['proximity_in', '$serial', 'tablet:intuos5', '$surface'], ['down', '$serial'], *tool_axes('pen', 200, 150, pressure=20000)[0], ['frame', '$time']
+    )
+    rig.expect('tablet-pointer', 'handover: the pen draws in the corner', kind=1, phase=1, x=px(200), y=px(150))
+    time.sleep(0.02)
+    rig.play(t, ['motion', 200, -40], ['frame', '$time'])
+    rig.expect('tablet-pointer', 'handover: is dragged out over the top edge', kind=1, phase=2, y=px(-40))
+    rig.play(t, ['up'], ['pressure', 0], ['frame', '$time'])
+    rig.expect('tablet-pointer', 'handover: lifts there', kind=1, phase=3)
+    rig.play(t, ['proximity_out'], ['frame', '$time'])
+    time.sleep(0.1)
+    rig.play('pinch', ['begin', '$serial', '$time', '$surface', 2], ['update', '$time', 0, 0, 1.25, 0], ['end', '$serial', '$time', 0])
+    for phase, note in ((1, 'begins'), (2, 'grows'), (3, 'ends')):
+        rig.expect('gesture', f'handover: a pinch {note} where the pointer is', kind=1, phase=phase, x=px(middle[0]), y=px(middle[1]))
+    time.sleep(0.05)
+    rig.play('pointer', ['axis_source', FINGER], ['axis', '$time', 0, 4.5], ['frame'])
+    rig.expect('scroll', 'handover: a scroll where the pointer is', dy=450, x=round(middle[0]), y=round(middle[1]))
+    rig.play('pointer', ['axis_source', FINGER], ['axis_stop', '$time', 0], ['frame'])
+    time.sleep(1.0)
+    rig.mark(skip='scroll')
+    rig.mark(skip='gesture')  # the rotation reports that go with the pinch
+
+
 # }}}
 
 
@@ -465,9 +595,12 @@ SEQUENCES: dict[str, Callable[[Rig], None]] = {
     'burst': tool_burst,
     'abort': tool_abort,
     'mods': tool_mods,
+    'pair': tool_pair,
+    'outside': tool_outside,
     'touch': touch,
     'gestures': gestures,
     'scroll': scroll,
+    'handover': handover,
     'pads': pads,
 }
 
@@ -491,7 +624,7 @@ def main() -> None:
             rig.mark(sequence=name)
             try:
                 SEQUENCES[name](rig)
-                rig.command(op='info')
+                rig.alive()
             except Died:
                 rig.mark(died=name)
                 print(f'the terminal dropped its connection during {name}', file=sys.stderr)
