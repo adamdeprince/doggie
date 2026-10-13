@@ -1306,6 +1306,9 @@ bundle_image_as_png(PyObject *self UNUSED, PyObject *args, PyObject *kw) {
     }
 }
 
+// Plays a tap of the haptic protocol on the trackpad: generic 0, alignment 1,
+// level 2, click 3, complete 4. A trackpad has no tap of its own for the last
+// two, so they get the generic one
 void
 cocoa_haptic_feedback(int which) {
     NSHapticFeedbackPattern pattern;

@@ -1789,10 +1789,22 @@ send_visibility_report(Screen *self) {
     write_escape_code_to_child(self, ESC_CSI, self->visibility_state != 2 ? "?999;1n" : "?999;2n");
 }
 
+static int
+haptic_name_index(const char *val, const char *const *names, size_t count) {
+    for (size_t i = 0; i < count; i++) {
+        if (!strcmp(val, names[i])) return (int)i;
+    }
+    return -1;
+}
+
 void
 screen_haptic(Screen *self, const char *data, size_t sz) {
+    // The caps bit of a target is 1 << its index here
+    static const char *const targets[] = {"trackpad", "pen", "dial"};
+    // The taps, numbered as cocoa_haptic_feedback() takes them
+    static const char *const taps[] = {"generic", "alignment", "level", "click", "complete"};
     char buf[128], reply[128], *saveptr = NULL;
-    const char *op = "", *pattern = "";
+    const char *op = "", *pattern = "", *target = "trackpad";
     int v = 0, id = -1;
     if (sz >= sizeof(buf)) return;
     memcpy(buf, data, sz);
@@ -1805,26 +1817,34 @@ screen_haptic(Screen *self, const char *data, size_t sz) {
         else if (!strcmp(tok, "op")) op = val;
         else if (!strcmp(tok, "id")) id = atoi(val);
         else if (!strcmp(tok, "pattern")) pattern = val;
+        else if (!strcmp(tok, "target")) target = val;
     }
     if (v != 1) return;
+    // What can be played right now: taps on the trackpad 1, on a pen 2 and on
+    // a dial 4, continuous feedback on a pen 8. Only the trackpad of a Mac can
+    // be driven
 #ifdef __APPLE__
-    const bool available = OPT(haptic_feedback);
+    const unsigned caps = OPT(haptic_feedback) ? 1 : 0;
 #else
-    const bool available = false;
+    const unsigned caps = 0;
 #endif
     if (!strcmp(op, "query") && id >= 0) {
-        snprintf(reply, sizeof(reply), "777;haptic;v=1:op=cap:id=%d:caps=%d", id, available);
+        snprintf(reply, sizeof(reply), "777;haptic;v=1:op=cap:id=%d:caps=%u", id, caps);
         write_escape_code_to_child(self, ESC_OSC, reply);
-    } else if (!strcmp(op, "play") && available) {
-        int which = !strcmp(pattern, "generic") ? 0 : !strcmp(pattern, "alignment") ? 1 : !strcmp(pattern, "level") ? 2 : -1;
+    } else if (!strcmp(op, "play")) {
+        const int target_index = haptic_name_index(target, targets, arraysz(targets)), which = haptic_name_index(pattern, taps, arraysz(taps));
+        if (target_index < 0 || which < 0 || !(caps & (1u << target_index))) return;
         OSWindow *os_window = os_window_for_kitty_window(self->window_id);
         monotonic_t now = monotonic();
-        if (which < 0 || !os_window || !os_window->is_focused || now - os_window->last_haptic_at < ms_to_monotonic_t(50)) return;
+        if (!os_window || !os_window->is_focused || now - os_window->last_haptic_at < ms_to_monotonic_t(50)) return;
         os_window->last_haptic_at = now;
 #ifdef __APPLE__
         cocoa_haptic_feedback(which);
 #endif
     }
+    // start and stop are for the continuous feedback of a pen, which nothing
+    // kitty runs on lets an application play, so there is never any to start
+    // or to stop
 }
 
 void

@@ -901,8 +901,21 @@ class TestScreen(BaseTest):
         parse_bytes(s, b'\x1b]777;haptic;v=1:op=query\x1b\\')
         parse_bytes(s, b'\x1b]777;haptic;v=1:op=query:id=7:bad\x1b\\')
         parse_bytes(s, b'\x1b]777;haptic;v=1:op=mode:mode=1\x1b\\')
+        # Taps on every target, the patterns a trackpad has no tap for, and
+        # the continuous feedback of a pen are all taken without a reply,
+        # as are values that are not defined
+        for frame in (
+            'op=play:pattern=click', 'op=play:pattern=complete:target=trackpad', 'op=play:pattern=click:target=pen',
+            'op=play:pattern=click:target=dial', 'op=play:pattern=generic:target=elbow', 'op=play:pattern=thud', 'op=play',
+            'op=start:target=pen:pattern=pencil:intensity=60', 'op=start:target=pen:pattern=ink', 'op=start:pattern=brush:intensity=900',
+            'op=start', 'op=stop', 'op=stop:target=pen',
+        ):
+            parse_bytes(s, f'\x1b]777;haptic;v=1:{frame}\x1b\\'.encode())
         self.ae(c.wtcbuf, b'')
         self.ae(str(s.line(0)), '')
+        # The capabilities are still only the trackpad's
+        parse_bytes(s, b'\x1b]777;haptic;v=1:op=query:id=8\x1b\\')
+        self.ae(c.wtcbuf, f'\x1b]777;haptic;v=1:op=cap:id=8:caps={1 if is_macos else 0}\x1b\\'.encode())
 
     def test_cursor_hidden(self):
         s = self.create_screen()
