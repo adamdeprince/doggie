@@ -981,8 +981,17 @@ padAddControl(_GLFWWaylandTabletPadGroup *group, GLFWTabletPadEventType type, un
     return c;
 }
 
+// A pad or a group must not be destroyed while the compositor is still
+// announcing what is in it: libwayland drops the events of a destroyed object
+// without taking note of the objects they bring, and the compositor's next
+// new object is then a protocol error that ends the connection. So a pad or a
+// group that cannot be kept, there being no memory or no room for it, is
+// listened to with no data until its done event and destroyed then. Rings,
+// strips and dials bring nothing and can be destroyed as they arrive
+
 static void
 padGroupHandleButtons(void *data, struct zwp_tablet_pad_group_v2 *group UNUSED, struct wl_array *buttons) {
+    if (!pg) return;
     free(pg->buttons);
     pg->num_buttons = 0;
     pg->buttons = buttons->size ? malloc(buttons->size) : NULL;
@@ -993,7 +1002,7 @@ padGroupHandleButtons(void *data, struct zwp_tablet_pad_group_v2 *group UNUSED, 
 
 static void
 padGroupHandleRing(void *data, struct zwp_tablet_pad_group_v2 *group UNUSED, struct zwp_tablet_pad_ring_v2 *ring) {
-    _GLFWWaylandTabletPadControl *c = padAddControl(pg, GLFW_TABLET_PAD_RING, &pg->pad->num_rings);
+    _GLFWWaylandTabletPadControl *c = pg ? padAddControl(pg, GLFW_TABLET_PAD_RING, &pg->pad->num_rings) : NULL;
     if (!c) {
         zwp_tablet_pad_ring_v2_destroy(ring);
         return;
@@ -1004,7 +1013,7 @@ padGroupHandleRing(void *data, struct zwp_tablet_pad_group_v2 *group UNUSED, str
 
 static void
 padGroupHandleStrip(void *data, struct zwp_tablet_pad_group_v2 *group UNUSED, struct zwp_tablet_pad_strip_v2 *strip) {
-    _GLFWWaylandTabletPadControl *c = padAddControl(pg, GLFW_TABLET_PAD_STRIP, &pg->pad->num_strips);
+    _GLFWWaylandTabletPadControl *c = pg ? padAddControl(pg, GLFW_TABLET_PAD_STRIP, &pg->pad->num_strips) : NULL;
     if (!c) {
         zwp_tablet_pad_strip_v2_destroy(strip);
         return;
@@ -1015,7 +1024,7 @@ padGroupHandleStrip(void *data, struct zwp_tablet_pad_group_v2 *group UNUSED, st
 
 static void
 padGroupHandleDial(void *data, struct zwp_tablet_pad_group_v2 *group UNUSED, struct zwp_tablet_pad_dial_v2 *dial) {
-    _GLFWWaylandTabletPadControl *c = padAddControl(pg, GLFW_TABLET_PAD_DIAL, &pg->pad->num_dials);
+    _GLFWWaylandTabletPadControl *c = pg ? padAddControl(pg, GLFW_TABLET_PAD_DIAL, &pg->pad->num_dials) : NULL;
     if (!c) {
         zwp_tablet_pad_dial_v2_destroy(dial);
         return;
@@ -1026,16 +1035,19 @@ padGroupHandleDial(void *data, struct zwp_tablet_pad_group_v2 *group UNUSED, str
 
 static void
 padGroupHandleModes(void *data, struct zwp_tablet_pad_group_v2 *group UNUSED, uint32_t modes) {
-    pg->num_modes = modes;
+    if (pg) pg->num_modes = modes;
 }
 
 static void
-padGroupHandleDone(void *data UNUSED, struct zwp_tablet_pad_group_v2 *group UNUSED) {}
+padGroupHandleDone(void *data, struct zwp_tablet_pad_group_v2 *group) {
+    if (!pg) zwp_tablet_pad_group_v2_destroy(group);
+}
 
 // Compositors also send this for every group when the pad gets the focus, so
 // an application learns the modes the pad is in
 static void
 padGroupHandleModeSwitch(void *data, struct zwp_tablet_pad_group_v2 *group UNUSED, uint32_t time, uint32_t serial, uint32_t mode) {
+    if (!pg) return;
     pg->mode = mode;
     pg->mode_serial = serial;
     pg->has_mode_serial = true;
@@ -1058,15 +1070,13 @@ static const struct zwp_tablet_pad_group_v2_listener padGroupListener = {
 
 static void
 padHandleGroup(void *data, struct zwp_tablet_pad_v2 *pad UNUSED, struct zwp_tablet_pad_group_v2 *group) {
-    _GLFWWaylandTabletPadGroup *g = pp->num_groups < arraysz(pp->groups) ? calloc(1, sizeof(_GLFWWaylandTabletPadGroup)) : NULL;
-    if (!g) {
-        zwp_tablet_pad_group_v2_destroy(group);
-        return;
+    _GLFWWaylandTabletPadGroup *g = pp && pp->num_groups < arraysz(pp->groups) ? calloc(1, sizeof(_GLFWWaylandTabletPadGroup)) : NULL;
+    if (g) {
+        g->pad = pp;
+        g->group = group;
+        g->index = (unsigned)pp->num_groups;
+        pp->groups[pp->num_groups++] = g;
     }
-    g->pad = pp;
-    g->group = group;
-    g->index = (unsigned)pp->num_groups;
-    pp->groups[pp->num_groups++] = g;
     zwp_tablet_pad_group_v2_add_listener(group, &padGroupListener, g);
 }
 
@@ -1075,20 +1085,24 @@ padHandlePath(void *data UNUSED, struct zwp_tablet_pad_v2 *pad UNUSED, const cha
 
 static void
 padHandleButtons(void *data, struct zwp_tablet_pad_v2 *pad UNUSED, uint32_t buttons) {
-    pp->num_buttons = buttons;
+    if (pp) pp->num_buttons = buttons;
 }
 
 static void
-padHandleDone(void *data UNUSED, struct zwp_tablet_pad_v2 *pad UNUSED) {}
+padHandleDone(void *data, struct zwp_tablet_pad_v2 *pad) {
+    if (!pp) zwp_tablet_pad_v2_destroy(pad);
+}
 
 static void
 padHandleButton(void *data, struct zwp_tablet_pad_v2 *pad UNUSED, uint32_t time, uint32_t button, uint32_t state) {
+    if (!pp) return;
     GLFWTabletPadEvent ev = {.type = GLFW_TABLET_PAD_BUTTON, .index = button, .pressed = state == ZWP_TABLET_PAD_V2_BUTTON_STATE_PRESSED};
     padSendEvent(pp, &ev, &time);
 }
 
 static void
 padHandleEnter(void *data, struct zwp_tablet_pad_v2 *pad UNUSED, uint32_t serial, struct zwp_tablet_v2 *tablet, struct wl_surface *surface) {
+    if (!pp) return;
     padLoseFocus(pp);
     _GLFWwindow *window = get_window_from_surface(surface);
     if (!window || surface != window->wl.surface) return;
@@ -1106,11 +1120,12 @@ padHandleEnter(void *data, struct zwp_tablet_pad_v2 *pad UNUSED, uint32_t serial
 
 static void
 padHandleLeave(void *data, struct zwp_tablet_pad_v2 *pad UNUSED, uint32_t serial UNUSED, struct wl_surface *surface UNUSED) {
-    padLoseFocus(pp);
+    if (pp) padLoseFocus(pp);
 }
 
 static void
 padHandleRemoved(void *data, struct zwp_tablet_pad_v2 *pad UNUSED) {
+    if (!pp) return;  // it was destroyed when it was done
     padLoseFocus(pp);
     destroyTabletPad(pp);
 }
@@ -1131,14 +1146,12 @@ static void
 tabletSeatHandlePadAdded(void *data UNUSED, struct zwp_tablet_seat_v2 *seat UNUSED, struct zwp_tablet_pad_v2 *pad) {
     static uint64_t device_count = 0;
     _GLFWWaylandTabletPad *p = calloc(1, sizeof(_GLFWWaylandTabletPad));
-    if (!p) {
-        zwp_tablet_pad_v2_destroy(pad);
-        return;
+    if (p) {
+        p->pad = pad;
+        p->device = ++device_count;
+        p->next = _glfw.wl.tablet_pads;
+        _glfw.wl.tablet_pads = p;
     }
-    p->pad = pad;
-    p->device = ++device_count;
-    p->next = _glfw.wl.tablet_pads;
-    _glfw.wl.tablet_pads = p;
     zwp_tablet_pad_v2_add_listener(pad, &padListener, p);
 }
 
