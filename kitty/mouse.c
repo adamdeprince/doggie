@@ -2106,8 +2106,14 @@ tablet_event(const GLFWTabletEvent *ev) {
     const OSWindow *osw = global_state.callback_os_window;
     TabletTool *t = tablet_tool(ev->device);
     Window *w = t->window_id ? window_for_window_id(t->window_id) : pointer_window(POINTER_PEN);
+    if (!w && ev->type != GLFW_TABLET_POINT && t->described_to) {
+        // A tool that goes away while it is over no window is still gone for the window that was last told of it
+        w = window_for_window_id(t->described_to);
+        if (w && !(w->render_data.screen->pointer.mode & POINTER_PEN)) w = NULL;
+    }
     if (!w) {
-        t->active = false;
+        // The tool is remembered for as long as it is in proximity, even over no window
+        if (ev->type != GLFW_TABLET_POINT) t->active = false;
         return false;
     }
     const WindowGeometry *g = &w->render_data.geometry;
