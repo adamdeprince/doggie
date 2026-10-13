@@ -735,10 +735,23 @@ static void
 toolHandleFrame(void *data, struct zwp_tablet_tool_v2 *t UNUSED, uint32_t time) {
     _GLFWwindow *window = tt->window;
     if (!window) return;
-    tt->ev.type = tt->left ? GLFW_TABLET_OUT : GLFW_TABLET_POINT;
     tt->ev.keyboard_modifiers = _glfw.wl.xkb.states.modifiers;
     tt->ev.timestamp = event_time_to_monotonic(time);
-    if (!_glfwInputTablet(window, &tt->ev)) {
+    // A tool that is flicked off the tablet lifts and leaves in one frame. The
+    // lift is reported before the leaving, so that the stroke is ended rather
+    // than taken to have been lost
+    const bool lifted = tt->released & (1u << GLFW_MOUSE_BUTTON_LEFT);
+    bool consumed = false;
+    if (!tt->left || lifted) {
+        tt->ev.type = GLFW_TABLET_POINT;
+        consumed = _glfwInputTablet(window, &tt->ev);
+    }
+    if (tt->left) {
+        tt->ev.type = GLFW_TABLET_OUT;
+        const bool out_consumed = _glfwInputTablet(window, &tt->ev);
+        if (!lifted) consumed = out_consumed;
+    }
+    if (!consumed) {
         // Compositors send no pointer events for a tool once this protocol is
         // bound, so make them here
         window->wl.cursorPosX = tt->ev.x;
