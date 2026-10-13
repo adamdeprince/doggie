@@ -42,7 +42,27 @@ typedef struct PointerReport {
     unsigned long long t;
     unsigned tu;  // microseconds past t, only meaningful with has_tu
     bool has_tu;
+    uint32_t ink;  // the element the terminal made for the stroke this report begins, see docs/ink-protocol.rst, 0 for none
 } PointerReport;
+
+// Terminal-side ink, see docs/ink-protocol.rst
+typedef struct InkBrush {
+    uint32_t image, group;        // the vector image that is drawn on and the group of it the strokes go into, no brush when image is 0
+    uint32_t next_id, remaining;  // the element ids the program set aside that are left
+    unsigned tools;               // the tools that draw, bit 1 << tool
+    double w0, w1, exponent;      // the width at no pressure and at full pressure, and the curve between them
+    char fill[24];                // the color of the strokes, as a record writes it
+} InkBrush;
+
+typedef struct InkStroke {
+    bool active;
+    uint64_t device;
+    int contact;
+    GraphicsManager *grman;
+    InkStrokeTarget target;
+    uint32_t element, group;
+    double w0, w1, exponent;
+} InkStroke;
 
 // A tool as it is described to the program before its first report
 typedef struct PointerDevice {
@@ -269,6 +289,12 @@ typedef struct {
         size_t capacity;
         PointerReport *contacts;  // grows as fingers land, see pointer_contact()
     } pointer;
+    struct {
+        bool on;
+        unsigned num_strokes;
+        InkBrush brush;
+        InkStroke strokes[4];  // those being drawn, one for each tool that is down
+    } ink;
 } Screen;
 
 #define pixel_scroll_enabled(screen) (OPT(pixel_scroll) && !screen->paused_rendering.expires_at && screen->linebuf == screen->main_linebuf)
@@ -337,6 +363,10 @@ void desktop_notify(Screen *self, unsigned int, PyObject *);
 void screen_tablet_pointer(Screen *self, const char *data, size_t sz);
 void screen_pointer_cancel(Screen *self, int kind);
 bool screen_pointer_report(Screen *self, PointerReport *r);
+void screen_ink(Screen *self, const char *data, size_t sz);
+void screen_ink_report(Screen *self, PointerReport *r);
+void screen_ink_off(Screen *self);
+void screen_ink_reset(Screen *self);
 bool screen_pointer_device(Screen *self, const PointerDevice *d);
 bool screen_pointer_action(Screen *self, const PointerAction *a);
 void set_icon(Screen *self, PyObject *);

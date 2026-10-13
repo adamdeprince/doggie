@@ -241,6 +241,7 @@ do_screen_reset(Screen *self, bool is_hard_reset) {
     }
     screen_pointer_cancel(self, 0);
     self->pointer.mode = 0;
+    screen_ink_reset(self);
     self->modes = empty_modes;
     self->saved_modes = empty_modes;
     self->active_hyperlink_id = 0;

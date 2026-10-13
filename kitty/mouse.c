@@ -1710,7 +1710,8 @@ write_pointer_report(Screen *screen, const PointerReport *r) {
 #undef F
         if (r->has_stage) n += snprintf(buf + n, sizeof(buf) - n, ":stage=%d", r->stage);
         if (r->src) n += snprintf(buf + n, sizeof(buf) - n, ":src=%d", r->src);
-        if (r->w > 0 && r->h > 0) snprintf(buf + n, sizeof(buf) - n, ":w=%d:h=%d", r->w, r->h);
+        if (r->w > 0 && r->h > 0) n += snprintf(buf + n, sizeof(buf) - n, ":w=%d:h=%d", r->w, r->h);
+        if (r->ink) snprintf(buf + n, sizeof(buf) - n, ":ink=%u", r->ink);
     }
     write_escape_code_to_child(screen, ESC_OSC, buf);
 }
@@ -1801,6 +1802,8 @@ screen_pointer_report(Screen *screen, PointerReport *r) {
             break;
         default: break;
     }
+    // the terminal draws the stroke itself for a program that gave it a brush
+    if (r->kind == POINTER_PEN && (screen->ink.on || screen->ink.num_strokes)) screen_ink_report(screen, r);
     write_pointer_report(screen, r);
     return true;
 }
@@ -1817,6 +1820,7 @@ screen_pointer_cancel(Screen *screen, int kind) {
         r.phase = POINTER_CANCEL;
         r.buttons = 0;
         r.p = 0;
+        if (r.kind == POINTER_PEN && screen->ink.num_strokes) screen_ink_report(screen, &r);
         write_pointer_report(screen, &r);
     }
     screen->pointer.num_contacts = kept;
