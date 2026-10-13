@@ -31,10 +31,19 @@ share the machine. The lock is the directory ``/tmp/silkie-rig.lock``: a run
 waits up to half an hour for it and removes it when it ends, however it ends.
 If a run is killed with ``SIGKILL`` the lock stays, remove it with ``rmdir``.
 
-It needs sway (1.9 or later), Python 3.12, libxkbcommon, and the protocol XML
-files of ``wayland-protocols`` (1.42 or later for dials) and ``libwayland-dev``,
-all of which a machine that builds kitty for Wayland has. kitty draws with
-Mesa's software renderer, so no GPU is used.
+It needs sway (it was written against 1.11), Python 3.12, libxkbcommon, and
+the protocol XML files of ``wayland-protocols`` (1.42 or later for dials) and
+``libwayland-dev``, all of which a machine that builds kitty for Wayland has.
+kitty draws with Mesa's software renderer, so no GPU is used.
+
+To check the rig itself, without a terminal::
+
+    rig/selftest.sh run-name
+
+builds ``tabletdump.c``, a small client that prints every ``tablet-v2`` event
+it is sent, connects it through the proxy, plays a pen, the puck and the pads
+to it and compares what it printed with ``selftest.expected``. Run it after
+changing ``wlproxy.py`` or the devices.
 
 How it works
 ---------------

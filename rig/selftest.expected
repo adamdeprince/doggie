@@ -1,0 +1,284 @@
+zwp_tablet_manager_v2 version 2
+tablet_added
+tablet name Wacom Intuos5 touch M Pen
+tablet id 056a:0027
+tablet path /dev/input/event90
+tablet bustype 3
+tablet done
+tool_added
+tool type 0x140
+tool serial 578837976
+tool id_wacom 0x802
+tool capability 2
+tool capability 3
+tool capability 1
+tool done
+tool_added
+tool type 0x141
+tool serial 578837976
+tool id_wacom 0x80a
+tool capability 2
+tool capability 3
+tool capability 1
+tool done
+tool_added
+tool type 0x140
+tool serial 1090564257
+tool id_wacom 0x804
+tool capability 2
+tool capability 3
+tool capability 1
+tool capability 4
+tool done
+tool_added
+tool type 0x144
+tool serial 1090564258
+tool id_wacom 0x902
+tool capability 2
+tool capability 3
+tool capability 1
+tool capability 5
+tool done
+tool_added
+tool type 0x147
+tool serial 1090564259
+tool id_wacom 0x96
+tool capability 6
+tool done
+tool_added
+tool type 0x140
+tool serial 1090564260
+tool id_wacom 0x802
+tool capability 2
+tool capability 3
+tool capability 1
+tool done
+tablet_added
+tablet name Wacom Cintiq Pro 16 Pen
+tablet id 056a:0350
+tablet path /dev/input/event94
+tablet bustype 3
+tablet done
+tool_added
+tool type 0x140
+tool serial 297797542
+tool id_wacom 0x823
+tool capability 2
+tool capability 3
+tool capability 1
+tool done
+tool proximity_in
+tool motion 100.00 100.00
+tool pressure 0
+tool distance 40000
+tool tilt 0.00 0.00
+tool frame
+tool motion 110.00 105.00
+tool pressure 0
+tool distance 30000
+tool tilt 0.00 0.00
+tool frame
+tool motion 120.00 110.00
+tool pressure 0
+tool distance 20000
+tool tilt 0.00 0.00
+tool frame
+tool motion 130.00 115.00
+tool pressure 0
+tool distance 10000
+tool tilt 0.00 0.00
+tool frame
+tool down
+tool motion 130.00 115.00
+tool pressure 5000
+tool distance 0
+tool tilt 10.00 -5.00
+tool frame
+tool motion 150.25 127.50
+tool pressure 11000
+tool distance 0
+tool tilt 14.00 -8.00
+tool frame
+tool motion 170.50 140.00
+tool pressure 17000
+tool distance 0
+tool tilt 18.00 -11.00
+tool frame
+tool motion 190.75 152.50
+tool pressure 23000
+tool distance 0
+tool tilt 22.00 -14.00
+tool frame
+tool motion 211.00 165.00
+tool pressure 29000
+tool distance 0
+tool tilt 26.00 -17.00
+tool frame
+tool motion 231.25 177.50
+tool pressure 35000
+tool distance 0
+tool tilt 30.00 -20.00
+tool frame
+tool motion 251.50 190.00
+tool pressure 41000
+tool distance 0
+tool tilt 34.00 -23.00
+tool frame
+tool motion 271.75 202.50
+tool pressure 47000
+tool distance 0
+tool tilt 38.00 -26.00
+tool frame
+tool motion 292.00 215.00
+tool pressure 53000
+tool distance 0
+tool tilt 42.00 -29.00
+tool frame
+tool motion 312.25 227.50
+tool pressure 59000
+tool distance 0
+tool tilt 46.00 -32.00
+tool frame
+tool motion 332.50 240.00
+tool pressure 65000
+tool distance 0
+tool tilt 50.00 -35.00
+tool frame
+tool up
+tool motion 332.50 240.00
+tool pressure 0
+tool distance 0
+tool tilt 50.00 -35.00
+tool frame
+tool proximity_out
+tool frame
+tool proximity_in
+tool motion 500.00 300.00
+tool frame
+tool button 0x111 1
+tool frame
+tool button 0x111 0
+tool frame
+tool button 0x110 1
+tool frame
+tool motion 516.00 300.00
+tool frame
+tool wheel 15.00 1
+tool frame
+tool motion 532.00 300.00
+tool frame
+tool wheel -30.00 -2
+tool frame
+tool button 0x112 1
+tool frame
+tool button 0x113 1
+tool frame
+tool button 0x114 1
+tool frame
+tool button 0x112 0
+tool button 0x113 0
+tool button 0x114 0
+tool frame
+tool button 0x110 0
+tool frame
+tool proximity_out
+tool frame
+pad_added
+pad group
+group buttons 0 1 2 3 4 5 6 7 8
+group ring
+group modes 4
+group done
+pad path /dev/input/event91
+pad buttons 9
+pad done
+pad_added
+pad group
+group buttons 0 1 2 3
+group strip
+group modes 1
+group done
+pad path /dev/input/event92
+pad buttons 4
+pad done
+pad_added
+pad group
+group buttons 0
+group dial
+group modes 1
+group done
+pad path /dev/input/event93
+pad buttons 1
+pad done
+pad enter
+pad button 0 1
+pad button 0 0
+pad button 1 1
+pad button 1 0
+pad button 2 1
+pad button 2 0
+pad button 3 1
+pad button 3 0
+pad button 4 1
+pad button 4 0
+pad button 5 1
+pad button 5 0
+pad button 6 1
+pad button 6 0
+pad button 7 1
+pad button 7 0
+pad button 8 1
+pad button 8 0
+ring source 1
+ring angle 0.00
+ring frame
+ring source 1
+ring angle 45.50
+ring frame
+ring source 1
+ring angle 90.00
+ring frame
+ring source 1
+ring angle 180.00
+ring frame
+ring source 1
+ring angle 355.00
+ring frame
+ring stop
+ring frame
+group mode_switch 1
+pad button 0 1
+pad button 0 0
+pad leave
+pad enter
+strip source 1
+strip position 0
+strip frame
+strip source 1
+strip position 16384
+strip frame
+strip source 1
+strip position 32768
+strip frame
+strip source 1
+strip position 65535
+strip frame
+strip stop
+strip frame
+pad leave
+pad enter
+dial delta 120
+dial frame
+dial delta -240
+dial frame
+dial delta 30
+dial frame
+pad button 0 1
+pad button 0 0
+pad leave
+--- requests
+      1 zwp_tablet_manager_v2.get_tablet_seat on 4 [N, N]
+      1 zwp_tablet_pad_dial_v2.set_feedback on dial:huion:0:0 ["brush size", N]
+      1 zwp_tablet_pad_ring_v2.set_feedback on ring:intuos5:0:0 ["zoom", N]
+      1 zwp_tablet_pad_v2.set_feedback on pad:huion [N, "undo", N]
+     10 zwp_tablet_pad_v2.set_feedback on pad:intuos5 [N, "undo", N]

@@ -84,13 +84,17 @@ class Rig:
         if self.expectations:
             self.expectations.write(json.dumps({**what, 'at': time.monotonic()}) + '\n')
 
-    def wait_for_window(self, timeout: float = 20) -> None:
+    def wait_for_window(self, timeout: float = 20) -> dict[str, Any]:
         end = time.monotonic() + timeout
+        seen = 0.0
         while time.monotonic() < end:
             info = self.command(op='info')
-            if info.get('connected') and info['surface'] and info['size'][0]:
-                self.width, self.height = info['size']
-                return
+            if info.get('connected') and info['surface']:
+                seen = seen or time.monotonic()
+                # a window that never draws is never given a size, the output's will do
+                if info['size'][0] or time.monotonic() - seen > 2:
+                    self.width, self.height = info['size'] if info['size'][0] else (1280, 800)
+                    return info
             time.sleep(0.1)
         raise TimeoutError('the terminal did not open a window')
 
@@ -106,9 +110,11 @@ def setup(rig: Rig) -> None:
     for device, d in DEVICES.items():
         if not device.startswith('pad:'):
             rig.command(op='add', device=device, **d)
-    rig.wait_for_window()
-    rig.play('keyboard', ['enter', '$serial', '$surface', []], ['modifiers', '$serial', 0, 0, 0, 0])
-    rig.play('pointer', ['enter', '$serial', '$surface', rig.width / 2, rig.height / 2], ['frame'])
+    info = rig.wait_for_window()
+    if 'wl_keyboard' in info['interfaces']:
+        rig.play('keyboard', ['enter', '$serial', '$surface', []], ['modifiers', '$serial', 0, 0, 0, 0])
+    if 'wl_pointer' in info['interfaces']:
+        rig.play('pointer', ['enter', '$serial', '$surface', rig.width / 2, rig.height / 2], ['frame'])
     time.sleep(0.2)
 
 
@@ -295,7 +301,7 @@ def pads(rig: Rig) -> None:
         if device.startswith('pad:'):
             rig.command(op='add', device=device, **d)
     time.sleep(0.2)
-    rig.command(op='info')  # a terminal that drops its connection over a pad is found out here
+    named = rig.command(op='info')['named']  # a terminal that drops its connection over a pad is found out here
 
     def pad(name: str, note: str, *events: list[Any], to: str = '', **fields: Any) -> None:
         rig.play(to or f'pad:{name}', *events)
@@ -326,7 +332,8 @@ def pads(rig: Rig) -> None:
     dial = 'dial:huion:0:0'
     pad('huion', 'enters the window', ['enter', '$serial', 'tablet:intuos5', '$surface'])
     for delta, what in ((120, 'one click'), (-240, 'two clicks back'), (30, 'a quarter of a click')):
-        pad('huion', f'dial {what}', ['delta', delta], ['frame', '$time'], to=dial, dial=0, delta=delta)
+        if dial in named:  # version 1 of tablet-v2 has no dials, the pad is then just its key
+            pad('huion', f'dial {what}', ['delta', delta], ['frame', '$time'], to=dial, dial=0, delta=delta)
     pad('huion', 'key down', ['button', '$time', 0, 1], button=0, state=1)
     pad('huion', 'key up', ['button', '$time', 0, 0], button=0, state=0)
     pad('huion', 'leaves', ['leave', '$serial', '$surface'])
