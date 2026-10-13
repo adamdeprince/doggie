@@ -152,7 +152,7 @@ env -u WAYLAND_DISPLAY DISPLAY=:$display LIBGL_ALWAYS_SOFTWARE=1 __GLX_VENDOR_LI
 kitty=$!
 pids+=($kitty)
 
-python3 "$here/x11.py" --sockets "$run/devices" --expect "$run/expect.jsonl" --wait "$run/ready" --size "$size" "$@"
+python3 "$here/x11.py" --sockets "$run/devices" --expect "$run/expect.jsonl" --wait "$run/ready" --size "$size" --display ":$display" "$@"
 played=$?
 touch "$run/stop"
 for _ in $(seq 100); do
