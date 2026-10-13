@@ -5,7 +5,7 @@ Display protocol
 
 A program that draws knows nothing about the screen its output ends up on:
 whether it is a color LCD or sixteen levels of gray on e-ink, how much of the
-color spectrum it covers, how bright it can go, how many device pixels a cell
+color spectrum it covers, how bright it can go, how many physical pixels a cell
 has and how often it refreshes. Each of these changes what the best rendering
 is, from the choice of a palette and a dithering strategy to whether animation
 is worth doing at all. The display protocol lets a program ask, and be told
@@ -76,19 +76,44 @@ The fields of the reply are:
     brightness protocol for how to use it.
 
 ``scale``
-    Device pixels per logical pixel, so a program that works in pixels knows
-    how fine its output can be. ``0`` when unknown.
+    The scaling of the framebuffer that the system asks applications for: how
+    many physical pixels it wants used for one of its own logical units,
+    ``2`` on most high density displays and often a fraction such as ``1.25``
+    or ``1.5`` on others. ``0`` when unknown. See `Pixels`_ for what it is
+    for.
 
 ``period``
     The refresh period of the display in microseconds, ``0`` when unknown.
 
 ``ppi``
-    Physical pixels per inch, ``0`` when unknown.
+    Physical pixels per inch: how many of the pixels a program draws in fit
+    in an inch of the screen, so that it can draw at a true size. ``0`` when
+    unknown.
 
 Values the terminal cannot determine are ``unknown`` or ``0``, never guessed.
 A terminal that knows nothing about its display, a multiplexer that is not
 attached, for example, answers with every field unknown and the program is no
 worse off than before it asked.
+
+Pixels
+----------
+
+A pixel, in this protocol and in every other one of this terminal that
+measures in pixels (the size of the window and of a cell, the size and
+placement of an image, the position of a pointer, a pen or a finger, the
+distance of a scroll), is a physical pixel: one pixel of the framebuffer the
+terminal draws into. Nothing is expressed in the logical units of the system,
+which stand for ``scale`` pixels each, and the terminal never stretches what a
+program draws to make up the difference. A line a program draws one pixel
+wide is therefore one pixel wide, not a soft blob spread over several, and a
+program gets every pixel the display has.
+
+``scale`` is what the system would have had an application do: the size it
+wants things drawn at for them to look the size the user chose. A program uses
+it to decide how big to draw, a rule that is one logical unit thick as
+``scale`` pixels for example, and never to convert a position or a size, which
+are in physical pixels already. ``ppi`` relates those same pixels to the
+screen itself.
 
 Mode
 --------
@@ -157,3 +182,16 @@ of, ``srgb`` when it covers neither of the wider two. ``headroom`` is the
 headroom of the :doc:`hdr-protocol`, after the cap of :opt:`hdr_max_headroom`,
 so it is ``1`` unless :opt:`hdr` is enabled and the window is actually showing
 HDR, which that page says when to expect on macOS and on Wayland.
+
+``scale`` is the scale the window system gives the window: the backing scale
+factor on macOS, the preferred scale of the surface on Wayland, fractional
+where the compositor says so, and the scale of the desktop taken from
+``Xft.dpi`` on X11. On X11, and on Wayland with a compositor that states its
+fractional scale, the pixels kitty draws are the pixels of the panel. On macOS
+they are those of the framebuffer the system keeps for the display, which are
+the panel's own at the default resolution. At one of the scaled resolutions
+(*More Space* and its neighbours in the display settings) the system resamples
+that framebuffer onto the panel, as a Wayland compositor does for a window it
+could only give a whole number scale. A pixel kitty draws is then not exactly
+a pixel of the panel, which no application can avoid, and on macOS ``ppi``
+counts the pixels kitty draws.
