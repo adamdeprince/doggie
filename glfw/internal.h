@@ -475,6 +475,7 @@ struct _GLFWwindow {
         GLFWtouchfun touch;
         GLFWgesturefun gesture;
         GLFWtabletfun tablet;
+        GLFWtabletpadfun tablet_pad;
         GLFWkeyboardfun keyboard;
         GLFWliveresizefun liveResize;
 
@@ -738,6 +739,7 @@ void _glfwPlatformGetWindowFrameSize(_GLFWwindow *window, int *left, int *top, i
 void _glfwPlatformGetWindowContentScale(_GLFWwindow *window, float *xscale, float *yscale);
 void _glfwPlatformGetWindowDisplayInfo(_GLFWwindow *window, GLFWdisplayinfo *info);
 monotonic_t _glfwPlatformGetDoubleClickInterval(_GLFWwindow *window);
+unsigned _glfwPlatformGetPointerInputClasses(void);
 void _glfwPlatformGetKeyboardRepeatDelay(monotonic_t *delay, monotonic_t *interval);
 void _glfwPlatformIconifyWindow(_GLFWwindow *window);
 void _glfwPlatformRestoreWindow(_GLFWwindow *window);
@@ -815,6 +817,7 @@ void _glfwInputScroll(_GLFWwindow *window, const GLFWScrollEvent *ev);
 void _glfwInputTouch(_GLFWwindow *window, const GLFWTouchEvent *ev);
 void _glfwInputGesture(_GLFWwindow *window, const GLFWGestureEvent *ev);
 bool _glfwInputTablet(_GLFWwindow *window, const GLFWTabletEvent *ev);
+void _glfwInputTabletPad(_GLFWwindow *window, const GLFWTabletPadEvent *ev);
 void _glfwInputMouseClick(_GLFWwindow *window, int button, int action, int mods);
 void _glfwInputCursorPos(_GLFWwindow *window, double xpos, double ypos);
 void _glfwInputCursorEnter(_GLFWwindow *window, bool entered);

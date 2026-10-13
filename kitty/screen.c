@@ -641,7 +641,11 @@ screen_resize(Screen *self, unsigned int lines, unsigned int columns) {
     screen_pause_rendering(self, false, 0);
     lines = MAX(1u, lines);
     columns = MAX(1u, columns);
-    if (lines != self->lines || columns != self->columns) screen_pointer_cancel(self, 0);
+    if (lines != self->lines || columns != self->columns) {
+        // The positions of the contacts no longer mean what they did. The held buttons of a pad are not at any position
+        screen_pointer_cancel(self, POINTER_PEN);
+        screen_pointer_cancel(self, POINTER_TOUCH);
+    }
 
     bool is_main = self->linebuf == self->main_linebuf;
     index_type num_content_lines_before, num_content_lines_after;
@@ -813,6 +817,7 @@ dealloc(Screen *self) {
     free(self->extra_cursors.locations);
     free(self->paused_rendering.extra_cursors.locations);
     free(self->pointer.contacts);
+    free(self->pointer.pad_buttons);
     if (self->lc) {
         cleanup_list_of_chars(self->lc);
         free(self->lc);

@@ -183,11 +183,16 @@ read_xi_tablet_device(const XIDeviceInfo *device) {
     XITabletAxis *axes[] = {&td.pressure, &td.tilt_x, &td.tilt_y, &td.wheel, &td.distance, &td.rotation};
     const Atom labels[] = {_glfw.x11.xi.label_pressure, _glfw.x11.xi.label_tilt_x, _glfw.x11.xi.label_tilt_y, _glfw.x11.xi.label_wheel, _glfw.x11.xi.label_distance, _glfw.x11.xi.label_rz};
     for (size_t k = 0; k < arraysz(axes); k++) axes[k]->number = -1;
+    td.x.number = td.y.number = -1;
     for (int j = 0; j < device->num_classes; j++) {
         if (device->classes[j]->type != XIValuatorClass) continue;
         XIValuatorClassInfo *vi = (XIValuatorClassInfo *)device->classes[j];
         for (size_t k = 0; k < arraysz(axes); k++) {
             if (vi->label == labels[k]) *axes[k] = (XITabletAxis){.number = vi->number, .min = vi->min, .max = vi->max, .value = vi->value};
+        }
+        // The first two valuators are the position. See handle_xi_tablet_event() for why it is wanted
+        if (device->use == XISlavePointer && vi->mode == XIModeAbsolute && vi->max > vi->min && (vi->number == 0 || vi->number == 1)) {
+            *(vi->number ? &td.y : &td.x) = (XITabletAxis){.number = vi->number, .min = vi->min, .max = vi->max, .value = vi->value};
         }
     }
     snprintf(td.name, sizeof(td.name), "%s", device->name);
@@ -201,6 +206,7 @@ read_xi_scroll_devices(void) {
 #define xi _glfw.x11.xi
     xi.num_scroll_devices = 0;
     xi.num_tablet_devices = 0;
+    xi.num_touch_devices = 0;
     // Require XI2.1 or later for smooth scrolling
     if (!xi.available || xi.major < 2 || (xi.major == 2 && xi.minor < 1) || !xi.LIBINPUT_SCROLL_METHOD_ENABLED) return;
 #undef xi
@@ -222,6 +228,14 @@ read_xi_scroll_devices(void) {
             continue;
         }
         if (device->use != XISlavePointer) continue;
+        // A touchscreen. The touches of a touchpad are not at any place in a window
+        for (int j = 0; j < device->num_classes; j++) {
+            if (device->classes[j]->type != XITouchClass || ((XITouchClassInfo *)device->classes[j])->mode != XIDirectTouch) continue;
+            if (_glfw.x11.xi.num_touch_devices < arraysz(_glfw.x11.xi.touch_devices)) {
+                _glfw.x11.xi.touch_devices[_glfw.x11.xi.num_touch_devices++] = device->deviceid;
+            }
+            break;
+        }
         Atom actual_type;
         int actual_format;
         unsigned long nitems, bytes_after;
@@ -380,8 +394,8 @@ initExtensions(void) {
 
         if (XQueryExtension(_glfw.x11.display, "XInputExtension", &_glfw.x11.xi.majorOpcode, &_glfw.x11.xi.eventBase, &_glfw.x11.xi.errorBase)) {
             // The newest version this code speaks. The server answers with
-            // the older of this and its own, 2.4 being where the touchpad
-            // gestures are
+            // the older of this and its own, 2.2 being where the touch events
+            // are and 2.4 where the touchpad gestures are
             _glfw.x11.xi.major = 2;
             _glfw.x11.xi.minor = 4;
 

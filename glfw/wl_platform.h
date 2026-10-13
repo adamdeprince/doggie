@@ -59,7 +59,7 @@ typedef VkBool32(APIENTRY *PFN_vkGetPhysicalDeviceWaylandPresentationSupportKHR)
 #include "wayland-primary-selection-unstable-v1-client-protocol.h"
 #include "wayland-xdg-activation-v1-client-protocol.h"
 #include "wayland-cursor-shape-v1-client-protocol.h"
-#include "wayland-tablet-unstable-v2-client-protocol.h"
+#include "wayland-tablet-v2-client-protocol.h"
 #include "wayland-fractional-scale-v1-client-protocol.h"
 #include "wayland-viewporter-client-protocol.h"
 #include "wayland-kwin-blur-v1-client-protocol.h"
@@ -371,8 +371,9 @@ typedef struct _GLFWWaylandTouchPoint {
 typedef struct _GLFWWaylandTabletTool {
     struct zwp_tablet_tool_v2 *tool;
     struct wp_cursor_shape_device_v1 *cursor_shape_device;
-    // The window the tool is in proximity over, and the serial of its proximity_in
-    _GLFWwindow *window;
+    // The window the tool is in proximity over, by id since the window can be
+    // closed under the tool, and the serial of its proximity_in
+    GLFWid window_id;
     uint32_t serial;
     GLFWTabletEvent ev;
     char tablet_name[128];  // of the tablet it is in proximity over
@@ -381,6 +382,55 @@ typedef struct _GLFWWaylandTabletTool {
     bool entered, left, moved;
     unsigned pressed, released;  // bits numbered by GLFW mouse button
 } _GLFWWaylandTabletTool;
+
+struct _GLFWWaylandTabletPad;
+
+// A group of the controls of a tablet pad, which has a mode
+typedef struct _GLFWWaylandTabletPadGroup {
+    struct _GLFWWaylandTabletPad *pad;
+    struct zwp_tablet_pad_group_v2 *group;
+    unsigned index, num_modes, mode;
+    // The serial of the last mode switch, which a label for a control of the
+    // group has to carry
+    uint32_t mode_serial;
+    bool has_mode_serial;
+    uint32_t *buttons;  // the buttons of the pad that are in this group
+    size_t num_buttons;
+} _GLFWWaylandTabletPadGroup;
+
+// A ring, strip or dial of a tablet pad. Its events collect here and are
+// reported at its frame event
+typedef struct _GLFWWaylandTabletPadControl {
+    struct _GLFWWaylandTabletPad *pad;
+    _GLFWWaylandTabletPadGroup *group;
+    GLFWTabletPadEventType type;  // GLFW_TABLET_PAD_RING, _STRIP or _DIAL
+    unsigned index;
+    union {
+        struct zwp_tablet_pad_ring_v2 *ring;
+        struct zwp_tablet_pad_strip_v2 *strip;
+        struct zwp_tablet_pad_dial_v2 *dial;
+    };
+    bool has_value, stopped, from_finger;
+    double value;
+    int delta;
+} _GLFWWaylandTabletPadControl;
+
+typedef struct _GLFWWaylandTabletPad {
+    struct _GLFWWaylandTabletPad *next;
+    struct zwp_tablet_pad_v2 *pad;
+    uint64_t device;
+    // The window the pad has the focus of, and the serial of its enter
+    GLFWid window_id;
+    uint32_t enter_serial;
+    unsigned num_buttons, num_rings, num_strips, num_dials;
+    _GLFWWaylandTabletPadGroup *groups[8];
+    size_t num_groups;
+    _GLFWWaylandTabletPadControl *controls[32];
+    size_t num_controls;
+    // Of the tablet the pad is attached to, known once it has the focus
+    char tablet_name[128];
+    unsigned vendor_id, product_id;
+} _GLFWWaylandTabletPad;
 
 // Wayland-specific global data
 //
@@ -403,6 +453,8 @@ typedef struct _GLFWlibraryWayland {
         // The time of the latest wl_touch event, in milliseconds of the compositor clock
         uint32_t last_event_time;
         bool has_event_time;
+        // The compositor has sent the shape of a contact, which not every one does
+        bool shape_seen;
     } touch_state;
     struct wl_data_device_manager *dataDeviceManager;
     struct wl_data_device *dataDevice;
@@ -452,6 +504,7 @@ typedef struct _GLFWlibraryWayland {
     struct zwp_tablet_seat_v2 *tablet_seat;
     _GLFWWaylandTabletTool *tablet_tool;  // the tool in proximity, if any
     uint32_t swipe_fingers;
+    _GLFWWaylandTabletPad *tablet_pads;   // every pad of the seat
     struct zxdg_output_manager_v1 *xdg_output_manager;
     struct zwlr_virtual_pointer_manager_v1 *virtual_pointer_manager;
     struct zwlr_virtual_pointer_v1 *virtual_pointer;

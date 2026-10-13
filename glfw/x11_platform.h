@@ -272,6 +272,9 @@ typedef struct XITabletDevice {
     uint64_t serial;
     GLFWid window_id;  // the window it last reported to
     XITabletAxis pressure, tilt_x, tilt_y, wheel, distance, rotation;
+    // Where the tool is on the tablet, for a tool that is attached to the core
+    // pointer and reports absolute positions; the number is -1 otherwise
+    XITabletAxis x, y;
     char name[128];
 } XITabletDevice;
 
@@ -521,6 +524,19 @@ typedef struct _GLFWlibraryX11 {
         // Server timestamp of the last tablet event the application consumed.
         // The core events the X server makes from it carry the same time.
         Time last_tablet_time;
+        // The touchscreens: the devices whose touches are at a place on the screen
+        int touch_devices[8];
+        unsigned num_touch_devices;
+        // The fingers that are down, each tied to the window it landed on
+        struct {
+            int id, deviceid;
+            GLFWid window_id;
+            double x, y;
+        } touch_points[16];
+        unsigned num_touch_points;
+        // Server timestamp of the last touch event. The pointer events the X
+        // server makes from a touch carry the same time.
+        Time last_touch_time;
         Atom label_pressure, label_tilt_x, label_tilt_y, label_wheel, label_distance, label_rz;  // valuator labels
     } xi;
 

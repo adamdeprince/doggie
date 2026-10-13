@@ -3507,6 +3507,11 @@ _glfwPlatformGetDoubleClickInterval(_GLFWwindow *window UNUSED) {
     return s_double_to_monotonic_t([NSEvent doubleClickInterval]);
 }
 
+unsigned
+_glfwPlatformGetPointerInputClasses(void) {
+    return GLFW_POINTER_INPUT_TOOLS | GLFW_POINTER_INPUT_TOUCHPAD | GLFW_POINTER_INPUT_TOOL_ACTIONS;
+}
+
 void
 _glfwPlatformGetKeyboardRepeatDelay(monotonic_t *delay, monotonic_t *interval) {
     if (delay) *delay = s_double_to_monotonic_t([NSEvent keyRepeatDelay]);

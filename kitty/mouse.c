@@ -1981,14 +1981,24 @@ utf8_prefix_length(const char *s, size_t max) {
     return n;
 }
 
-// Describes a tool to the program, which it is before the first of its
-// reports. The hardware identifiers go only to a program that asked for them
+// Describes a tool or a pad to the program, which it is before the first of
+// its reports. The hardware identifiers go only to a program that asked for them
 bool
 screen_pointer_device(Screen *screen, const PointerDevice *d) {
-    if (!(screen->pointer.mode & d->kind)) return false;
+    if (!(screen->pointer.mode & (d->kind == POINTER_PAD ? POINTER_MODE_PADS : d->kind))) return false;
     char buf[512];
-    int n = snprintf(
-        buf, sizeof(buf), "777;tablet-pointer;v=1:op=device:device=%llu:kind=%d:tool=%d:axes=%u", (unsigned long long)d->device, d->kind, d->tool, d->axes);
+    int n;
+    if (d->kind == POINTER_PAD) {
+        n = snprintf(
+            buf, sizeof(buf), "777;tablet-pointer;v=1:op=device:device=%llu:kind=%d:buttons=%u:rings=%u:strips=%u:dials=%u:groups=%u",
+            (unsigned long long)d->device, d->kind, d->num_buttons, d->num_rings, d->num_strips, d->num_dials, d->num_groups);
+        const unsigned num_groups = MIN(d->num_groups, 16u);
+        for (unsigned i = 0; i < num_groups && d->num_modes; i++) n += snprintf(buf + n, sizeof(buf) - n, "%s%u", i ? "," : ":modes=", d->num_modes[i]);
+        for (unsigned i = 0; i < num_groups && d->modes; i++) n += snprintf(buf + n, sizeof(buf) - n, "%s%u", i ? "," : ":mode=", d->modes[i]);
+    } else {
+        n = snprintf(
+            buf, sizeof(buf), "777;tablet-pointer;v=1:op=device:device=%llu:kind=%d:tool=%d:axes=%u", (unsigned long long)d->device, d->kind, d->tool, d->axes);
+    }
     if (d->name && d->name[0]) {
         unsigned char name[192];
         size_t sz = sizeof(name) - 1;
@@ -2004,6 +2014,69 @@ screen_pointer_device(Screen *screen, const PointerDevice *d) {
     }
     write_escape_code_to_child(screen, ESC_OSC, buf);
     return true;
+}
+
+static void
+write_pointer_pad(Screen *screen, const PointerPad *p) {
+    char buf[256];
+    int n = snprintf(buf, sizeof(buf), "777;tablet-pointer;v=1:op=event:kind=3:device=%llu:t=%llu", (unsigned long long)p->device, p->t);
+    if (p->has_tu) n += snprintf(buf + n, sizeof(buf) - n, ":tu=%u", p->tu);
+    n += snprintf(buf + n, sizeof(buf) - n, ":mods=%d", p->mods);
+#define C(name, value_name)                                                           \
+    if (p->stop) n += snprintf(buf + n, sizeof(buf) - n, ":" name "=%d:stop=1", p->index); \
+    else n += snprintf(buf + n, sizeof(buf) - n, ":" name "=%d:" value_name "=%d", p->index, p->value)
+    switch (p->control) {
+        case PAD_BUTTON: n += snprintf(buf + n, sizeof(buf) - n, ":button=%d:state=%d", p->index, p->value != 0); break;
+        case PAD_RING: C("ring", "angle"); break;
+        case PAD_STRIP: C("strip", "pos"); break;
+        case PAD_DIAL: n += snprintf(buf + n, sizeof(buf) - n, ":dial=%d:delta=%d", p->index, p->value); break;
+        case PAD_GROUP: n += snprintf(buf + n, sizeof(buf) - n, ":group=%d:mode=%d", p->index, p->value); break;
+    }
+#undef C
+    if (p->from_finger) snprintf(buf + n, sizeof(buf) - n, ":src=1");
+    write_escape_code_to_child(screen, ESC_OSC, buf);
+}
+
+// Reports a control of a pad to a program that asked for pads. The buttons that
+// are down are remembered, so that they can be let go when the program can no
+// longer be told, and a release whose press the program never saw is not sent
+bool
+screen_pointer_pad(Screen *screen, const PointerPad *p) {
+    if (!(screen->pointer.mode & POINTER_MODE_PADS)) return false;
+    if (p->control == PAD_BUTTON) {
+        const PointerPad *down = screen->pointer.pad_buttons;
+        unsigned i = 0;
+        while (i < screen->pointer.num_pad_buttons && (down[i].device != p->device || down[i].index != p->index)) i++;
+        const bool held = i < screen->pointer.num_pad_buttons;
+        if (p->value) {
+            if (!held) {
+                ensure_space_for(&screen->pointer, pad_buttons, PointerPad, screen->pointer.num_pad_buttons + 1, pad_capacity, 8, false);
+                screen->pointer.num_pad_buttons++;
+            }
+            screen->pointer.pad_buttons[i] = *p;
+        } else {
+            if (!held) return false;
+            screen->pointer.pad_buttons[i] = screen->pointer.pad_buttons[--screen->pointer.num_pad_buttons];
+        }
+    }
+    write_pointer_pad(screen, p);
+    return true;
+}
+
+// Lets go of the held buttons of a pad, or of every pad when device is zero
+void
+screen_pointer_pad_release(Screen *screen, uint64_t device) {
+    unsigned kept = 0;
+    for (unsigned i = 0; i < screen->pointer.num_pad_buttons; i++) {
+        PointerPad p = screen->pointer.pad_buttons[i];
+        if (device && p.device != device) {
+            screen->pointer.pad_buttons[kept++] = p;
+            continue;
+        }
+        p.value = 0;
+        write_pointer_pad(screen, &p);
+    }
+    screen->pointer.num_pad_buttons = kept;
 }
 
 static PointerReport *
@@ -2062,18 +2135,24 @@ screen_pointer_cancel(Screen *screen, int kind) {
         write_pointer_report(screen, &r);
     }
     screen->pointer.num_contacts = kept;
+    if (!kind || kind == POINTER_PAD) screen_pointer_pad_release(screen, 0);
 }
 
 // What this terminal can report: tools 1, fingers on a touchscreen 2, fingers
-// on a touchpad 4, the shape of a finger contact 8, tool actions 32, hardware
-// identifiers 64
+// on a touchpad 4, the shape of a finger contact 8, pads 16, tool actions 32,
+// hardware identifiers 64. The window system says which of the first six it
+// has, and the bits of GLFWPointerInputClass are these bits
 static unsigned
 pointer_caps(void) {
 #ifdef __APPLE__
-    return 1 | 4 | 32 | 64;
+    unsigned caps = 1 | 4 | 32;
 #else
-    return global_state.is_wayland ? 1 | 2 | 8 | 64 : 1 | 64;
+    unsigned caps = global_state.is_wayland ? 1 | 2 : 1;
 #endif
+    // No window system is loaded when the tests run
+    if (glfwGetPointerInputClasses) caps = glfwGetPointerInputClasses();
+    if (caps & (1 | 16)) caps |= 64;
+    return caps;
 }
 
 typedef struct TabletTool {
@@ -2084,11 +2163,71 @@ typedef struct TabletTool {
 } TabletTool;
 static TabletTool tablet_tools[8];
 
+typedef struct TabletPad {
+    bool active;
+    uint64_t device;
+    id_type window_id;     // the window that got its last report, and so knows of its held buttons
+    id_type described_to;  // the window whose program was sent the device frame
+} TabletPad;
+static TabletPad tablet_pads[8];
+
+// The last label a program gave a control of a pad, for the tests
+static struct {
+    bool is_set;
+    uint64_t device;
+    int control, index;
+    char text[64];
+} last_pad_label;
+
+// A label is passed to the window system, which may show it to the user, when
+// it comes from the program the pad is reporting to
+static void
+pointer_pad_label(Screen *screen, uint64_t device, PointerPadControl control, int index, const char *text) {
+    if (!(screen->pointer.mode & POINTER_MODE_PADS)) return;
+    last_pad_label.is_set = true;
+    last_pad_label.device = device;
+    last_pad_label.control = control;
+    last_pad_label.index = index;
+    snprintf(last_pad_label.text, sizeof(last_pad_label.text), "%s", text);
+    const OSWindow *osw = os_window_for_kitty_window(screen->window_id);
+    if (!osw || !osw->handle || !osw->num_tabs || !global_state.is_wayland || !glfwWaylandSetTabletPadLabel) return;
+    const Tab *tab = osw->tabs + osw->active_tab;
+    if (!tab->num_windows || tab->windows[tab->active_window].id != screen->window_id) return;
+    static const int controls[] = {
+        [PAD_BUTTON] = GLFW_TABLET_PAD_BUTTON, [PAD_RING] = GLFW_TABLET_PAD_RING, [PAD_STRIP] = GLFW_TABLET_PAD_STRIP, [PAD_DIAL] = GLFW_TABLET_PAD_DIAL,
+    };
+    glfwWaylandSetTabletPadLabel(osw->handle, device, controls[control], (unsigned)index, text);
+}
+
+// Decodes the text of a label: base64 of at most 60 bytes of UTF-8 with no
+// control characters. Returns false when it is anything else
+static bool
+decode_pad_label(const char *src, char *dest, size_t dest_sz) {
+    uint8_t decoded[96];
+    size_t sz = sizeof(decoded);
+    const size_t src_sz = strlen(src);
+    if (!src_sz) sz = 0;
+    else if (src_sz > 80 || !base64_decode8_strict((const uint8_t *)src, src_sz, decoded, &sz) || sz > 60) return false;
+    if (sz >= dest_sz) return false;
+    uint32_t state = 0, codep = 0;
+    for (size_t i = 0; i < sz; i++) {
+        if (decode_utf8(&state, &codep, decoded[i]) == 1) return false;
+        if (state == 0 && (codep < 0x20 || codep == 0x7f)) return false;
+    }
+    if (state != 0) return false;
+    memcpy(dest, decoded, sz);
+    dest[sz] = 0;
+    return true;
+}
+
 void
 screen_tablet_pointer(Screen *screen, const char *data, size_t sz) {
     char buf[128], reply[128], *saveptr = NULL;
-    const char *op = "";
-    int v = 0, mode = -1, id = -1;
+    const char *op = "", *text = "";
+    int v = 0, mode = -1, id = -1, num_controls = 0, control_index = -1;
+    PointerPadControl control = PAD_BUTTON;
+    unsigned long long device = 0;
+    bool has_device = false;
     if (sz >= sizeof(buf)) return;
     memcpy(buf, data, sz);
     buf[sz] = 0;
@@ -2096,13 +2235,27 @@ screen_tablet_pointer(Screen *screen, const char *data, size_t sz) {
         char *val = strchr(tok, '=');
         if (!val) return;
         *val++ = 0;
+#define CONTROL(name, which) \
+    else if (!strcmp(tok, name)) { control = which; control_index = *val >= '0' && *val <= '9' ? atoi(val) : -1; num_controls++; }
         if (!strcmp(tok, "v")) v = atoi(val);
         else if (!strcmp(tok, "op")) op = val;
         else if (!strcmp(tok, "mode")) mode = atoi(val);
         else if (!strcmp(tok, "id")) id = atoi(val);
+        else if (!strcmp(tok, "device")) { device = strtoull(val, NULL, 10); has_device = *val >= '0' && *val <= '9'; }
+        else if (!strcmp(tok, "text")) text = val;
+        CONTROL("button", PAD_BUTTON)
+        CONTROL("ring", PAD_RING)
+        CONTROL("strip", PAD_STRIP)
+        CONTROL("dial", PAD_DIAL)
+#undef CONTROL
     }
     if (v != 1) return;
-    if (!strcmp(op, "query") && id >= 0) {
+    if (!strcmp(op, "label")) {
+        // Says what one control of a pad does at the moment. A label that is not well formed is dropped as a whole
+        char label[64];
+        if (!has_device || num_controls != 1 || control_index < 0 || control_index > 255 || !decode_pad_label(text, label, sizeof(label))) return;
+        pointer_pad_label(screen, device, control, control_index, label);
+    } else if (!strcmp(op, "query") && id >= 0) {
         const unsigned cw = MIN(4096u, MAX(1u, screen->cell_size.width)), ch = MIN(4096u, MAX(1u, screen->cell_size.height));
         snprintf(
             reply, sizeof(reply), "777;tablet-pointer;v=1:op=cap:id=%d:caps=%u:mode=%u:w=%u:h=%u:cw=%u:ch=%u", id, pointer_caps(), screen->pointer.mode,
@@ -2117,9 +2270,12 @@ screen_tablet_pointer(Screen *screen, const char *data, size_t sz) {
         screen_pointer_cancel(screen, 0);
         // Only the bits this terminal knows are kept, so a program that reads the mode sees what took
         screen->pointer.mode = mode & POINTER_MODES;
-        // A program that changes what it wants is told about the tools in proximity again
+        // A program that changes what it wants is told about the tools in proximity and the pads again
         for (size_t i = 0; i < arraysz(tablet_tools); i++) {
             if (tablet_tools[i].described_to == screen->window_id) tablet_tools[i].described_to = 0;
+        }
+        for (size_t i = 0; i < arraysz(tablet_pads); i++) {
+            if (tablet_pads[i].described_to == screen->window_id) tablet_pads[i].described_to = 0;
         }
     }
 }
@@ -2192,8 +2348,14 @@ tablet_event(const GLFWTabletEvent *ev) {
     const OSWindow *osw = global_state.callback_os_window;
     TabletTool *t = tablet_tool(ev->device);
     Window *w = t->window_id ? window_for_window_id(t->window_id) : pointer_window(POINTER_PEN);
+    if (!w && ev->type != GLFW_TABLET_POINT && t->described_to) {
+        // A tool that goes away while it is over no window is still gone for the window that was last told of it
+        w = window_for_window_id(t->described_to);
+        if (w && !(w->render_data.screen->pointer.mode & POINTER_PEN)) w = NULL;
+    }
     if (!w) {
-        t->active = false;
+        // The tool is remembered for as long as it is in proximity, even over no window
+        if (ev->type != GLFW_TABLET_POINT) t->active = false;
         return false;
     }
     const WindowGeometry *g = &w->render_data.geometry;
@@ -2232,8 +2394,84 @@ tablet_event(const GLFWTabletEvent *ev) {
     } else {
         r.phase = t->down ? POINTER_CANCEL : POINTER_OUT;
         t->active = false;
+        if (t->down && ev->type == GLFW_TABLET_OUT) {
+            // The stroke is lost, and the system also said that the tool left
+            screen_pointer_report(w->render_data.screen, &r);
+            r.phase = POINTER_OUT;
+        }
     }
     screen_pointer_report(w->render_data.screen, &r);
+    return true;
+}
+
+// A pad reports to the window that has the keyboard focus, when it asked for pads
+static Window *
+pad_window(const OSWindow *osw) {
+    if (!osw || !osw->num_tabs) return NULL;
+    Tab *tab = osw->tabs + osw->active_tab;
+    if (!tab->num_windows) return NULL;
+    Window *w = tab->windows + tab->active_window;
+    return w->render_data.screen && (w->render_data.screen->pointer.mode & POINTER_MODE_PADS) ? w : NULL;
+}
+
+bool
+tablet_pad_event(const GLFWTabletPadEvent *ev) {
+    TabletPad *pad = NULL, *free_slot = tablet_pads;
+    for (size_t i = 0; i < arraysz(tablet_pads) && !pad; i++) {
+        if (tablet_pads[i].active && tablet_pads[i].device == ev->device) pad = tablet_pads + i;
+        else if (!tablet_pads[i].active) free_slot = tablet_pads + i;
+    }
+    if (!pad) {
+        pad = free_slot;
+        *pad = (TabletPad){.active = true, .device = ev->device};
+    }
+    Window *w = ev->type == GLFW_TABLET_PAD_LEAVE ? NULL : pad_window(global_state.callback_os_window);
+    if (pad->window_id && (!w || w->id != pad->window_id)) {
+        // The pad no longer reports to the window that knows of its held buttons
+        Window *before = window_for_window_id(pad->window_id);
+        if (before) screen_pointer_pad_release(before->render_data.screen, ev->device);
+        pad->window_id = 0;
+    }
+    if (ev->type == GLFW_TABLET_PAD_LEAVE) pad->active = false;
+    if (!w) return false;
+    Screen *screen = w->render_data.screen;
+    if (pad->described_to != w->id) {
+        const PointerDevice d = {
+            .kind = POINTER_PAD, .device = ev->device, .name = ev->name, .vid = ev->vendor_id, .pid = ev->product_id,
+            .num_buttons = ev->num_buttons, .num_rings = ev->num_rings, .num_strips = ev->num_strips, .num_dials = ev->num_dials,
+            .num_groups = ev->num_groups, .num_modes = ev->num_modes, .modes = ev->modes,
+        };
+        if (screen_pointer_device(screen, &d)) pad->described_to = w->id;
+    }
+    PointerPad p = {
+        .device = ev->device, .mods = pointer_mods(ev->keyboard_modifiers), .index = (int)ev->index, .stop = ev->stopped, .from_finger = ev->from_finger,
+    };
+    pointer_time(&p, ev->timestamp, ev->timestamp_is_fine);
+    switch (ev->type) {
+        case GLFW_TABLET_PAD_BUTTON:
+            p.control = PAD_BUTTON;
+            p.value = ev->pressed;
+            break;
+        case GLFW_TABLET_PAD_RING:
+            p.control = PAD_RING;
+            p.value = ((int)round(ev->value * 100) % 36000 + 36000) % 36000;
+            break;
+        case GLFW_TABLET_PAD_STRIP:
+            p.control = PAD_STRIP;
+            p.value = pointer_clamp((int)round(ev->value * 65535), 0, 65535);
+            break;
+        case GLFW_TABLET_PAD_DIAL:
+            p.control = PAD_DIAL;
+            p.value = ev->delta;
+            break;
+        case GLFW_TABLET_PAD_MODE:
+            p.control = PAD_GROUP;
+            p.value = (int)ev->mode;
+            break;
+        default: return true;  // the pad got the focus, and has been described
+    }
+    pad->window_id = w->id;
+    screen_pointer_pad(screen, &p);
     return true;
 }
 
@@ -2344,16 +2582,67 @@ send_pointer_action(PyObject *self UNUSED, PyObject *args, PyObject *kw) {
     Py_RETURN_FALSE;
 }
 
+// Fills dest from a sequence of small numbers, returning how many there were or -1 with an exception set
+static int
+unsigned_sequence(PyObject *src, unsigned *dest, size_t max) {
+    if (!src || src == Py_None) return 0;
+    PyObject *fast = PySequence_Fast(src, "expected a sequence of numbers");
+    if (!fast) return -1;
+    const Py_ssize_t n = MIN(PySequence_Fast_GET_SIZE(fast), (Py_ssize_t)max);
+    for (Py_ssize_t i = 0; i < n; i++) dest[i] = (unsigned)PyLong_AsUnsignedLong(PySequence_Fast_GET_ITEM(fast, i));
+    Py_DECREF(fast);
+    return PyErr_Occurred() ? -1 : (int)n;
+}
+
 static PyObject *
 send_pointer_device(PyObject *self UNUSED, PyObject *args, PyObject *kw) {
     Screen *screen;
     PointerDevice d = {.kind = POINTER_PEN, .tool = 1};
-    static const char *kwlist[] = {"screen", "device", "kind", "tool", "axes", "name", "serial", "hwid", "vid", "pid", NULL};
+    PyObject *num_modes = NULL, *modes = NULL;
+    unsigned num_modes_buf[16], modes_buf[16];
+    static const char *kwlist[] = {"screen", "device", "kind", "tool", "axes",  "name",  "serial",    "hwid",  "vid",
+                                   "pid",    "buttons", "rings", "strips", "dials", "num_modes", "modes", NULL};
     if (!PyArg_ParseTupleAndKeywords(
-            args, kw, "O!K|iiIzKKII", (char **)kwlist, &Screen_Type, &screen, &d.device, &d.kind, &d.tool, &d.axes, &d.name, &d.serial, &d.hwid, &d.vid, &d.pid))
+            args, kw, "O!K|iiIzKKIIIIIIOO", (char **)kwlist, &Screen_Type, &screen, &d.device, &d.kind, &d.tool, &d.axes, &d.name, &d.serial, &d.hwid, &d.vid,
+            &d.pid, &d.num_buttons, &d.num_rings, &d.num_strips, &d.num_dials, &num_modes, &modes))
         return NULL;
+    // A pad has as many groups as it is given numbers of modes
+    const int num_groups = unsigned_sequence(num_modes, num_modes_buf, arraysz(num_modes_buf)), num = unsigned_sequence(modes, modes_buf, arraysz(modes_buf));
+    if (num_groups < 0 || num < 0) return NULL;
+    d.num_groups = num_groups;
+    d.num_modes = num_modes_buf;
+    if (num && num == num_groups) d.modes = modes_buf;
     if (screen_pointer_device(screen, &d)) Py_RETURN_TRUE;
     Py_RETURN_FALSE;
+}
+
+static PyObject *
+send_pointer_pad(PyObject *self UNUSED, PyObject *args, PyObject *kw) {
+    Screen *screen;
+    PointerPad p = {0};
+    int control, tu = -1, stop = 0, src = 0;
+    static const char *kwlist[] = {"screen", "device", "control", "index", "value", "stop", "src", "mods", "t", "tu", NULL};
+    if (!PyArg_ParseTupleAndKeywords(
+            args, kw, "O!Kii|ippiKi", (char **)kwlist, &Screen_Type, &screen, &p.device, &control, &p.index, &p.value, &stop, &src, &p.mods, &p.t, &tu))
+        return NULL;
+    if (control < PAD_BUTTON || control > PAD_GROUP) {
+        PyErr_SetString(PyExc_ValueError, "unknown pad control");
+        return NULL;
+    }
+    p.control = control;
+    p.stop = stop;
+    p.from_finger = src;
+    if (tu >= 0) p.tu = tu, p.has_tu = true;
+    if (screen_pointer_pad(screen, &p)) Py_RETURN_TRUE;
+    Py_RETURN_FALSE;
+}
+
+// The last label a program gave a control of a pad as (device, control, index, text), then forgotten. None when there was none
+static PyObject *
+take_pointer_pad_label(PyObject *self UNUSED, PyObject *args UNUSED) {
+    if (!last_pad_label.is_set) Py_RETURN_NONE;
+    last_pad_label.is_set = false;
+    return Py_BuildValue("Kiis", (unsigned long long)last_pad_label.device, last_pad_label.control, last_pad_label.index, last_pad_label.text);
 }
 // }}}
 
@@ -2497,6 +2786,8 @@ static PyMethodDef module_methods[] = {
     {"send_pointer_report", (PyCFunction)(void (*)(void))(send_pointer_report), METH_VARARGS | METH_KEYWORDS, NULL},
     {"send_pointer_device", (PyCFunction)(void (*)(void))(send_pointer_device), METH_VARARGS | METH_KEYWORDS, NULL},
     {"send_pointer_action", (PyCFunction)(void (*)(void))(send_pointer_action), METH_VARARGS | METH_KEYWORDS, NULL},
+    {"send_pointer_pad", (PyCFunction)(void (*)(void))(send_pointer_pad), METH_VARARGS | METH_KEYWORDS, NULL},
+    {"take_pointer_pad_label", (PyCFunction)take_pointer_pad_label, METH_NOARGS, NULL},
     METHODB(test_encode_mouse, METH_VARARGS),
     METHODB(test_scale_scroll, METH_VARARGS),
     METHODB(send_mock_mouse_event_to_window, METH_VARARGS),

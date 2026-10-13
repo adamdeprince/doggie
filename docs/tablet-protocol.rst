@@ -6,9 +6,10 @@ Tablet pointer protocol
 Pens and fingers carry far more than the mouse protocol can express:
 pressure, tilt, rotation of the barrel, which end of the pen is in use,
 hovering, several fingers at once, the shape of each finger on the glass.
-The tablet pointer protocol is an open terminal extension that reports all
-of it, from graphics tablets, pen displays, touchscreens and touchpads, with
-room for whatever a device measures. It belongs to no terminal: silkie (this
+A tablet has keys, rings and dials of its own beside the pen. The tablet
+pointer protocol is an open terminal extension that reports all of it, from
+graphics tablets, pen displays, touchscreens and touchpads, with room for
+whatever a device measures. It belongs to no terminal: silkie (this
 kitty fork) implements it and this page is its specification. The goals are
 those of the other extensions here: small, unobtrusive, easy to implement,
 and no change to what the TTY is.
@@ -29,8 +30,8 @@ is rejected as a whole, and a rejected or incomplete frame must never reach a
 program as keystrokes. Spaces in the examples below are for clarity only.
 
 Every frame has ``v``, the protocol version, which is ``1``, and ``op``, one
-of ``query``, ``cap``, ``mode``, ``device`` and ``event``. A frame with any
-other version is ignored.
+of ``query``, ``cap``, ``mode``, ``device``, ``label`` and ``event``. A frame
+with any other version is ignored.
 
 The protocol grows without a new version. A program ignores a frame whose
 ``op`` it does not know, a report whose ``kind`` it does not know and any
@@ -60,15 +61,19 @@ answers::
 ``2``   Fingers on a touchscreen
 ``4``   Fingers on a touchpad
 ``8``   The shape of a finger contact
-``16``  Reserved
+``16``  Pads
 ``32``  Tool actions
-``64``  The hardware identifiers of tools
+``64``  The hardware identifiers of tools and pads
 ``128`` Estimated and predicted samples
 ======= ===================================================================
 
 It describes the terminal on the system it runs on, not the hardware
-attached right now. What goes beyond tools and fingers, the last three, is
-sent only when asked for with the mode. ``mode`` is the current state of the
+attached right now. A bit is set only for what the terminal knows it can
+report. Where the system does not say beforehand whether it gives the shape
+of a contact, bit ``8`` stays clear until a contact has had one, so a
+program does not wait for the bit: a report has a shape when its ``valid``
+says so. What goes beyond tools and fingers, the last four, is sent only
+when asked for with the mode. ``mode`` is the current state of the
 mode described below. ``w,h`` are the size of the cell area in pixels (1 to
 65535) and ``cw,ch`` the cell size (1 to 4096). A program queries again
 after a resize. A terminal that does not support the protocol ignores the
@@ -88,8 +93,8 @@ off:
 ======= ===================================================================
 ``1``   Reports of tools
 ``2``   Reports of fingers
-``4``   Reserved
-``8``   The hardware identifiers of tools, see `Devices`_
+``4``   Reports of pads, see `Pads`_
+``8``   The hardware identifiers of tools and pads, see `Devices`_
 ``16``  Reports of tool actions, see `Tool actions`_
 ``32``  Estimated and predicted samples, see `Estimates and predictions`_
 ======= ===================================================================
@@ -101,14 +106,15 @@ pen draws while a finger still taps and scrolls as a mouse, and with
 mouse, and the mouse and scroll events a touchpad produces by itself,
 continue to use whatever mouse reporting the program asked for. Programs
 that merely want pen input to act as a mouse need not use the protocol at
-all.
+all. Bit ``4`` takes nothing away: what the system itself does with the
+controls of a pad, such as a shortcut the user has put on a key, goes on.
 
 The mode is local to the window, is reset by ``RIS``, and changing it
-cancels every active contact. Programs must turn it off when they exit,
-suspend or fail, and turn it back on when resumed. Multiplexers keep it with
-the rest of the terminal state, restore it on reconnect, and turn it off
-when detaching. There is no user setting that overrides the program's
-choice.
+cancels every active contact and lets go of every held key of a pad.
+Programs must turn it off when they exit, suspend or fail, and turn it back
+on when resumed. Multiplexers keep it with the rest of the terminal state,
+restore it on reconnect, and turn it off when detaching. There is no user
+setting that overrides the program's choice.
 
 A ``mode`` request without a ``mode`` field reads the state instead of
 changing it, and is answered with::
@@ -157,8 +163,9 @@ The description is sent again when the tool comes back after leaving
 proximity, when it moves over another window, and when the program changes
 the mode while the tool is in proximity. A program must not depend on
 getting one: a terminal that knows nothing about a tool beyond its reports
-need not describe it. Only tools are described; the device of a finger
-report is not.
+need not describe it. A pad is described in the same way, with ``kind=3``
+and fields of its own, see `Pads`_. The device of a finger report is not
+described.
 
 Reports
 -----------
@@ -172,8 +179,9 @@ In the reports of tools and fingers ``kind``, ``phase``, ``device``, ``t``,
 default to zero, except ``tool``, which defaults to ``1``:
 
 ================ ==================================================================
-``kind``         ``1`` tool, ``2`` finger. ``4`` is a tool action, which has
-                 fields of its own, see `Tool actions`_
+``kind``         ``1`` tool, ``2`` finger. ``3`` is a pad and ``4`` a tool
+                 action, which have fields of their own, see `Pads`_ and
+                 `Tool actions`_
 ``phase``        ``0`` hover, ``1`` down, ``2`` move, ``3`` up, ``4`` cancel,
                  ``5`` the tool left proximity, ``6`` frame, see `Fingers`_,
                  ``7`` correction, see `Estimates and predictions`_
@@ -297,6 +305,94 @@ the window under the pointer. What an action does is the program's choice; a
 double tap usually switches between the pen and the eraser. A program
 ignores an ``action`` it does not know.
 
+Pads
+~~~~~~~
+
+A pad is the keys, touch rings, touch strips and dials on the body of a
+tablet, or on a remote of their own. While mode bit ``4`` is on they are
+reported with ``kind=3``, one control to a report::
+
+    <OSC> 777 ; tablet-pointer ; v=1 : op=event : kind=3 : device=5 : t=408211 : mods=0 : ring=0 : angle=9000 : src=1 <ST>
+
+``device``, ``t`` and ``mods`` are always present and mean what they do in
+the other reports, as does ``tu``. A pad report has no ``phase``, no
+``contact`` and no position. The rest of it is one of these:
+
+============================ ======================================================
+``button``, ``state``        A key went down, ``state=1``, or came up, ``state=0``
+``ring``, ``angle``          Where the finger is on a touch ring, in hundredths of
+                             a degree, ``0`` to ``35999``, clockwise from the top
+                             of the ring as the tablet is turned
+``strip``, ``pos``           Where the finger is on a touch strip, ``0`` at its
+                             top or left end to ``65535`` at the other
+``ring`` or ``strip``,       The finger lifted off the ring or strip, in place of
+``stop=1``                   ``angle`` or ``pos``. What comes next from that
+                             control begins a new movement, so the jump from the
+                             last position to the next one is not a turn
+``dial``, ``delta``          How far a dial was turned since its last report,
+                             signed, ``120`` for each detent and less for a dial
+                             that turns smoothly. A dial has no position
+``group``, ``mode``          A group of controls went into another mode
+============================ ======================================================
+
+The value of ``button``, ``ring``, ``strip`` and ``dial`` is the number of
+the control, each kind counted from zero across the pad in the order the
+system lists them. ``src=1`` is added to a ring or strip report when the
+system says a finger is what moves it.
+
+The controls of a pad are in groups, and each group has a mode, a number
+from zero that the user changes on the pad, usually with a key the system
+keeps for that, and that the pad may show with a light. A mode is nothing
+but a number: it is there so that the same controls can do one set of things
+in one mode and another in the next, and the program decides what. A
+``group`` report gives the number of the group and the mode it is now in.
+Terminals also send one for every group when the pad comes to the window, so
+a program does not have to wait for the user to switch before it knows.
+
+Pad reports go to the window that has the keyboard focus, not to the one
+under the pointer. Before the first of them, each time the pad comes to a
+window that has pad reports on, the terminal describes the pad::
+
+    <OSC> 777 ; tablet-pointer ; v=1 : op=device : device=5 : kind=3 : buttons=9 : rings=1 : strips=0 : dials=0 : groups=1 : modes=4 : name=V2Fjb20gSW50dW9zNSB0b3VjaCBNIFBlbg== <ST>
+
+================ ==================================================================
+``buttons``,     How many keys, rings, strips and dials the pad has
+``rings``,
+``strips``,
+``dials``
+``groups``       How many groups its controls are in
+``modes``        How many modes each group has, separated by commas, in the order
+                 of the groups
+``mode``         The mode each group is in, in the same form, present when the
+                 terminal knows it at that moment
+``name``         The name of the tablet the pad belongs to, as for a tool
+``vid``, ``pid`` The ids of that tablet, sent only while mode bit ``8`` is on
+================ ==================================================================
+
+A pad holds nothing open except its keys. When the mode is changed, the
+terminal is reset, the keyboard focus goes to another window or the pad goes
+away, the terminal reports every key that is down as released,
+``state=0``, with the ``t`` of its press, and the release that the pad makes
+later is not reported. A key that was already down when the reports began
+never reports its release. A program must tolerate a release for a key it
+does not have down.
+
+A program can say what a control does at the moment, for the system to show
+the user where it has a display for that, such as an overlay of the layout
+of the pad::
+
+    <OSC> 777 ; tablet-pointer ; v=1 : op=label : device=5 : button=2 : text=VW5kbw== <ST>
+
+``device`` is the pad and exactly one of ``button``, ``ring``, ``strip`` and
+``dial`` names the control, with a number from ``0`` to ``255``. ``text`` is
+at most 60 bytes of UTF-8 without control characters, encoded as base64 with
+padding, so the frame stays within its 127 bytes; a ``text`` that is empty or
+left out takes the label away. A label belongs to the mode the group of the
+control is in, so a program sets its labels when the pad is described and
+again after each ``group`` report. It is accepted only from the program the
+pad is reporting to, there is no reply, and a terminal with nowhere to show
+labels ignores it.
+
 Totems
 ~~~~~~~~~
 
@@ -354,7 +450,10 @@ to the last lifting, all go to the window under the first finger, or for a
 touchpad to the window under the pointer when the first finger landed.
 ``hover`` reports follow a tool in proximity without a contact and are not
 captured. A tool leaving proximity cancels any stroke it had open, and then,
-when the system reports it, sends phase ``5``.
+when the system reports it, sends phase ``5``. That report goes to the
+window that was last told of the tool, wherever the tool was when it left:
+a pen whose stroke was dragged out of the window and ended there is over no
+window, and the program still has to learn that it is gone.
 
 The terminal cancels contacts, with ``buttons=0`` and ``p=0``, when the mode
 changes, the terminal is reset, the window's size in cells changes, the
@@ -375,7 +474,11 @@ pane's first report of the tool, without the hardware identifiers unless
 that pane asked for them. A tool action goes to the pane that has a stroke
 of the tool, and otherwise to the pane under the pointer, with ``x,y``
 translated as for a contact. Corrections follow the report they correct to
-its pane, and ``seq`` is forwarded unchanged. A multiplexer or relay that
+its pane, and ``seq`` is forwarded unchanged. Pad reports go unchanged to
+the pane that has the focus, after the description of the pad, and when the
+focus moves to another pane the keys that are down are reported released to
+the pane it left. A label is passed on only from the pane the pad is
+reporting to. A multiplexer or relay that
 detaches or loses its connection while contacts are live sends ``cancel``
 for each of them to the program, so a program never holds a dead contact,
 and a relay that reconnects forwards nothing it did not see: the fingers
@@ -385,9 +488,9 @@ Implementations
 -------------------
 
 * silkie, this fork of kitty: tools on macOS, Wayland and X11; fingers on
-  the touchpad on macOS and on touchscreens, with contact shape, on Wayland;
-  tool actions on macOS. ``kitty --debug-input`` logs the tablet and touch
-  events it sees.
+  the touchpad on macOS and on touchscreens on Wayland, with contact shape,
+  and on X11, without; pads on Wayland; tool actions on macOS. ``kitty --debug-input`` logs the
+  tablet, pad and touch events it sees.
 * Inkline, Goblin Skiff and GoblinView carry a codec for an earlier draft of
   this protocol and are being brought up to this specification.
 
@@ -396,7 +499,8 @@ Implementation notes for silkie
 
 silkie reads tablets and touch devices through the window system, so a
 program gets what the system reports. It keeps the mode bits ``1``, ``2``,
-``8`` and ``16``. None of the systems it runs on hands over estimates or
+``4``, ``8`` and ``16``, and ``caps`` says which of them the system it runs
+on can do anything for. None of the systems it runs on hands over estimates or
 predictions, so it does not take bit ``32``, and it reports no totems and no
 battery charge. ``tu`` is sent on macOS only: Wayland and X11 stamp tablet
 and touch events in whole milliseconds.
@@ -419,20 +523,49 @@ and touch events in whole milliseconds.
   events the system makes from them. A trackpad that measures force gives
   ``p`` and ``stage`` once it has been pressed for the first time. The Wacom
   tool types, the double tap and the force are written from the
-  documentation of AppKit and have not been tried with the hardware.
+  documentation of AppKit and have not been tried with the hardware. There
+  are no pad reports: AppKit has no events for the controls of a pad, which
+  an application gets only through the request interface of Wacom's own
+  driver.
 * On Wayland, tools come through the ``tablet-v2`` protocol, which reports
   every measurement above, identifies the tool and names the tablet, and
   fingers through ``wl_touch``, with ``shape`` and ``orientation`` on a seat
-  of version 6 or later (``caps`` claims the shape on every Wayland seat; on
-  an older one the shape measurement is simply absent). The pointer cursor
+  of version 6 or later whose compositor sends them, which sway and GNOME
+  did not when this was written; ``caps`` claims the shape once a contact
+  has had one. The pointer cursor
   follows a tool only on compositors with ``cursor-shape-v1``. GNOME applies
   its own stylus button mapping first (by default the lower button is the
-  middle button), sway passes the buttons through.
+  middle button), sway passes the buttons through. A tool does not move the
+  pointer as far as silkie is concerned: a compositor can give tablets a
+  cursor of their own, so what is reported at the pointer, such as a scroll,
+  stays where the pointer was. Pads come through
+  ``tablet-v2`` as well: keys, rings, strips and modes from its first
+  version and dials from its second, which the compositor has to offer, and
+  a label is passed to the compositor as the feedback for that control. The
+  ``name`` and ids of a pad are those of the tablet it is attached to.
+  ``caps`` claims tools and pads only on a compositor that has the protocol.
+  Pads have been tried against a stand-in for the compositor that sends what
+  wlroots sends, not with a tablet.
 * On X11, tools come through XInput 2 devices whose names include the tool
   type, as the libinput and wacom drivers name them; that name is the
   ``name`` of the device frame, and the ids of the tablet are not known.
   ``tangent`` carries the device's wheel axis and ``twist`` its rotary Z
-  axis. The X server does not report a tool leaving proximity, so phase
+  axis. The position of a tool is made from the position its own device
+  reports, scaled to the screen as the server does it, because the server
+  puts the position of the pointer before an event into that event, which
+  is where the tool was one report earlier. The X server does not report a
+  tool leaving proximity, so phase
   ``5`` arrives only when the device goes away. Xwayland's tablet devices
   are recognised too, but under GNOME no motion reached them in testing; use
-  the Wayland backend there. Fingers are not reported on X11.
+  the Wayland backend there. Fingers on a touchscreen come through the touch
+  events of XInput 2.2, and ``caps`` claims them when the server has that
+  version. X reports each finger in an event of its own, so every finger
+  report is followed by a frame report of its own and fingers that moved
+  together are not grouped. There is no contact shape, a touch the system
+  takes over ends with an ordinary ``up`` since the server does not say that
+  it was taken, and the fingers on a touchpad are not reported. The server
+  also moves the pointer to where the first finger lands, which is not passed
+  on as mouse reports. This was tried against Xwayland, which makes these
+  events from the touches of its compositor, not with a touchscreen. Pads
+  are not reported on X11: the wacom driver has a device for the pad, which
+  is not read.

@@ -398,6 +398,12 @@ load_glfw(const char* path) {
     *(void **) (&glfwGetSupportedGestures_impl) = dlsym(handle, "glfwGetSupportedGestures");
     if (glfwGetSupportedGestures_impl == NULL) fail("Failed to load glfw function glfwGetSupportedGestures with error: %s", dlerror());
 
+    *(void **) (&glfwSetTabletPadCallback_impl) = dlsym(handle, "glfwSetTabletPadCallback");
+    if (glfwSetTabletPadCallback_impl == NULL) fail("Failed to load glfw function glfwSetTabletPadCallback with error: %s", dlerror());
+
+    *(void **) (&glfwGetPointerInputClasses_impl) = dlsym(handle, "glfwGetPointerInputClasses");
+    if (glfwGetPointerInputClasses_impl == NULL) fail("Failed to load glfw function glfwGetPointerInputClasses with error: %s", dlerror());
+
     *(void **) (&glfwSetLiveResizeCallback_impl) = dlsym(handle, "glfwSetLiveResizeCallback");
     if (glfwSetLiveResizeCallback_impl == NULL) fail("Failed to load glfw function glfwSetLiveResizeCallback with error: %s", dlerror());
 
@@ -586,6 +592,9 @@ load_glfw(const char* path) {
 
     *(void **) (&glfwWaylandBeep_impl) = dlsym(handle, "glfwWaylandBeep");
     if (glfwWaylandBeep_impl == NULL) dlerror(); // clear error indicator
+
+    *(void **) (&glfwWaylandSetTabletPadLabel_impl) = dlsym(handle, "glfwWaylandSetTabletPadLabel");
+    if (glfwWaylandSetTabletPadLabel_impl == NULL) dlerror(); // clear error indicator
 
     *(void **) (&glfwWaylandCompositorPID_impl) = dlsym(handle, "glfwWaylandCompositorPID");
     if (glfwWaylandCompositorPID_impl == NULL) dlerror(); // clear error indicator

@@ -1916,6 +1916,14 @@ _glfwPlatformGetDoubleClickInterval(_GLFWwindow *window UNUSED) {
     return ms_to_monotonic_t(500ll);
 }
 
+unsigned
+_glfwPlatformGetPointerInputClasses(void) {
+    // Tools and pads need the compositor to have the tablet protocol. A touchscreen is reported through the core protocol,
+    // which has the shape of a contact too, but a compositor need not send it and nothing says whether it will
+    return (_glfw.wl.tablet_manager ? GLFW_POINTER_INPUT_TOOLS | GLFW_POINTER_INPUT_PADS : 0) | GLFW_POINTER_INPUT_TOUCHSCREEN |
+           (_glfw.wl.touch_state.shape_seen ? GLFW_POINTER_INPUT_TOUCH_SHAPE : 0);
+}
+
 void
 _glfwPlatformGetKeyboardRepeatDelay(monotonic_t *delay, monotonic_t *interval) {
     if (delay) *delay = _glfw.wl.keyboardRepeatDelay;
@@ -2306,14 +2314,15 @@ isPointerLocked(_GLFWwindow *window) {
 
 void
 _glfwWaylandSetTabletToolCursor(_GLFWWaylandTabletTool *tool) {
-    if (!tool->window || !tool->cursor_shape_device) return;
-    wayland_cursor_shape s = glfw_cursor_shape_to_wayland_cursor_shape(tool->window->cursor ? tool->window->cursor->wl.shape : GLFW_DEFAULT_CURSOR);
+    const _GLFWwindow *window = _glfwWindowForId(tool->window_id);
+    if (!window || !tool->cursor_shape_device) return;
+    wayland_cursor_shape s = glfw_cursor_shape_to_wayland_cursor_shape(window->cursor ? window->cursor->wl.shape : GLFW_DEFAULT_CURSOR);
     if (s.which > -1) wp_cursor_shape_device_v1_set_shape(tool->cursor_shape_device, tool->serial, (uint32_t)s.which);
 }
 
 void
 _glfwPlatformSetCursor(_GLFWwindow *window, _GLFWcursor *cursor) {
-    if (_glfw.wl.tablet_tool && _glfw.wl.tablet_tool->window == window) _glfwWaylandSetTabletToolCursor(_glfw.wl.tablet_tool);
+    if (_glfw.wl.tablet_tool && _glfw.wl.tablet_tool->window_id == window->id) _glfwWaylandSetTabletToolCursor(_glfw.wl.tablet_tool);
     if (!_glfw.wl.pointer) return;
 
     window->wl.currentCursor = cursor;

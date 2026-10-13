@@ -24,12 +24,14 @@ typedef struct DnDCommand {
 } DnDCommand;
 
 typedef enum PointerPhase { POINTER_HOVER, POINTER_DOWN, POINTER_MOVE, POINTER_UP, POINTER_CANCEL, POINTER_OUT, POINTER_FRAME } PointerPhase;
-typedef enum PointerKind { POINTER_PEN = 1, POINTER_TOUCH = 2 } PointerKind;
-// The bits of the mode beyond the report kinds, and all the bits this terminal knows
+// The mode bit of a tool or a finger is its kind. A pad is kind 3 and has a bit of its own
+typedef enum PointerKind { POINTER_PEN = 1, POINTER_TOUCH = 2, POINTER_PAD = 3 } PointerKind;
+// The bits of the mode beyond tools and fingers, and all the bits this terminal knows
 typedef enum PointerMode {
+    POINTER_MODE_PADS = 4,
     POINTER_MODE_IDS = 8,
     POINTER_MODE_ACTIONS = 16,
-    POINTER_MODES = POINTER_PEN | POINTER_TOUCH | POINTER_MODE_IDS | POINTER_MODE_ACTIONS
+    POINTER_MODES = POINTER_PEN | POINTER_TOUCH | POINTER_MODE_PADS | POINTER_MODE_IDS | POINTER_MODE_ACTIONS
 } PointerMode;
 
 // A tablet pointer protocol event, see docs/tablet-protocol.rst
@@ -64,12 +66,16 @@ typedef struct InkStroke {
     double w0, w1, exponent;
 } InkStroke;
 
-// A tool as it is described to the program before its first report
+// A tool or a pad as it is described to the program before its first report
 typedef struct PointerDevice {
     int kind, tool;
     unsigned axes, vid, pid;
     uint64_t device, serial, hwid;
     const char *name;  // UTF-8, NULL or empty when unknown
+    // For a pad: what it has, the number of modes of each of its groups, and
+    // the mode each group is in, which is NULL when that is not known
+    unsigned num_buttons, num_rings, num_strips, num_dials, num_groups;
+    const unsigned *num_modes, *modes;
 } PointerDevice;
 
 // Something done with a tool that is not a button held down
@@ -80,6 +86,23 @@ typedef struct PointerAction {
     unsigned tu;
     bool has_tu;
 } PointerAction;
+
+typedef enum PointerPadControl { PAD_BUTTON = 1, PAD_RING, PAD_STRIP, PAD_DIAL, PAD_GROUP } PointerPadControl;
+
+// A report of one control of a tablet pad
+typedef struct PointerPad {
+    PointerPadControl control;
+    int index;  // of the button, ring, strip or dial, or for PAD_GROUP of the group
+    // Whether the button is down, the angle of the ring, the position on the
+    // strip, how far the dial turned, or the mode the group went into
+    int value;
+    bool stop, from_finger;  // of a ring or a strip
+    int mods;
+    uint64_t device;
+    unsigned long long t;
+    unsigned tu;
+    bool has_tu;
+} PointerPad;
 
 typedef struct {
     bool mLNM, mIRM, mDECTCEM, mDECSCNM, mDECOM, mDECAWM, mDECCOLM, mDECARM, mDECCKM, mCOLOR_PREFERENCE_NOTIFICATION, mBRACKETED_PASTE, mFOCUS_TRACKING,
@@ -318,6 +341,10 @@ typedef struct {
         unsigned num_contacts;
         size_t capacity;
         PointerReport *contacts;  // grows as fingers land, see pointer_contact()
+        // The buttons of pads that are held, as the reports of their presses
+        unsigned num_pad_buttons;
+        size_t pad_capacity;
+        PointerPad *pad_buttons;
     } pointer;
     struct {
         bool on;
@@ -409,6 +436,8 @@ void screen_ink_off(Screen *self);
 void screen_ink_reset(Screen *self);
 bool screen_pointer_device(Screen *self, const PointerDevice *d);
 bool screen_pointer_action(Screen *self, const PointerAction *a);
+bool screen_pointer_pad(Screen *self, const PointerPad *p);
+void screen_pointer_pad_release(Screen *self, uint64_t device);
 void set_icon(Screen *self, PyObject *);
 void set_dynamic_color(Screen *self, unsigned int code, PyObject *);
 void color_control(Screen *self, unsigned int code, PyObject *);

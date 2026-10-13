@@ -404,6 +404,7 @@ void focus_in_event(void);
 void scroll_event(const GLFWScrollEvent *ev);
 bool gesture_event(const GLFWGestureEvent *ev);
 bool tablet_event(const GLFWTabletEvent *ev);
+bool tablet_pad_event(const GLFWTabletPadEvent *ev);
 bool touch_pointer_event(const GLFWTouchEvent *ev);
 void on_key_input(const GLFWkeyevent *ev);
 void request_window_attention(id_type, bool);

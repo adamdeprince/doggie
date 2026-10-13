@@ -1430,8 +1430,13 @@ def send_pointer_action(
 ) -> bool: ...
 def send_pointer_device(
     screen: Screen, device: int, kind: int = 1, tool: int = 1, axes: int = 0, name: str | None = None, serial: int = 0, hwid: int = 0, vid: int = 0,
-    pid: int = 0
+    pid: int = 0, buttons: int = 0, rings: int = 0, strips: int = 0, dials: int = 0, num_modes: Sequence[int] | None = None,
+    modes: Sequence[int] | None = None
 ) -> bool: ...
+def send_pointer_pad(
+    screen: Screen, device: int, control: int, index: int, value: int = 0, stop: bool = False, src: bool = False, mods: int = 0, t: int = 0, tu: int = -1
+) -> bool: ...
+def take_pointer_pad_label() -> tuple[int, int, int, str] | None: ...
 def set_window_logo(os_window_id: int, tab_id: int, window_id: int, path: str, position: str, alpha: float, png_data: bytes = b'') -> None:
     pass
 

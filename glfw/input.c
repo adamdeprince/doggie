@@ -336,6 +336,13 @@ _glfwInputTablet(_GLFWwindow *window, const GLFWTabletEvent *ev) {
     return window->callbacks.tablet && window->callbacks.tablet((GLFWwindow *)window, ev);
 }
 
+// Notifies shared code of a tablet pad event
+//
+void
+_glfwInputTabletPad(_GLFWwindow *window, const GLFWTabletPadEvent *ev) {
+    if (window->callbacks.tablet_pad) window->callbacks.tablet_pad((GLFWwindow *)window, ev);
+}
+
 // Notifies shared code of a mouse button click event
 //
 void
@@ -1163,6 +1170,22 @@ GLFWAPI unsigned
 glfwGetSupportedGestures(void) {
     _GLFW_REQUIRE_INIT_OR_RETURN(0);
     return _glfwPlatformSupportedGestures();
+}
+
+GLFWAPI GLFWtabletpadfun
+glfwSetTabletPadCallback(GLFWwindow *handle, GLFWtabletpadfun cbfun) {
+    _GLFWwindow *window = (_GLFWwindow *)handle;
+    assert(window != NULL);
+
+    _GLFW_REQUIRE_INIT_OR_RETURN(NULL);
+    _GLFW_SWAP_POINTERS(window->callbacks.tablet_pad, cbfun);
+    return cbfun;
+}
+
+GLFWAPI unsigned
+glfwGetPointerInputClasses(void) {
+    _GLFW_REQUIRE_INIT_OR_RETURN(0);
+    return _glfwPlatformGetPointerInputClasses();
 }
 
 GLFWAPI GLFWdropeventfun

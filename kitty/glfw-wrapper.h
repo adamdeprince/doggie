@@ -506,6 +506,76 @@ typedef struct GLFWTabletEvent {
     GLFWTabletActionState action_state;
 } GLFWTabletEvent;
 
+// The input beyond a mouse that the window system can deliver through the
+// touch, tablet and tablet pad callbacks, as glfwGetPointerInputClasses()
+// returns it. It says what the system has, not what is plugged in
+typedef enum GLFWPointerInputClass {
+    GLFW_POINTER_INPUT_TOOLS = 1,
+    GLFW_POINTER_INPUT_TOUCHSCREEN = 2,
+    GLFW_POINTER_INPUT_TOUCHPAD = 4,
+    // The shape of the contact of a finger. Where the system does not say
+    // whether it reports shapes this is set once it has reported one
+    GLFW_POINTER_INPUT_TOUCH_SHAPE = 8,
+    GLFW_POINTER_INPUT_PADS = 16,
+    GLFW_POINTER_INPUT_TOOL_ACTIONS = 32,
+} GLFWPointerInputClass;
+
+// A tablet pad is the keys, rings, strips and dials on the body of a tablet or
+// on a remote of their own. A pad has the focus of the window that has the
+// keyboard focus and its events are reported to that window.
+typedef enum GLFWTabletPadEventType {
+    // The pad got the focus of the window
+    GLFW_TABLET_PAD_ENTER = 1,
+    // The pad lost the focus of the window, or went away
+    GLFW_TABLET_PAD_LEAVE = 2,
+    GLFW_TABLET_PAD_BUTTON = 3,
+    GLFW_TABLET_PAD_RING = 4,
+    GLFW_TABLET_PAD_STRIP = 5,
+    GLFW_TABLET_PAD_DIAL = 6,
+    // A group of controls of the pad changed its mode
+    GLFW_TABLET_PAD_MODE = 7,
+} GLFWTabletPadEventType;
+
+typedef struct GLFWTabletPadEvent {
+    GLFWTabletPadEventType type;
+    int keyboard_modifiers;
+    // As for GLFWTouchEvent
+    monotonic_t timestamp;
+    bool timestamp_is_fine;
+    // Identifies the pad for as long as it is attached
+    uint64_t device;
+    // What the pad has. Its controls are in groups, each with a mode of its
+    // own that says what its controls currently do. num_modes holds the number
+    // of modes of each group and is valid only during the callback
+    unsigned num_buttons, num_rings, num_strips, num_dials, num_groups;
+    const unsigned *num_modes;
+    // The mode each group is in, NULL when the system has not said yet. Valid
+    // only during the callback
+    const unsigned *modes;
+    // The name and ids of the tablet the pad belongs to, NULL and zero when the
+    // system does not report them. The name is valid only during the callback
+    const char *name;
+    unsigned vendor_id, product_id;
+    // The button, ring, strip or dial the event is about, or for
+    // GLFW_TABLET_PAD_MODE the group, counted from zero in the order the system
+    // lists them
+    unsigned index;
+    // GLFW_TABLET_PAD_BUTTON
+    bool pressed;
+    // GLFW_TABLET_PAD_RING: degrees clockwise from the logical north of the ring.
+    // GLFW_TABLET_PAD_STRIP: 0 to 1 along the strip
+    double value;
+    // GLFW_TABLET_PAD_RING and GLFW_TABLET_PAD_STRIP: the finger lifted, value
+    // is meaningless
+    bool stopped;
+    // GLFW_TABLET_PAD_RING and GLFW_TABLET_PAD_STRIP: a finger is what moves it
+    bool from_finger;
+    // GLFW_TABLET_PAD_DIAL: how far the dial turned, 120 for one detent
+    int delta;
+    // GLFW_TABLET_PAD_MODE: the mode the group is in now
+    unsigned mode;
+} GLFWTabletPadEvent;
+
 /*! @defgroup joysticks Joysticks
  *  @brief Joystick IDs.
  *
@@ -1773,6 +1843,14 @@ typedef void (*GLFWgesturefun)(GLFWwindow *, const GLFWGestureEvent *);
  */
 typedef bool (*GLFWtabletfun)(GLFWwindow *, const GLFWTabletEvent *);
 
+/*! @brief The function pointer type for tablet pad callbacks.
+ *
+ *  @sa @ref glfwSetTabletPadCallback
+ *
+ *  @ingroup input
+ */
+typedef void (*GLFWtabletpadfun)(GLFWwindow *, const GLFWTabletPadEvent *);
+
 /*! @brief The function pointer type for key callbacks.
  *
  *  This is the function pointer type for key callbacks.  A keyboard
@@ -2723,6 +2801,14 @@ typedef unsigned (*glfwGetSupportedGestures_func)(void);
 GFW_EXTERN glfwGetSupportedGestures_func glfwGetSupportedGestures_impl;
 #define glfwGetSupportedGestures glfwGetSupportedGestures_impl
 
+typedef GLFWtabletpadfun (*glfwSetTabletPadCallback_func)(GLFWwindow*, GLFWtabletpadfun);
+GFW_EXTERN glfwSetTabletPadCallback_func glfwSetTabletPadCallback_impl;
+#define glfwSetTabletPadCallback glfwSetTabletPadCallback_impl
+
+typedef unsigned (*glfwGetPointerInputClasses_func)(void);
+GFW_EXTERN glfwGetPointerInputClasses_func glfwGetPointerInputClasses_impl;
+#define glfwGetPointerInputClasses glfwGetPointerInputClasses_impl
+
 typedef GLFWliveresizefun (*glfwSetLiveResizeCallback_func)(GLFWwindow*, GLFWliveresizefun);
 GFW_EXTERN glfwSetLiveResizeCallback_func glfwSetLiveResizeCallback_impl;
 #define glfwSetLiveResizeCallback glfwSetLiveResizeCallback_impl
@@ -2974,6 +3060,10 @@ GFW_EXTERN glfwWaylandIsWindowFullyCreated_func glfwWaylandIsWindowFullyCreated_
 typedef bool (*glfwWaylandBeep_func)(GLFWwindow*);
 GFW_EXTERN glfwWaylandBeep_func glfwWaylandBeep_impl;
 #define glfwWaylandBeep glfwWaylandBeep_impl
+
+typedef bool (*glfwWaylandSetTabletPadLabel_func)(GLFWwindow*, uint64_t, int, unsigned, const char*);
+GFW_EXTERN glfwWaylandSetTabletPadLabel_func glfwWaylandSetTabletPadLabel_impl;
+#define glfwWaylandSetTabletPadLabel glfwWaylandSetTabletPadLabel_impl
 
 typedef pid_t (*glfwWaylandCompositorPID_func)(void);
 GFW_EXTERN glfwWaylandCompositorPID_func glfwWaylandCompositorPID_impl;

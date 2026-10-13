@@ -1080,16 +1080,38 @@ touch_callback(GLFWwindow *w, const GLFWTouchEvent *ev) {
     global_state.callback_os_window = NULL;
 }
 
+static void
+tablet_pad_callback(GLFWwindow *w, const GLFWTabletPadEvent *ev) {
+    if (!set_callback_window(w)) return;
+    const bool reported = is_window_ready_for_callbacks() && tablet_pad_event(ev);
+    debug_input(
+        "\x1b[33mTablet pad\x1b[m type: %d device: %llu index: %u pressed: %d value: %.3f stopped: %d delta: %d mode: %u reported: %d\n",
+        ev->type, (unsigned long long)ev->device, ev->index, ev->pressed, ev->value, ev->stopped, ev->delta, ev->mode, reported);
+    if (reported) request_tick_callback();
+    global_state.callback_os_window = NULL;
+}
+
 static bool
 tablet_callback(GLFWwindow *w, const GLFWTabletEvent *ev) {
     if (!set_callback_window(w)) return false;
     OSWindow *osw = global_state.callback_os_window;
     osw->last_mouse_activity_at = monotonic();
-    if (ev->type == GLFW_TABLET_POINT) {
+    // A tool is found and reported by where it is. On Wayland that is not
+    // where the pointer is: the compositor may give tablets a cursor of their
+    // own, and the pointer, which gestures and scrolling are reported at, has
+    // not moved. So there the position of the pointer is put back afterwards,
+    // and a tool that acts as a mouse moves it with the pointer events that
+    // are made from it. Elsewhere the tool is the pointer
+    const double pointer_x = osw->mouse_x, pointer_y = osw->mouse_y;
+    if (ev->type == GLFW_TABLET_POINT || (global_state.is_wayland && ev->type != GLFW_TABLET_ACTION)) {
         osw->mouse_x = ev->x * osw->viewport_x_ratio;
         osw->mouse_y = ev->y * osw->viewport_y_ratio;
     }
     const bool consumed = is_window_ready_for_callbacks() && tablet_event(ev);
+    if (global_state.is_wayland) {
+        osw->mouse_x = pointer_x;
+        osw->mouse_y = pointer_y;
+    }
     debug_input(
         "\x1b[33mTablet\x1b[m type: %d tool: %d buttons: %u axes: %u x: %.1f y: %.1f pressure: %.3f consumed: %d\n",
         ev->type, ev->tool, ev->buttons, ev->axes, ev->x, ev->y, ev->pressure, consumed);
@@ -2713,6 +2735,7 @@ create_os_window(PyObject UNUSED *self, PyObject *args, PyObject *kw) {
     glfwSetTouchCallback(glfw_window, touch_callback);
     glfwSetGestureCallback(glfw_window, gesture_callback);
     glfwSetTabletCallback(glfw_window, tablet_callback);
+    glfwSetTabletPadCallback(glfw_window, tablet_pad_callback);
     glfwSetKeyboardCallback(glfw_window, key_callback);
 
     glfwSetDragSourceCallback(glfw_window, drag_source_callback);

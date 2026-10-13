@@ -16,7 +16,9 @@ from kitty.fast_data_types import (
     send_mock_mouse_event_to_window,
     send_pointer_action,
     send_pointer_device,
+    send_pointer_pad,
     send_pointer_report,
+    take_pointer_pad_label,
 )
 
 from .base import BaseTest, parse_bytes
@@ -687,7 +689,7 @@ class TestMouse(BaseTest):
         # Bits of the mode this terminal does not know are dropped, so reading it back shows what took
         send('v=1:op=mode:mode=1023')
         send('v=1:op=mode')
-        self.ae(c.wtcbuf, b'\x1b]777;tablet-pointer;v=1:op=mode:mode=27\x1b\\')
+        self.ae(c.wtcbuf, b'\x1b]777;tablet-pointer;v=1:op=mode:mode=31\x1b\\')
         send('v=1:op=mode:mode=0')
 
         # Tool actions are a kind of report with a mode bit of its own
@@ -723,3 +725,142 @@ class TestMouse(BaseTest):
         send('v=1:op=mode:mode=0')
         self.ae(c.wtcbuf.count(b':phase=4:'), 40)
         self.assertIn(ev('kind=2:phase=4:device=7:t=1001:contact=39:x=256:y=512:buttons=0:mods=0:tool=0:valid=0'), c.wtcbuf)
+
+    def test_tablet_pads(self):
+        s = self.create_screen()
+        c = s.callbacks
+        BUTTON, RING, STRIP, DIAL, GROUP = 1, 2, 3, 4, 5
+
+        def send(body):
+            c.clear()
+            parse_bytes(s, f'\x1b]777;tablet-pointer;{body}\x1b\\'.encode())
+
+        def pad(control, index, value=0, **kw):
+            c.clear()
+            kw.setdefault('t', 1000)
+            return send_pointer_pad(s, 9, control, index, value, **kw)
+
+        def describe(**kw):
+            c.clear()
+            return send_pointer_device(s, 9, kind=3, **kw)
+
+        def ev(fields):
+            return f'\x1b]777;tablet-pointer;v=1:op=event:kind=3:device=9:{fields}\x1b\\'.encode()
+
+        def frame(fields):
+            return f'\x1b]777;tablet-pointer;v=1:op=device:device=9:kind=3:{fields}\x1b\\'.encode()
+
+        def b64(text):
+            return standard_b64encode(text if isinstance(text, bytes) else text.encode()).decode()
+
+        def label(body):
+            take_pointer_pad_label()
+            send(f'v=1:op=label:{body}')
+            self.ae(c.wtcbuf, b'')
+            return take_pointer_pad_label()
+
+        # Pads have a mode bit of their own, and nothing of a pad goes to a program that did not set it
+        send('v=1:op=mode:mode=27')
+        self.assertFalse(pad(BUTTON, 2, 1))
+        self.assertFalse(describe(buttons=9))
+        self.assertIsNone(label(f'device=9:button=2:text={b64("Undo")}'))
+        send('v=1:op=mode:mode=4')
+        send('v=1:op=mode')
+        self.ae(c.wtcbuf, b'\x1b]777;tablet-pointer;v=1:op=mode:mode=4\x1b\\')
+        # Tools are not reported while only pads are on
+        c.clear()
+        self.assertFalse(send_pointer_report(s, 1, 0, 7, 0, 256, 512))
+
+        # A pad is described before its reports, with the modes of each of its groups
+        name = 'Wacom Intuos5 touch M Pad'
+        self.assertTrue(describe(name=name, buttons=9, rings=1, num_modes=(4,), modes=(1,), vid=0x56A, pid=0x27))
+        self.ae(c.wtcbuf, frame(f'buttons=9:rings=1:strips=0:dials=0:groups=1:modes=4:mode=1:name={b64(name)}'))
+        # The mode the groups are in is left out when it is not known, and a pad need not have groups
+        describe(buttons=4, strips=2, dials=1, num_modes=(3, 2))
+        self.ae(c.wtcbuf, frame('buttons=4:rings=0:strips=2:dials=1:groups=2:modes=3,2'))
+        describe(buttons=1)
+        self.ae(c.wtcbuf, frame('buttons=1:rings=0:strips=0:dials=0:groups=0'))
+        # The ids of the tablet are hardware identifiers
+        send('v=1:op=mode:mode=12')
+        describe(buttons=9, vid=0x56A, pid=0x27)
+        self.ae(c.wtcbuf, frame('buttons=9:rings=0:strips=0:dials=0:groups=0:vid=1386:pid=39'))
+
+        # Every form of report
+        self.assertTrue(pad(BUTTON, 2, 1, mods=5))
+        self.ae(c.wtcbuf, ev('t=1000:mods=5:button=2:state=1'))
+        self.assertTrue(pad(BUTTON, 2, 0, t=1040, tu=250))
+        self.ae(c.wtcbuf, ev('t=1040:tu=250:mods=0:button=2:state=0'))
+        pad(RING, 0, 9000, src=True)
+        self.ae(c.wtcbuf, ev('t=1000:mods=0:ring=0:angle=9000:src=1'))
+        pad(RING, 1, 0)
+        self.ae(c.wtcbuf, ev('t=1000:mods=0:ring=1:angle=0'))
+        pad(RING, 0, stop=True, src=True)
+        self.ae(c.wtcbuf, ev('t=1000:mods=0:ring=0:stop=1:src=1'))
+        pad(STRIP, 1, 65535, src=True)
+        self.ae(c.wtcbuf, ev('t=1000:mods=0:strip=1:pos=65535:src=1'))
+        pad(STRIP, 1, stop=True)
+        self.ae(c.wtcbuf, ev('t=1000:mods=0:strip=1:stop=1'))
+        pad(DIAL, 0, -120)
+        self.ae(c.wtcbuf, ev('t=1000:mods=0:dial=0:delta=-120'))
+        pad(DIAL, 1, 15)
+        self.ae(c.wtcbuf, ev('t=1000:mods=0:dial=1:delta=15'))
+        pad(GROUP, 0, 2)
+        self.ae(c.wtcbuf, ev('t=1000:mods=0:group=0:mode=2'))
+        self.assertRaises(ValueError, pad, 6, 0)
+
+        # A release whose press the program did not see is not sent
+        self.assertFalse(pad(BUTTON, 5, 0))
+        # A button held twice is one button
+        pad(BUTTON, 5, 1)
+        pad(BUTTON, 5, 1, t=1001)
+        self.assertTrue(pad(BUTTON, 5, 0))
+        self.assertFalse(pad(BUTTON, 5, 0))
+
+        # Changing the mode lets go of the held buttons, whose releases are then dropped
+        pad(BUTTON, 1, 1, mods=2)
+        pad(BUTTON, 3, 1, t=1010)
+        send('v=1:op=mode:mode=5')
+        self.ae(c.wtcbuf, ev('t=1000:mods=2:button=1:state=0') + ev('t=1010:mods=0:button=3:state=0'))
+        self.assertFalse(pad(BUTTON, 1, 0))
+        self.assertFalse(pad(BUTTON, 3, 0))
+        # So does a reset
+        pad(BUTTON, 1, 1)
+        c.clear()
+        s.reset()
+        self.ae(c.wtcbuf, ev('t=1000:mods=0:button=1:state=0'))
+        self.assertFalse(pad(BUTTON, 1, 1))
+        # A resize cancels contacts but not the buttons of a pad, which are not at any position
+        send('v=1:op=mode:mode=5')
+        pad(BUTTON, 1, 1)
+        send_pointer_report(s, 1, 1, 7, 0, 256, 512, buttons=1)
+        c.clear()
+        s.resize(s.lines, s.columns + 2)
+        self.assertIn(b':kind=1:phase=4:', c.wtcbuf)
+        self.assertNotIn(b':kind=3:', c.wtcbuf)
+        self.assertTrue(pad(BUTTON, 1, 0))
+
+        # Labels: what a control does at the moment, for the window system to show
+        self.ae(label(f'device=9:button=2:text={b64("Undo")}'), (9, BUTTON, 2, 'Undo'))
+        self.ae(label(f'text={b64("Größe")}:ring=0:device=9'), (9, RING, 0, 'Größe'))
+        self.ae(label(f'device=12:strip=1:text={b64("x" * 60)}'), (12, STRIP, 1, 'x' * 60))
+        # No text, or an empty one, takes the label away
+        self.ae(label('device=9:dial=255'), (9, DIAL, 255, ''))
+        self.ae(label('device=9:dial=0:text='), (9, DIAL, 0, ''))
+        for bad in (
+            f'button=2:text={b64("Undo")}',  # no device
+            f'device=9:text={b64("Undo")}',  # no control
+            f'device=9:button=2:ring=0:text={b64("Undo")}',  # two controls
+            f'device=9:button=256:text={b64("Undo")}',
+            f'device=9:button=-1:text={b64("Undo")}',
+            f'device=x:button=1:text={b64("Undo")}',
+            f'device=9:group=0:text={b64("Undo")}',  # a group is not a control
+            'device=9:button=2:text=VW5kbw',  # not padded
+            'device=9:button=2:text=!!!!',
+            f'device=9:button=2:text={b64("x" * 61)}',
+            f'device=9:button=2:text={b64("a" + chr(10) + "b")}',  # a control character
+            f'device=9:button=2:text={b64(bytes((0xC3, 0x28)))}',  # not UTF-8
+            f'device=9:button=2:text={b64(bytes((0xE2, 0x82)))}',  # cut short
+        ):
+            self.assertIsNone(label(bad), bad)
+        send(f'v=2:op=label:device=9:button=2:text={b64("Undo")}')
+        self.assertIsNone(take_pointer_pad_label())
