@@ -89,6 +89,8 @@
 #define EGL_CONTEXT_OPENGL_NO_ERROR_KHR 0x31b3
 #define EGL_GL_COLORSPACE_KHR 0x309d
 #define EGL_GL_COLORSPACE_SRGB_KHR 0x3089
+#define EGL_COLOR_COMPONENT_TYPE_EXT 0x3339
+#define EGL_COLOR_COMPONENT_TYPE_FLOAT_EXT 0x333b
 #define EGL_CONTEXT_RELEASE_BEHAVIOR_KHR 0x2097
 #define EGL_CONTEXT_RELEASE_BEHAVIOR_NONE_KHR 0
 #define EGL_CONTEXT_RELEASE_BEHAVIOR_FLUSH_KHR 0x2098
@@ -164,6 +166,7 @@ typedef struct _GLFWcontextEGL {
     EGLConfig config;
     EGLContext handle;
     EGLSurface surface;
+    bool floatColor;  // the surface has floating point color components
 
     void *client;
 
@@ -187,6 +190,7 @@ typedef struct _GLFWlibraryEGL {
     bool EXT_platform_x11;
     bool EXT_platform_wayland;
     bool EXT_present_opaque;
+    bool EXT_pixel_format_float;
     bool ANGLE_platform_angle;
     bool ANGLE_platform_angle_opengl;
     bool ANGLE_platform_angle_d3d;
@@ -223,6 +227,7 @@ typedef struct _GLFWlibraryEGL {
 bool _glfwInitEGL(void);
 void _glfwTerminateEGL(void);
 bool _glfwCreateContextEGL(_GLFWwindow *window, const _GLFWctxconfig *ctxconfig, const _GLFWfbconfig *fbconfig);
+bool _glfwHasFloatColorEGL(const _GLFWctxconfig *ctxconfig, const _GLFWfbconfig *fbconfig);
 #if defined(_GLFW_X11)
 bool _glfwChooseVisualEGL(const _GLFWwndconfig *wndconfig, const _GLFWctxconfig *ctxconfig, const _GLFWfbconfig *fbconfig, Visual **visual, int *depth);
 #endif /*_GLFW_X11*/

@@ -2729,7 +2729,9 @@ rendered exactly as it is with this option off, HDR only adds extra brightness
 requested by programs via the :doc:`/hdr-protocol`, by :opt:`cursor_brightness`
 and by HDR images. :code:`auto` enables the extended range of the display only
 while something brighter than SDR white is on screen, :code:`always` keeps it
-enabled. Currently only supported on macOS.
+enabled. Supported on macOS, and on Wayland where the compositor implements
+color management and the graphics driver has floating point window surfaces,
+see :doc:`/hdr-protocol`.
 """,
 )
 

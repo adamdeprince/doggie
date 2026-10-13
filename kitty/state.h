@@ -584,7 +584,7 @@ typedef struct OSWindow {
         float alpha;
         bool os_forces_opaque, supports_transparency;
     } background_opacity;
-    float hdr_headroom;
+    float hdr_headroom, hdr_white_level;
     bool hdr_active, hdr_content, linear_output, linear_output_checked;
     FONTS_DATA_HANDLE fonts_data;
     id_type temp_font_group_id;
@@ -761,6 +761,7 @@ void send_image_to_gpu(uint32_t *, const void *, int32_t, int32_t, bool, bool, b
 void update_image_on_gpu(uint32_t, const void *, int32_t, int32_t, int32_t, int32_t);
 void copy_rectangle_texture_to_texture(uint32_t, uint32_t *, int32_t, int32_t);
 float effective_hdr_headroom(const OSWindow *w);
+void scale_output_to_hdr_white_level(const OSWindow *w);
 bool backbuffer_is_float(void);
 void send_sprite_to_gpu(FONTS_DATA_HANDLE fg, sprite_index, pixel *, sprite_index);
 void blank_canvas(float, color_type, bool);

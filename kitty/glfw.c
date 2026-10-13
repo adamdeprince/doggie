@@ -2399,6 +2399,7 @@ create_os_window(PyObject UNUSED *self, PyObject *args, PyObject *kw) {
     glfwWindowHint(GLFW_COCOA_COLOR_SPACE, OPT(macos_colorspace));
     glfwWindowHint(GLFW_COCOA_HDR, OPT(hdr) != 0);
 #else
+    glfwWindowHint(GLFW_WAYLAND_HDR, OPT(hdr) != 0);
     glfwWindowHintString(GLFW_X11_INSTANCE_NAME, wm_class_name);
     glfwWindowHintString(GLFW_X11_CLASS_NAME, wm_class_class);
     glfwWindowHintString(GLFW_WAYLAND_APP_ID, wm_class_class);
@@ -2544,6 +2545,7 @@ create_os_window(PyObject UNUSED *self, PyObject *args, PyObject *kw) {
     OSWindow *w = add_os_window();
     w->handle = glfw_window;
     w->hdr_headroom = glfwGetWindowHDRHeadroom(glfw_window);
+    w->hdr_white_level = 1.f;
     w->disallow_title_changes = disallow_override_title;
     if (lsc != NULL) {
         w->is_layer_shell = true;
@@ -3248,6 +3250,7 @@ is_mouse_hidden(OSWindow *w) {
 void
 swap_window_buffers(OSWindow *os_window) {
     if (glfwAreSwapsAllowed(os_window->handle)) {
+        scale_output_to_hdr_white_level(os_window);
         glfwSwapBuffers(os_window->handle);
         os_window->keep_rendering_till_swap = 0;
     }

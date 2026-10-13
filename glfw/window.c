@@ -360,6 +360,7 @@ glfwWindowHint(int hint, int value) {
         case GLFW_CONTEXT_RELEASE_BEHAVIOR: _glfw.hints.context.release = value; return;
         case GLFW_REFRESH_RATE: _glfw.hints.refreshRate = value; return;
         case GLFW_WAYLAND_BGCOLOR: _glfw.hints.window.wl.bgcolor = value; return;
+        case GLFW_WAYLAND_HDR: _glfw.hints.window.wl.hdr = value ? true : false; return;
     }
     _glfwInputError(GLFW_INVALID_ENUM, "Invalid window hint 0x%08X", hint);
 }
@@ -858,6 +859,15 @@ glfwSetWindowHDRActive(GLFWwindow *handle, bool active) {
 
     _GLFW_REQUIRE_INIT();
     _glfwPlatformSetWindowHDRActive(window, active);
+}
+
+GLFWAPI float
+glfwSetWindowHDRRange(GLFWwindow *handle, float peak) {
+    _GLFWwindow *window = (_GLFWwindow *)handle;
+    assert(window != NULL);
+
+    _GLFW_REQUIRE_INIT_OR_RETURN(1.f);
+    return _glfwPlatformSetWindowHDRRange(window, peak);
 }
 
 GLFWAPI bool

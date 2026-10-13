@@ -2528,6 +2528,25 @@ draw_resizing_text(OSWindow *w) {
 }
 
 void
+scale_output_to_hdr_white_level(const OSWindow *w) {
+    // Everything is drawn with SDR white at 1.0. On a system that wants it elsewhere in the framebuffer of an HDR
+    // window, see glfwSetWindowHDRRange(), the finished frame is scaled just before it is presented, by
+    // multiplying what is in the framebuffer with the color of a quad that covers it
+    if (!w->linear_output || !(w->hdr_white_level > 0.f) || w->hdr_white_level == 1.f) return;
+    set_framebuffer_to_use_for_output(0);
+    bind_framebuffer_for_output(0);
+    disable_scissor();
+    if (shader_globals_vao_idx != -1) bind_vertex_array(shader_globals_vao_idx);
+    bind_program(TINT_PROGRAM);
+    glUniform4f(program_uniform_location(TINT_PROGRAM, "tint_color"), w->hdr_white_level, w->hdr_white_level, w->hdr_white_level, 1.f);
+    glUniform4f(program_uniform_location(TINT_PROGRAM, "edges"), -1, 1, 1, -1);
+    glEnable(GL_BLEND);
+    glBlendFuncSeparate(GL_ZERO, GL_SRC_COLOR, GL_ZERO, GL_ONE);
+    glDrawArrays(GL_TRIANGLE_FAN, 0, 4);
+    glBlendFunc(GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
+}
+
+void
 blank_os_window(OSWindow *osw) {
     color_type color = OPT(background);
     if (osw->num_tabs > 0) {

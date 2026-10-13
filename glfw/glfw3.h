@@ -1283,6 +1283,13 @@ typedef enum {
 #define GLFW_WAYLAND_APP_ID 0x00025001
 #define GLFW_WAYLAND_BGCOLOR 0x00025002
 #define GLFW_WAYLAND_WINDOW_TAG 0x00025003
+/*! @brief Wayland specific
+ *  [window hint](@ref GLFW_WAYLAND_HDR_hint). Use a floating point framebuffer
+ *  holding linear values, with 1.0 being SDR white, when the EGL driver has
+ *  one and the compositor can be told what it holds. Values above 1.0 are
+ *  then displayed brighter than SDR white, see glfwSetWindowHDRRange.
+ */
+#define GLFW_WAYLAND_HDR 0x00025004
 /*! @} */
 
 #define GLFW_NO_API 0
@@ -4343,7 +4350,10 @@ GLFWAPI void glfwSetWindowAttrib(GLFWwindow *window, int attrib, int value);
 GLFWAPI int glfwSetWindowBlur(GLFWwindow *window, int value);
 
 /*! @brief The brightness the display can show, as a multiple of SDR white.
- *  1.0 means no HDR headroom. The value changes with display brightness, the
+ *  1.0 means no HDR headroom, which is also the answer for a window that was
+ *  not created with the GLFW_COCOA_HDR or GLFW_WAYLAND_HDR hint or could not
+ *  be given a floating point framebuffer. The value changes with display
+ *  brightness and when the display is switched into or out of HDR, the
  *  refresh callback is called when it might have.
  */
 GLFWAPI float glfwGetWindowHDRHeadroom(GLFWwindow *window);
@@ -4352,6 +4362,30 @@ GLFWAPI float glfwGetWindowHDRHeadroom(GLFWwindow *window);
  *  effective when the window was created with the GLFW_COCOA_HDR hint.
  */
 GLFWAPI void glfwSetWindowHDRActive(GLFWwindow *window, bool active);
+
+/*! @brief Says how bright the contents of an HDR window get.
+ *
+ *  Called before a frame is drawn, with the brightest value that frame and
+ *  the ones after it hold, as a multiple of SDR white: 1.0 when nothing is
+ *  brighter than SDR white.
+ *
+ *  On macOS the framebuffer of an HDR window always has SDR white at 1.0.
+ *  A Wayland compositor is told the range the framebuffer covers, and 1.0 in
+ *  the framebuffer is the top of that range, so SDR white is at a lower value
+ *  whenever the range reaches above it. The frame has to be drawn with SDR
+ *  white at the value this returns, and is shown that way when it is
+ *  presented.
+ *
+ *  @param[in] window The window about to be drawn.
+ *  @param[in] peak The brightest value drawn, as a multiple of SDR white.
+ *  @return The value SDR white has in the framebuffer, 1.0 for a window that
+ *  is not HDR.
+ *
+ *  @thread_safety This function must only be called from the main thread.
+ *
+ *  @ingroup window
+ */
+GLFWAPI float glfwSetWindowHDRRange(GLFWwindow *window, float peak);
 
 /*! @brief Retrieves what the display a window is on can show.
  *
