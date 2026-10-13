@@ -98,8 +98,10 @@ A report is a single frame per event::
 ``kind``         ``1`` pinch, ``2`` rotate, ``3`` swipe, ``4`` smart zoom,
                  ``5`` hold
 ``phase``        ``1`` begin, ``2`` update, ``3`` end, ``4`` cancel
-``x``, ``y``     Position of the pointer in 1/256 pixel, signed, zero based,
-                 relative to the top left of the cell area, within ±1073741823
+``x``, ``y``     Position of the pointer in 1/256 of a physical pixel, signed,
+                 zero based, relative to the top left of the cell area, within
+                 ±1073741823. A physical pixel is one of the framebuffer the
+                 terminal draws into, not a scaled unit of the window system
 ``mods``         Shift ``1``, Alt ``2``, Control ``4``, Super ``8``
 ================ ==================================================================
 
