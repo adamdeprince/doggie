@@ -133,9 +133,8 @@ typedef struct {
     ref_map refs_by_internal_id;
     float peak; // of HDR images, see docs/hdr-protocol.rst
     bool tone_map;
-    VectorDoc *vector;  // f=200 images are rasterized on demand at the size they are shown at
+    VectorDoc *vector;  // f=200 images are rasterized on demand at the size they are shown at, the document tracks what changed
     uint32_t vector_tex_width, vector_tex_height;
-    bool vector_dirty;
 } Image;
 
 typedef struct {

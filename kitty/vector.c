@@ -59,6 +59,50 @@ apply(Mat m, double x, double y, double *ox, double *oy) {
     *oy = m.b * x + m.d * y + m.f;
 }
 
+// A box with its sides along the axes, empty when x1 < x0
+typedef struct {
+    double x0, y0, x1, y1;
+} Box;
+static const Box empty_box = {INFINITY, INFINITY, -INFINITY, -INFINITY};
+static const Box everything = {-INFINITY, -INFINITY, INFINITY, INFINITY};
+
+static inline bool
+box_is_empty(Box b) {
+    return !(b.x0 <= b.x1 && b.y0 <= b.y1);
+}
+
+static inline void
+box_add(Box *b, double x, double y) {
+    b->x0 = fmin(b->x0, x), b->y0 = fmin(b->y0, y), b->x1 = fmax(b->x1, x), b->y1 = fmax(b->y1, y);
+}
+
+static inline void
+box_union(Box *b, Box o) {
+    if (box_is_empty(o)) return;
+    box_add(b, o.x0, o.y0);
+    box_add(b, o.x1, o.y1);
+}
+
+static inline Box
+box_grow(Box b, double by) {
+    return box_is_empty(b) ? b : (Box){b.x0 - by, b.y0 - by, b.x1 + by, b.y1 + by};
+}
+
+// The box around b after the transform, everything when that cannot be worked out
+static Box
+box_transform(Box b, Mat m) {
+    if (box_is_empty(b)) return b;
+    Box ans = empty_box;
+    const double xs[2] = {b.x0, b.x1}, ys[2] = {b.y0, b.y1};
+    for (int i = 0; i < 4; i++) {
+        double x, y;
+        apply(m, xs[i & 1], ys[i >> 1], &x, &y);
+        if (!isfinite(x) || !isfinite(y)) return everything;
+        box_add(&ans, x, y);
+    }
+    return ans;
+}
+
 enum { PC_MOVE, PC_LINE, PC_QUAD, PC_CUBIC, PC_CLOSE };
 typedef struct {
     uint8_t op;
@@ -250,6 +294,35 @@ add_polygon(EdgeList *el, const double *pts, size_t n, Mat m, bool orient) {
 
 typedef void (*span_fn)(void *ctx, int y, int x0, int x1, const float *cov);
 
+// Pixels of the image, x1 and y1 exclusive
+typedef struct {
+    int x0, y0, x1, y1;
+} Rect;
+
+static inline size_t
+rect_size(Rect r) {
+    return (size_t)(r.x1 - r.x0) * (size_t)(r.y1 - r.y0);
+}
+
+static inline size_t
+rect_index(Rect r, int x, int y) {
+    return (size_t)(y - r.y0) * (size_t)(r.x1 - r.x0) + (size_t)(x - r.x0);
+}
+
+// Whether a closed polygon stays clear of the pixels of clip. Such a polygon
+// winds around none of them, so leaving it out changes nothing there.
+static bool
+polygon_misses(const double *pts, size_t n, Mat m, Rect clip) {
+    double x0 = INFINITY, y0 = INFINITY, x1 = -INFINITY, y1 = -INFINITY;
+    for (size_t i = 0; i < n; i++) {
+        double x, y;
+        apply(m, pts[2 * i], pts[2 * i + 1], &x, &y);
+        if (!isfinite(x) || !isfinite(y)) return false;
+        x0 = fmin(x0, x), y0 = fmin(y0, y), x1 = fmax(x1, x), y1 = fmax(y1, y);
+    }
+    return x1 < clip.x0 - 1 || x0 > clip.x1 + 1 || y1 < clip.y0 - 1 || y0 > clip.y1 + 1;
+}
+
 typedef struct {
     double x;
     int dir;
@@ -261,29 +334,31 @@ cmp_edge_y(const void *a, const void *b) {
     return x->y0 < y->y0 ? -1 : x->y0 > y->y0;
 }
 
+#define COVERAGE_ONE 4096  // a whole pixel on one subsample line
+
+// Coverage is summed in whole numbers, so a span adds exactly nothing to the
+// pixels past its end and the coverage of a pixel depends on the geometry over
+// that pixel alone. That is what lets a part of an image be drawn again and
+// come out the same as when all of it is drawn.
 static inline void
-add_span(float *acc, double xa, double xb, double limit) {
-    if (xa < 0) xa = 0;
-    if (xb > limit) xb = limit;
-    if (xb <= xa) return;
-    const float w = 1.f / SUBSAMPLES;
-    int ia = (int)xa, ib = (int)xb;
-    if (ia == ib) {
-        acc[ia] += (float)(xb - xa) * w;
-        acc[ia + 1] -= (float)(xb - xa) * w;
-    } else {
-        acc[ia] += (float)(ia + 1 - xa) * w;
-        acc[ia + 1] += (float)(xa - ia) * w;
-        acc[ib] += (float)(xb - ib - 1) * w;
-        acc[ib + 1] -= (float)(xb - ib) * w;
-    }
+add_span(int32_t *acc, double xa, double xb, double limit) {
+    if (!(xa >= 0)) xa = 0;
+    if (!(xb <= limit)) xb = limit;
+    if (!(xb > xa)) return;
+    const int ia = (int)xa, ib = (int)xb;
+    const int32_t fa = (int32_t)((xa - ia) * COVERAGE_ONE + 0.5), fb = (int32_t)((xb - ib) * COVERAGE_ONE + 0.5);
+    acc[ia] += COVERAGE_ONE - fa;
+    acc[ia + 1] += fa;
+    acc[ib] += fb - COVERAGE_ONE;
+    acc[ib + 1] -= fb;
 }
 
-// Scanline rasterization with exact horizontal and SUBSAMPLES-fold vertical
-// coverage, calling fn once per row with the coverage of the covered pixels.
+// Scanline rasterization of the pixels in clip, with horizontal coverage to
+// one part in COVERAGE_ONE and SUBSAMPLES-fold vertical coverage, calling fn
+// once per row with the coverage of the covered pixels.
 static bool
-rasterize(EdgeList *el, bool evenodd, int W, int H, span_fn fn, void *ctx) {
-    if (!el->count || W <= 0 || H <= 0) return true;
+rasterize(EdgeList *el, bool evenodd, Rect clip, span_fn fn, void *ctx) {
+    if (!el->count || clip.x1 <= clip.x0 || clip.y1 <= clip.y0) return true;
     double minx = INFINITY, maxx = -INFINITY, miny = INFINITY, maxy = -INFINITY;
     for (size_t i = 0; i < el->count; i++) {
         const Edge *e = el->item + i;
@@ -292,11 +367,13 @@ rasterize(EdgeList *el, bool evenodd, int W, int H, span_fn fn, void *ctx) {
         miny = fmin(miny, e->y0);
         maxy = fmax(maxy, e->y1);
     }
-    int bx0 = (int)fmax(0, floor(minx)), bx1 = (int)fmin(W - 1, ceil(maxx));
-    int by0 = (int)fmax(0, floor(miny)), by1 = (int)fmin(H - 1, ceil(maxy));
-    if (bx1 < bx0 || by1 < by0) return true;
+    // compared before they are converted, the edges can be anywhere
+    const double fx0 = fmax(clip.x0, floor(minx)), fx1 = fmin(clip.x1 - 1, ceil(maxx)), fy0 = fmax(clip.y0, floor(miny)), fy1 = fmin(clip.y1 - 1, ceil(maxy));
+    if (!(fx0 <= fx1 && fy0 <= fy1)) return true;
+    const int bx0 = (int)fx0, bx1 = (int)fx1, by0 = (int)fy0, by1 = (int)fy1;
     const int bw = bx1 - bx0 + 1;
-    float *acc = calloc(bw + 2, sizeof(float)), *cov = malloc(bw * sizeof(float));
+    int32_t *acc = calloc(bw + 2, sizeof(int32_t));
+    float *cov = malloc(bw * sizeof(float));
     Edge **active = malloc(el->count * sizeof(Edge *));
     Crossing *xs = malloc(el->count * sizeof(Crossing));
     bool ok = acc && cov && active && xs;
@@ -315,6 +392,7 @@ rasterize(EdgeList *el, bool evenodd, int W, int H, span_fn fn, void *ctx) {
                         active[i] = active[--nactive];
                         continue;
                     }
+                    // taking a whole number of pixels off a crossing at or right of bx0 loses nothing of where in its pixel it is
                     xs[nx++] = (Crossing){e->x0 + (sy - e->y0) * e->slope - bx0, e->dir};
                     i++;
                 }
@@ -342,18 +420,19 @@ rasterize(EdgeList *el, bool evenodd, int W, int H, span_fn fn, void *ctx) {
                 }
             }
             if (!any) continue;
-            float run = 0;
+            int32_t run = 0;
             int first = -1, last = -1;
             for (int i = 0; i < bw; i++) {
                 run += acc[i];
-                float c = run < 0 ? 0 : (run > 1 ? 1 : run);
+                float c = (float)run * (1.f / (SUBSAMPLES * COVERAGE_ONE));
+                c = c < 0 ? 0 : (c > 1 ? 1 : c);
                 if (c > 0.0005f) {
                     if (first < 0) first = i;
                     last = i;
                 }
                 cov[i] = c;
             }
-            memset(acc, 0, (bw + 2) * sizeof(float));
+            memset(acc, 0, (bw + 2) * sizeof(int32_t));
             if (first >= 0) fn(ctx, y, bx0 + first, bx0 + last + 1, cov + first);
         }
     }
@@ -371,16 +450,20 @@ rasterize(EdgeList *el, bool evenodd, int W, int H, span_fn fn, void *ctx) {
 typedef struct {
     EdgeList *edges;
     Mat m;
+    Rect clip;  // the pixels being drawn, pieces that stay clear of them are left out
 } StrokeOut;
 
 static bool
 emit(StrokeOut *o, const double *pts, size_t n) {
+    if (polygon_misses(pts, n, o->m, o->clip)) return true;
     return add_polygon(o->edges, pts, n, o->m, true);
 }
 
 static bool
 emit_circle(StrokeOut *o, double cx, double cy, double r, double tol) {
     if (r <= 0) return true;
+    const double box[8] = {cx - r, cy - r, cx + r, cy - r, cx + r, cy + r, cx - r, cy + r};
+    if (polygon_misses(box, 4, o->m, o->clip)) return true;
     unsigned n = r > tol ? (unsigned)ceil(M_PI / acos(1 - tol / r)) : 6;
     if (n < 6) n = 6;
     if (n > 256) n = 256;
@@ -551,6 +634,12 @@ typedef struct {
 } Stop;
 enum { BLEND_NORMAL, BLEND_MULTIPLY, BLEND_SCREEN };
 
+// Where flatten_path() is after some of the commands of a path
+typedef struct {
+    bool open;
+    double cx, cy, sx, sy;
+} PathCursor;
+
 typedef struct {
     uint32_t id, parent, ref;  // ref: clip path of a group, symbol of a use, image of an image
     char type;
@@ -568,6 +657,11 @@ typedef struct {
     Stop *stops;
     unsigned nstops;
     size_t slot, bytes;
+    // The box of the geometry in the element's own coordinate system, worked
+    // out when first asked for and kept up as geometry is appended
+    Box box;
+    bool has_box;
+    PathCursor cursor;  // where the path has got to
 } Elem;
 
 #define NAME elem_map
@@ -582,6 +676,14 @@ struct VectorDoc {
     size_t count, capacity, live;
     size_t used_bytes;
     Elem root;
+    Elem **sorted;  // the elements that are drawn, by parent then slot, rebuilt when an element comes or goes
+    size_t nsorted;
+    bool is_sorted;
+    unsigned clip_groups;  // the groups other than the root that have a clip path
+    // What changed since the damage was last cleared: everything, or the
+    // part of the image inside the box, which is in the image's user units
+    bool damage_all;
+    Box damage;
 };
 
 static void
@@ -619,6 +721,8 @@ vector_doc_new(unsigned width, unsigned height) {
     d->root.visible = true;
     d->root.opacity = 100;
     d->root.type = 'g';
+    d->damage_all = true;  // nothing of it has been drawn yet
+    d->damage = empty_box;
     return d;
 }
 
@@ -627,6 +731,7 @@ vector_doc_free(VectorDoc *d) {
     if (!d) return;
     for (size_t i = 0; i < d->count; i++) elem_free(d->order[i]);
     free(d->order);
+    free(d->sorted);
     vt_cleanup(&d->by_id);
     free(d);
 }
@@ -647,12 +752,19 @@ lookup(const VectorDoc *d, uint32_t id) {
     return vt_is_end(i) ? NULL : i.data->val;
 }
 
+static inline bool
+is_clip_group(const Elem *e) {
+    return e->type == 'g' && e->ref;
+}
+
 static void
 remove_elem(VectorDoc *d, Elem *e) {
     vt_erase(&d->by_id, e->id);
     d->order[e->slot] = NULL;
     d->used_bytes -= e->bytes;
     d->live--;
+    d->is_sorted = false;
+    if (is_clip_group(e)) d->clip_groups--;
     elem_free(e);
 }
 
@@ -672,11 +784,13 @@ compact(VectorDoc *d) {
 static bool
 insert_elem(VectorDoc *d, Elem *e) {
     Elem *old = lookup(d, e->id);
+    d->is_sorted = false;
     if (old) {
         e->slot = old->slot;
         d->order[e->slot] = e;
         vt_erase(&d->by_id, old->id);
         d->used_bytes -= old->bytes;
+        if (is_clip_group(old)) d->clip_groups--;
         elem_free(old);
         d->live--;
     } else {
@@ -694,6 +808,7 @@ insert_elem(VectorDoc *d, Elem *e) {
     if (vt_is_end(vt_insert(&d->by_id, e->id, e))) return false;
     d->used_bytes += e->bytes;
     d->live++;
+    if (is_clip_group(e)) d->clip_groups++;
     return true;
 }
 
@@ -721,6 +836,173 @@ delete_group(VectorDoc *d, uint32_t gid) {
         Elem *e = d->order[i];
         if (e && e->in_progress) remove_elem(d, e);
     }
+}
+
+// }}}
+
+// Extent and damage {{{
+
+// Adds to box every point flatten_path() makes of the commands from the given
+// one on. A curve stays inside its control points, so they stand for it.
+static void
+path_box(const Path *path, size_t from, PathCursor *pc, Box *box) {
+    for (size_t i = from; i < path->count; i++) {
+        const PathCmd *c = path->item + i;
+        unsigned n = 0;
+        switch (c->op) {
+            case PC_MOVE:
+                box_add(box, c->p[0], c->p[1]);
+                pc->cx = pc->sx = c->p[0];
+                pc->cy = pc->sy = c->p[1];
+                pc->open = true;
+                continue;
+            case PC_CLOSE:
+                if (!pc->open) continue;
+                box_add(box, pc->sx, pc->sy);  // the closing segment runs to the start of the subpath
+                pc->cx = pc->sx;
+                pc->cy = pc->sy;
+                pc->open = false;
+                continue;
+            case PC_LINE: n = 1; break;
+            case PC_QUAD: n = 2; break;
+            case PC_CUBIC: n = 3; break;
+            default: continue;
+        }
+        if (!pc->open) {  // a subpath that starts where the last one left off
+            box_add(box, pc->cx, pc->cy);
+            pc->open = true;
+        }
+        for (unsigned k = 0; k < n; k++) box_add(box, c->p[2 * k], c->p[2 * k + 1]);
+        pc->cx = c->p[2 * n - 2];
+        pc->cy = c->p[2 * n - 1];
+    }
+}
+
+static inline void
+pen_box(const Elem *e, size_t from, Box *box) {
+    for (size_t i = from; i < e->npts; i++) {
+        const double x = e->pts[3 * i], y = e->pts[3 * i + 1], r = fabs(e->pts[3 * i + 2]) / 2;
+        box_add(box, x - r, y - r);
+        box_add(box, x + r, y + r);
+    }
+}
+
+// The box of the geometry of an element, in its own coordinate system and
+// without the width of a stroke along a path
+static Box
+elem_box(Elem *e) {
+    if (!e->has_box) {
+        e->box = empty_box;
+        e->cursor = (PathCursor){0};
+        path_box(&e->path, 0, &e->cursor, &e->box);
+        pen_box(e, 0, &e->box);
+        e->has_box = true;
+    }
+    return e->box;
+}
+
+// How far the stroke of a path drawn with this style reaches from the path
+static double
+stroke_reach(const Elem *style) {
+    if (style->stroke.type == PAINT_NONE || !(style->width > 0)) return 0;
+    double k = 1;
+    if (style->join == JOIN_MITER) k = fmax(k, style->miter_limit);
+    if (style->cap == CAP_SQUARE) k = fmax(k, 1.4143);  // the corner of a square cap
+    return style->width / 2 * k;
+}
+
+// The transform from the coordinate system of e to that of the image. Returns
+// 0 when e hangs off something that is not a group, so that it is not drawn,
+// and -1 when the groups nest too deep to follow.
+static int
+elem_matrix(const VectorDoc *d, const Elem *e, Mat *out) {
+    Mat m = e->has_t ? e->t : identity;
+    uint32_t p = e->parent;
+    for (unsigned depth = 0; p; depth++) {
+        if (depth > MAX_DEPTH) return -1;
+        const Elem *g = lookup(d, p);
+        if (!g || g->type != 'g') return 0;
+        if (g->has_t) m = mat_mul(g->t, m);
+        p = g->parent;
+    }
+    *out = d->root.has_t ? mat_mul(d->root.t, m) : m;
+    return 1;
+}
+
+static bool
+is_clip_path(const VectorDoc *d, uint32_t id) {
+    if (d->root.ref == id) return true;
+    if (!d->clip_groups) return false;
+    for (size_t i = 0; i < d->count; i++) {
+        const Elem *e = d->order[i];
+        if (e && is_clip_group(e) && e->ref == id) return true;
+    }
+    return false;
+}
+
+// Damages the part of the image under box, which is in the coordinate system of e
+static void
+damage_under(VectorDoc *d, const Elem *e, Box box) {
+    if (d->damage_all || box_is_empty(box)) return;
+    Mat m;
+    switch (elem_matrix(d, e, &m)) {
+        case 0: return;
+        case 1: break;
+        default:
+            d->damage_all = true;
+            return;
+    }
+    box = box_transform(box, m);
+    if (!isfinite(box.x0) || !isfinite(box.y0) || !isfinite(box.x1) || !isfinite(box.y1)) d->damage_all = true;
+    else box_union(&d->damage, box);
+}
+
+// Damages everything e draws, when that can be bounded, and the whole image
+// when it cannot: an element that others refer to, a group, a raster image.
+static void
+damage_elem(VectorDoc *d, Elem *e) {
+    if (d->damage_all) return;
+    Box box;
+    switch (e->type) {
+        case 'p':
+            if (is_clip_path(d, e->id)) goto all;
+            box = box_grow(elem_box(e), stroke_reach(e));
+            break;
+        case 'k': box = elem_box(e); break;
+        case 'u': {
+            Elem *sym = lookup(d, e->ref);
+            if (!sym || sym->type != 's') return;  // draws nothing
+            box = box_grow(elem_box(sym), stroke_reach(e));
+        } break;
+        default: goto all;
+    }
+    damage_under(d, e, box);
+    return;
+all:
+    d->damage_all = true;
+}
+
+// Damages what appending geometry to e changed, given how much geometry it
+// had and where its path was before
+static void
+damage_appended(VectorDoc *d, Elem *e, size_t ncmds, size_t npts, PathCursor before) {
+    Box added = empty_box;
+    if (e->type == 'k') {
+        // the last of the old points too: the piece to the first new point starts
+        // there, and it may no longer be drawn as the end of the stroke
+        pen_box(e, npts ? npts - 1 : 0, &added);
+        box_union(&e->box, added);
+        damage_under(d, e, added);
+        return;
+    }
+    // the new pieces run on from where the path was, which is where the old
+    // end cap sat and where the join to the first of them now is
+    if (ncmds) box_add(&added, before.cx, before.cy);
+    path_box(&e->path, ncmds, &e->cursor, &added);
+    box_union(&e->box, added);
+    // a fill is closed across the ends of its subpaths, so more of it changes than was added
+    if (e->type == 'p' && e->fill.type == PAINT_NONE && !is_clip_path(d, e->id)) damage_under(d, e, box_grow(added, stroke_reach(e)));
+    else damage_elem(d, e);
 }
 
 // }}}
@@ -1214,17 +1496,32 @@ vector_doc_apply(VectorDoc *d, const uint8_t *text, size_t sz) {
                         d->root.opacity = 100;
                         d->root.blend = BLEND_NORMAL;
                         d->root.visible = true;
-                    } else if (r->delete_group) delete_group(d, r->id);
-                    else {
+                        d->damage_all = true;
+                    } else if (r->delete_group) {
+                        delete_group(d, r->id);
+                        d->damage_all = true;
+                    } else {
                         Elem *e = lookup(d, r->id);
-                        if (e) remove_elem(d, e);
+                        if (e) {
+                            damage_elem(d, e);
+                            remove_elem(d, e);
+                        }
                     }
                     break;
                 case 'a': {
                     Elem *e = lookup(d, r->id);
-                    if (e && !append_geometry(d, e, r->elem)) err = "Append to an element of another kind";
+                    if (!e) break;
+                    elem_box(e);  // leaves the cursor at the end of the path there is
+                    const PathCursor before = e->cursor;
+                    const size_t ncmds = e->path.count, npts = e->npts;
+                    if (append_geometry(d, e, r->elem)) damage_appended(d, e, ncmds, npts, before);
+                    else {
+                        e->has_box = false;  // some of it may have been appended
+                        err = "Append to an element of another kind";
+                    }
                 } break;
                 case 'g':
+                    d->damage_all = true;  // a group changes everything under it
                     if (!r->elem->id) {  // the root group
                         d->root.t = r->elem->t;
                         d->root.has_t = r->elem->has_t;
@@ -1235,13 +1532,19 @@ vector_doc_apply(VectorDoc *d, const uint8_t *text, size_t sz) {
                         break;
                     }
                     /* fallthrough */
-                default:
-                    if (!insert_elem(d, r->elem)) err = "Too many elements";
-                    else r->elem = NULL;  // now owned by the document
-                    break;
+                default: {
+                    Elem *old = lookup(d, r->id), *e = r->elem;
+                    if (old) damage_elem(d, old);
+                    if (!insert_elem(d, e)) err = "Too many elements";
+                    else {
+                        r->elem = NULL;  // now owned by the document
+                        damage_elem(d, e);
+                    }
+                } break;
             }
             if (err) break;
         }
+        if (err) d->damage_all = true;  // the records before the bad one were applied
         compact(d);
     }
     for (size_t i = 0; i < nrecs; i++) elem_free(recs[i].elem);
@@ -1255,14 +1558,14 @@ vector_doc_apply(VectorDoc *d, const uint8_t *text, size_t sz) {
 
 typedef struct {
     uint8_t *px;  // premultiplied RGBA
-    int W, H;
+    Rect r;       // the pixels of the image it holds
 } Canvas;
 
 enum { FILL_SOLID, FILL_LINEAR, FILL_RADIAL, FILL_IMAGE };
 
 typedef struct {
     Canvas *canvas;
-    const uint8_t *clip;  // W*H coverage mask or NULL
+    const uint8_t *clip;  // coverage mask the size of the canvas or NULL
     int type;
     uint8_t blend;
     float r, g, b, a;  // premultiplied solid color
@@ -1276,7 +1579,7 @@ typedef struct {
     VectorDoc *doc;
     Elem **sorted;  // live elements sorted by parent then slot
     size_t nsorted;
-    int W, H;
+    Rect area;  // the pixels being drawn
     vector_image_lookup lookup;
     void *lookup_ctx;
     bool failed;
@@ -1389,8 +1692,9 @@ static void
 composite_span(void *ctx, int y, int x0, int x1, const float *cov) {
     const Fill *f = ctx;
     Canvas *c = f->canvas;
-    uint8_t *row = c->px + ((size_t)y * c->W + x0) * 4;
-    const uint8_t *clip = f->clip ? f->clip + (size_t)y * c->W + x0 : NULL;
+    const size_t at = rect_index(c->r, x0, y);
+    uint8_t *row = c->px + at * 4;
+    const uint8_t *clip = f->clip ? f->clip + at : NULL;
     for (int x = x0; x < x1; x++, row += 4) {
         float cv = cov[x - x0];
         if (clip) cv *= clip[x - x0] / 255.f;
@@ -1405,15 +1709,16 @@ composite_span(void *ctx, int y, int x0, int x1, const float *cov) {
 typedef struct {
     uint8_t *mask;
     const uint8_t *outer;
-    int W;
+    Rect r;
 } MaskCtx;
 
 static void
 mask_span(void *ctx, int y, int x0, int x1, const float *cov) {
     const MaskCtx *m = ctx;
-    uint8_t *row = m->mask + (size_t)y * m->W;
-    const uint8_t *outer = m->outer ? m->outer + (size_t)y * m->W : NULL;
-    for (int x = x0; x < x1; x++) row[x] = (uint8_t)(cov[x - x0] * (outer ? outer[x] : 255) + 0.5f);
+    const size_t at = rect_index(m->r, x0, y);
+    uint8_t *row = m->mask + at;
+    const uint8_t *outer = m->outer ? m->outer + at : NULL;
+    for (int i = 0; i < x1 - x0; i++) row[i] = (uint8_t)(cov[i] * (outer ? outer[i] : 255) + 0.5f);
 }
 
 typedef struct {
@@ -1444,12 +1749,32 @@ setup_fill(Render *r, Fill *f, const Target *t, const Paint *p, Mat m, float opa
 
 static void
 fill_edges(Render *r, EdgeList *el, bool evenodd, Fill *f) {
-    if (!rasterize(el, evenodd, r->W, r->H, composite_span, f)) r->failed = true;
+    if (!rasterize(el, evenodd, r->area, composite_span, f)) r->failed = true;
+}
+
+// Whether what lies inside box, in the coordinate system m maps to pixels,
+// stays clear of the pixels being drawn
+static bool
+outside(const Render *r, Box box, Mat m) {
+    if (box_is_empty(box)) return true;
+    box = box_transform(box, m);
+    return box.x1 < r->area.x0 - 1 || box.x0 > r->area.x1 + 1 || box.y1 < r->area.y0 - 1 || box.y0 > r->area.y1 + 1;
+}
+
+// The edges of the subpaths that reach the pixels being drawn
+static bool
+add_polys(const Render *r, const PolyList *polys, EdgeList *el) {
+    for (size_t i = 0; i < polys->count; i++) {
+        const Poly *p = polys->item + i;
+        if (polygon_misses(p->pts, p->count / 2, identity, r->area)) continue;
+        if (!add_polygon(el, p->pts, p->count / 2, identity, false)) return false;
+    }
+    return true;
 }
 
 static bool
-stroke_polys(PolyList *polys, const Elem *style, double hw, Mat m, double tol, EdgeList *el) {
-    StrokeOut out = {el, m};
+stroke_polys(PolyList *polys, const Elem *style, double hw, Mat m, Rect clip, double tol, EdgeList *el) {
+    StrokeOut out = {el, m, clip};
     for (size_t i = 0; i < polys->count; i++) {
         PolyList pieces = {0};
         bool ok = dash_polyline(polys->item + i, style->dash, style->ndash, style->dash_phase, &pieces);
@@ -1468,8 +1793,7 @@ draw_path(Render *r, const Elem *e, const Path *path, Mat m, const Target *t) {
         PolyList polys = {0};
         EdgeList el = {0};
         Fill f;
-        bool ok = flatten_path(path, m, TOLERANCE, &polys);
-        for (size_t i = 0; ok && i < polys.count; i++) ok = add_polygon(&el, polys.item[i].pts, polys.item[i].count / 2, identity, false);
+        bool ok = flatten_path(path, m, TOLERANCE, &polys) && add_polys(r, &polys, &el);
         if (ok && setup_fill(r, &f, t, &e->fill, m, 1)) fill_edges(r, &el, e->rule == 1, &f);
         if (!ok) r->failed = true;
         polylist_free(&polys);
@@ -1480,7 +1804,7 @@ draw_path(Render *r, const Elem *e, const Path *path, Mat m, const Target *t) {
         EdgeList el = {0};
         Fill f;
         double tol = TOLERANCE / mat_scale(m);
-        bool ok = flatten_path(path, identity, tol, &polys) && stroke_polys(&polys, e, e->width / 2, m, tol, &el);
+        bool ok = flatten_path(path, identity, tol, &polys) && stroke_polys(&polys, e, e->width / 2, m, r->area, tol, &el);
         if (ok && setup_fill(r, &f, t, &e->stroke, m, 1)) fill_edges(r, &el, false, &f);
         if (!ok) r->failed = true;
         polylist_free(&polys);
@@ -1492,7 +1816,7 @@ static void
 draw_pen(Render *r, const Elem *e, Mat m, const Target *t) {
     if (e->fill.type == PAINT_NONE || !e->npts) return;
     EdgeList el = {0};
-    StrokeOut out = {&el, m};
+    StrokeOut out = {&el, m, r->area};
     double tol = TOLERANCE / mat_scale(m);
     bool ok = true;
     const double *p = e->pts;
@@ -1518,7 +1842,10 @@ draw_pen(Render *r, const Elem *e, Mat m, const Target *t) {
 static void
 draw_image(Render *r, const Elem *e, Mat m, const Target *t) {
     VectorImageData img = {0};
-    if (!r->lookup || !r->lookup(r->lookup_ctx, e->ref, &img) || !img.data || !img.width || !img.height) {
+    // its size first, fetching the pixels costs a lot more than finding it is not in the part being drawn
+    if (!r->lookup || !r->lookup(r->lookup_ctx, e->ref, false, &img) || !img.width || !img.height) return;
+    if (outside(r, (Box){0, 0, img.width, img.height}, m)) return;
+    if (!r->lookup(r->lookup_ctx, e->ref, true, &img) || !img.data || !img.width || !img.height) {
         free(img.data);
         return;
     }
@@ -1532,17 +1859,16 @@ draw_image(Render *r, const Elem *e, Mat m, const Target *t) {
 
 static uint8_t *
 make_clip(Render *r, const Elem *path, Mat m, const uint8_t *outer) {
-    uint8_t *mask = calloc((size_t)r->W * r->H, 1);
+    uint8_t *mask = calloc(rect_size(r->area), 1);
     if (!mask) {
         r->failed = true;
         return NULL;
     }
     PolyList polys = {0};
     EdgeList el = {0};
-    bool ok = flatten_path(&path->path, mat_mul(m, path->t), TOLERANCE, &polys);
-    for (size_t i = 0; ok && i < polys.count; i++) ok = add_polygon(&el, polys.item[i].pts, polys.item[i].count / 2, identity, false);
-    MaskCtx mc = {mask, outer, r->W};
-    if (ok) ok = rasterize(&el, path->rule == 1, r->W, r->H, mask_span, &mc);
+    bool ok = flatten_path(&path->path, mat_mul(m, path->t), TOLERANCE, &polys) && add_polys(r, &polys, &el);
+    MaskCtx mc = {mask, outer, r->area};
+    if (ok) ok = rasterize(&el, path->rule == 1, r->area, mask_span, &mc);
     if (!ok) r->failed = true;
     polylist_free(&polys);
     free(el.item);
@@ -1551,7 +1877,7 @@ make_clip(Render *r, const Elem *path, Mat m, const uint8_t *outer) {
 
 static void
 composite_group(Canvas *dst, const Canvas *src, float opacity) {
-    size_t n = (size_t)dst->W * dst->H;
+    size_t n = rect_size(dst->r);
     for (size_t i = 0; i < n; i++) {
         const uint8_t *s = src->px + 4 * i;
         uint8_t *d = dst->px + 4 * i;
@@ -1585,13 +1911,19 @@ render_group(Render *r, Elem *g, Mat parent_m, Target parent, unsigned depth) {
     uint8_t *own_clip = NULL;
     if (g->ref) {
         Elem *cp = lookup(r->doc, g->ref);
-        if (cp && (cp->type == 'p' || cp->type == 's')) t.clip = own_clip = make_clip(r, cp, m, t.clip);
+        if (cp && (cp->type == 'p' || cp->type == 's')) {
+            if (outside(r, elem_box(cp), mat_mul(m, cp->t))) {  // all of the group is clipped away here
+                g->in_progress = false;
+                return;
+            }
+            t.clip = own_clip = make_clip(r, cp, m, t.clip);
+        }
     }
     if (g->blend != BLEND_NORMAL) t.blend = g->blend;
     Canvas layer = {0};
     if (g->opacity < 100) {
-        layer.W = r->W, layer.H = r->H;
-        layer.px = calloc((size_t)r->W * r->H, 4);
+        layer.r = r->area;
+        layer.px = calloc(rect_size(r->area), 4);
         if (!layer.px) r->failed = true;
         else t.canvas = &layer;
     }
@@ -1601,12 +1933,16 @@ render_group(Render *r, Elem *g, Mat parent_m, Target parent, unsigned depth) {
         Mat em = e->has_t ? mat_mul(m, e->t) : m;
         switch (e->type) {
             case 'g': render_group(r, e, m, t, depth + 1); break;
-            case 'p': draw_path(r, e, &e->path, em, &t); break;
+            case 'p':
+                if (!outside(r, box_grow(elem_box(e), stroke_reach(e)), em)) draw_path(r, e, &e->path, em, &t);
+                break;
             case 'u': {
                 Elem *sym = lookup(r->doc, e->ref);
-                if (sym && sym->type == 's') draw_path(r, e, &sym->path, em, &t);
+                if (sym && sym->type == 's' && !outside(r, box_grow(elem_box(sym), stroke_reach(e)), em)) draw_path(r, e, &sym->path, em, &t);
             } break;
-            case 'k': draw_pen(r, e, em, &t); break;
+            case 'k':
+                if (!outside(r, elem_box(e), em)) draw_pen(r, e, em, &t);
+                break;
             case 'i': draw_image(r, e, em, &t); break;
         }
     }
@@ -1625,36 +1961,76 @@ cmp_parent_slot(const void *a, const void *b) {
     return x->slot < y->slot ? -1 : x->slot > y->slot;
 }
 
-uint8_t *
-vector_doc_render(VectorDoc *d, unsigned width, unsigned height, vector_image_lookup lookup, void *ctx) {
-    if (!width || !height || !d->width || !d->height) return NULL;
-    Render r = {.doc = d, .W = width, .H = height, .lookup = lookup, .lookup_ctx = ctx};
-    Canvas canvas = {.px = calloc((size_t)width * height, 4), .W = width, .H = height};
-    r.sorted = malloc((d->live + 1) * sizeof(Elem *));
-    if (!canvas.px || !r.sorted) {
-        free(canvas.px);
-        free(r.sorted);
-        return NULL;
-    }
+// The elements that are drawn, ordered so that the children of a group are
+// together and in the order they are drawn in
+static bool
+sort_elements(VectorDoc *d) {
+    if (d->is_sorted) return true;
+    void *np = realloc(d->sorted, (d->live + 1) * sizeof(Elem *));
+    if (!np) return false;
+    d->sorted = np;
+    d->nsorted = 0;
     for (size_t i = 0; i < d->count; i++) {
         Elem *e = d->order[i];
-        if (e && e->type != 's' && e->type != 'l' && e->type != 'r') r.sorted[r.nsorted++] = e;
+        if (e && e->type != 's' && e->type != 'l' && e->type != 'r') d->sorted[d->nsorted++] = e;
     }
-    qsort(r.sorted, r.nsorted, sizeof(Elem *), cmp_parent_slot);
+    qsort(d->sorted, d->nsorted, sizeof(Elem *), cmp_parent_slot);
+    d->is_sorted = true;
+    return true;
+}
+
+uint8_t *
+vector_doc_render_rect(VectorDoc *d, unsigned width, unsigned height, VectorRect rect, vector_image_lookup lookup, void *ctx) {
+    if (!width || !height || !d->width || !d->height || !rect.width || !rect.height) return NULL;
+    if (width > INT32_MAX || height > INT32_MAX) return NULL;
+    if (rect.x >= width || rect.y >= height || rect.width > width - rect.x || rect.height > height - rect.y) return NULL;
+    if (!sort_elements(d)) return NULL;
+    const Rect area = {(int)rect.x, (int)rect.y, (int)(rect.x + rect.width), (int)(rect.y + rect.height)};
+    Render r = {.doc = d, .sorted = d->sorted, .nsorted = d->nsorted, .area = area, .lookup = lookup, .lookup_ctx = ctx};
+    Canvas canvas = {.px = calloc(rect_size(area), 4), .r = area};
+    if (!canvas.px) return NULL;
+    // The scale is that of the whole image whatever part of it is drawn, and
+    // every step from here on works out a pixel from the geometry over that
+    // pixel alone, so the part comes out as it does when all of it is drawn
     Mat m = {(double)width / d->width, 0, 0, (double)height / d->height, 0, 0};
     render_group(&r, &d->root, m, (Target){&canvas, NULL, BLEND_NORMAL}, 0);
-    free(r.sorted);
     if (r.failed) {
         free(canvas.px);
         return NULL;
     }
     // straight alpha for the GPU
-    for (size_t i = 0, n = (size_t)width * height; i < n; i++) {
+    for (size_t i = 0, n = rect_size(area); i < n; i++) {
         uint8_t *p = canvas.px + 4 * i;
         if (p[3] && p[3] != 255)
             for (int k = 0; k < 3; k++) p[k] = (uint8_t)fmin(255, (p[k] * 255 + p[3] / 2) / p[3]);
     }
     return canvas.px;
+}
+
+uint8_t *
+vector_doc_render(VectorDoc *d, unsigned width, unsigned height, vector_image_lookup lookup, void *ctx) {
+    return vector_doc_render_rect(d, width, height, (VectorRect){0, 0, width, height}, lookup, ctx);
+}
+
+bool
+vector_doc_damage(const VectorDoc *d, unsigned width, unsigned height, VectorRect *rect) {
+    *rect = (VectorRect){0, 0, width, height};
+    if (d->damage_all) return true;
+    if (box_is_empty(d->damage) || !d->width || !d->height) return false;
+    const double sx = (double)width / d->width, sy = (double)height / d->height;
+    // The pixels the box touches and one more all round, since the box and
+    // the edges inside it reach pixels by different arithmetic
+    const double x0 = fmax(0, floor(d->damage.x0 * sx) - 1), y0 = fmax(0, floor(d->damage.y0 * sy) - 1);
+    const double x1 = fmin(width, ceil(d->damage.x1 * sx) + 1), y1 = fmin(height, ceil(d->damage.y1 * sy) + 1);
+    if (!(x0 < x1 && y0 < y1)) return false;  // all of it is off the image
+    *rect = (VectorRect){(unsigned)x0, (unsigned)y0, (unsigned)(x1 - x0), (unsigned)(y1 - y0)};
+    return true;
+}
+
+void
+vector_doc_clear_damage(VectorDoc *d) {
+    d->damage_all = false;
+    d->damage = empty_box;
 }
 
 // }}}

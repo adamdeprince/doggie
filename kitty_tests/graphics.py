@@ -1961,6 +1961,207 @@ class TestGraphics(BaseTest):
         self.ae(pixel(img, 2, 2), (255, 0, 0, 255))
         self.ae(pixel(img, 7, 7), (0, 255, 0, 255))
 
+    def test_vector_image_damage(self):
+        # A patch to a vector image draws only the part of it that changed.
+        # The pixels kept up that way must be those of drawing all of it.
+        s = self.create_screen()
+        g = s.grman
+        W, H = 120, 90
+        # one image shown at its own size, one stretched by amounts that are not whole numbers
+        sizes = {1: (W, H), 2: (173, 131)}
+        pixels = {i: bytearray() for i in sizes}
+
+        def patch(records, **kw):
+            for i in sizes:
+                res = parse_full_response(send_command(s, ','.join(f'{k}={v}' for k, v in dict(kw, i=i).items()), records))
+                self.ae(res.code, 'OK', f'{res.msg}: {records}')
+
+        def update(what=''):
+            # the rectangles that were drawn again, as fractions of the image
+            ans = []
+            for i, (w, h) in sizes.items():
+                rect = g.update_vector_pixels(i, w, h, pixels[i])
+                self.assertTrue(pixels[i] == g.render_vector_image(i, w, h), f'Image {i} differs from a full render after: {what}')
+                ans.append(0 if rect is None else rect[2] * rect[3] / (w * h))
+            return ans
+
+        def edit(records, how='some'):
+            patch(records, a='e')
+            for frac in update(records):
+                if how == 'none':
+                    self.ae(frac, 0, records)
+                elif how == 'all':
+                    self.ae(frac, 1, records)
+                elif how == 'some':
+                    self.assertTrue(0 < frac < 0.5, f'{frac} of the image was drawn again after: {records}')
+
+        send_command(s, 'a=T,f=24,i=9,s=2,v=2', b'\xff\x00\x00\x00\xff\x00\x00\x00\xff\xff\xff\x00')
+        patch(
+            '\n'.join((
+                'p id=1 d=M0,0L120,0L120,90L0,90Z fill=#fffffff0',
+                'l id=2 x1=0 y1=0 x2=60 y2=0 stops=0,#ff000080,1,#0000ff',
+                'p id=3 d=M5,5L65,5L65,35L5,35Z fill=@2 stroke=#00000080 w=3',
+                'p id=4 d=M30,20L90,20L90,60L30,60Z fill=#00ff0060',
+                's id=5 d=M0,0C3,-6,9,-6,12,0C9,6,3,6,0,0Z',
+                'u id=6 s=5 t=1,0,0,1,70,70 fill=#804000',
+                'u id=7 s=5 t=0,2,-2,0,100,40 stroke=#000080 w=1.5 fill=none',
+                'i id=8 img=9 t=6,0,0,6,100,70 o=70',
+                'g id=20 t=0.8,0.3,-0.3,0.8,35,5',
+                'p id=30 d=M20,45L75,40L80,80L15,85Z',
+                'g id=31 clip=30',
+                'p id=32 g=31 d=M0,50L120,50L120,75L0,75Z fill=#ffff0090',
+                'g id=40 o=50',
+                'p id=41 g=40 d=M60,5L110,5L110,30L60,30Z fill=#ff00ff',
+                'p id=42 g=40 d=M80,15L118,15L118,45L80,45Z fill=#00ffff',
+                'g id=50 blend=multiply',
+                'p id=51 g=50 d=M2,60L40,60L40,88L2,88Z fill=#c0c0ff',
+            ))
+            + '\n',
+            a='T',
+            f=200,
+            s=W,
+            v=H,
+        )
+        self.ae(update('transmission'), [1, 1])
+        self.ae(update('nothing'), [0, 0])
+
+        # a pen stroke, a point at a time: translucent, widths that vary, doubling back over itself
+        edit('k id=100 pts=10,10,3 fill=#10203080')
+        for x, y, w in ((14, 13, 4), (19.5, 12, 2.5), (25, 18, 6), (22, 24, 1), (15, 20, 5), (12, 12, 3), (30, 30, 0), (33.25, 30.5, 2)):
+            edit(f'a id=100 pts={x},{y},{w}')
+        edit('a id=100 pts=40,31,2,44,35,3,47,40,2')
+        # with butt ends the old last point is drawn differently once it is no longer last
+        edit('k id=101 pts=60,80,6 cap=butt fill=#000000')
+        edit('a id=101 pts=70,82,6')
+        edit('a id=101 pts=78,78,4')
+
+        # stroked paths, growing by lines and curves, with every kind of join and end
+        edit('p id=110 d=M8,70 fill=none stroke=#c00000a0 w=5 join=round cap=round')
+        for d in ('L16,62', 'L24,71', 'Q30,60,36,70', 'C40,80,44,60,50,72', 'L50,72', 'L44,66'):
+            edit(f'a id=110 d={d}')
+        edit('p id=111 d=M70,10L80,12 fill=none stroke=#0060c0c0 w=3 join=miter ml=8 cap=square')
+        for d in ('L72,14', 'L84,17', 'L74,18.5', 'Q90,25,76,24'):
+            edit(f'a id=111 d={d}')
+        edit('p id=112 d=M5,40L15,42 fill=none stroke=#208020 w=2 join=bevel cap=butt dash=6,3,1,2 dp=2')
+        for d in ('L25,38', 'L27,48', 'C35,48,35,40,45,44', 'L60,44'):
+            edit(f'a id=112 d={d}')
+        # closing a subpath reaches back to its start, and a new subpath begins somewhere else
+        edit('a id=112 d=Z', how=None)
+        edit('a id=112 d=M100,5L110,8L104,12')
+        edit('a id=112 d=Z')
+        edit('a id=112 d=L112,14')
+        # a fill is closed across its ends, so all of the element is drawn again
+        edit('p id=113 d=M90,60L110,62L100,75 fill=#ff800090 stroke=#000000 w=1', how=None)
+        edit('a id=113 d=L92,80', how=None)
+        edit('a id=113 d=L85,70Z', how=None)
+
+        # replacing an element draws where it was and where it is, deleting one where it was
+        edit('k id=100 pts=50,50,4,56,58,2,62,52,5 fill=#40208080', how=None)
+        edit('p id=4 d=M32,22L92,22L92,62L32,62Z fill=#00ff0060', how=None)
+        edit('u id=6 s=5 t=1.5,0,0,1.5,60,74 fill=#804000')
+        edit('k id=110 pts=8,70,2,20,64,3', how=None)
+        edit('x id=111')
+        edit('x id=101')
+        edit('x id=77777', how='none')
+        edit('a id=77777 pts=1,1,1', how='none')
+
+        # strokes inside a group that is turned and scaled, one that is clipped, one drawn
+        # through a layer and one that multiplies
+        edit('k id=120 g=20 pts=10,10,3 fill=#000000c0')
+        for x, y, w in ((16, 14, 4), (24, 12, 2), (30, 22, 5)):
+            edit(f'a id=120 pts={x},{y},{w}')
+        edit('k id=121 g=31 pts=10,55,4 fill=#0000ffb0')
+        for x, y, w in ((22, 60, 6), (30, 52, 3), (45, 44, 5), (70, 38, 4)):
+            edit(f'a id=121 pts={x},{y},{w}', how=None)
+        edit('k id=122 g=40 pts=70,10,4 fill=#ffff00')
+        for x, y, w in ((84, 20, 6), (96, 14, 3), (104, 28, 5)):
+            edit(f'a id=122 pts={x},{y},{w}')
+        edit('p id=123 g=50 d=M10,65L20,70 fill=none stroke=#ffc0c0 w=6 cap=round join=round')
+        for d in ('L28,82', 'Q36,70,30,64'):
+            edit(f'a id=123 d={d}')
+
+        # nothing to draw for geometry off the image or for an append of nothing
+        edit('k id=130 pts=500,500,4 fill=#000000', how='none')
+        edit('a id=130 pts=520,510,4', how='none')
+        edit('a id=130 pts=-90,-80,2', how=None)
+        edit('a id=100 pts=', how=None)
+        edit('a id=112 d=', how=None)
+        # a stroke as wide as the image, and one with a miter limit that reaches right across it
+        edit('k id=131 pts=60,45,300 fill=#00000010', how='all')
+        edit('p id=132 d=M10,10L60,11L10,12 fill=none stroke=#00000020 w=4 ml=1000', how=None)
+
+        # what cannot be bounded is drawn in full: groups, what other elements
+        # refer to, raster images, the path a group is clipped by
+        edit('g id=20 t=0.8,0.3,-0.3,0.8,36,5', how='all')
+        edit('g id=0 t=1,0,0,1,1,0.5', how='all')
+        edit('g id=60', how='all')
+        edit('a id=5 d=M2,0L4,1', how='all')
+        edit('s id=61 d=M0,0L1,1', how='all')
+        edit('l id=2 x1=0 y1=0 x2=60 y2=0 stops=0,#00ff0080,1,#0000ff', how='all')
+        edit('i id=8 img=9 t=5,0,0,5,100,70', how='all')
+        edit('a id=30 d=M0,0L5,0L5,5Z', how='all')
+        edit('p id=30 d=M20,45L75,40L80,80Z', how='all')
+        edit('p id=33 d=M50,5L90,5L90,30 fill=none stroke=#000000\ng id=34 clip=33\np id=35 g=34 d=M0,0L120,0L120,90L0,90Z fill=#80808080', how='all')
+        edit('a id=33 d=L50,30', how='all')
+        edit('p id=36 d=M0,0L9,0L9,9Z fill=#ff0000\ng id=0 clip=36', how='all')
+        edit('a id=36 d=M0,0L120,0L120,90L0,90Z', how='all')
+        edit('g id=0', how='all')
+        edit('x id=6\nx id=5', how='all')
+        edit('x g=40', how='all')
+        # in the coordinates of a transformed root, and after a failed patch
+        edit('k id=140 pts=20,20,3,30,26,5 fill=#000000')
+        edit('a id=140 pts=41,22,4')
+        for i in sizes:
+            self.ae(parse_full_response(send_command(s, f'a=e,i={i}', 'k id=141 pts=5,5,3\na id=141 d=M0,0L9,9\n')).code, 'EINVAL')
+        self.ae(update('a patch that failed part way'), [1, 1])
+        edit('x all', how='all')
+        edit('k id=1 pts=5,5,4,9,9,4')
+
+        # many patches of every kind, in an order that is always the same
+        rnd = random.Random(20261013)
+
+        def coord():
+            return f'{rnd.uniform(-10, 130):.2f},{rnd.uniform(-10, 100):.2f}'
+
+        def style():
+            return (
+                f'stroke=#{rnd.randrange(1 << 32):08x} w={rnd.uniform(0.3, 9):.2f} join={rnd.choice(("miter", "round", "bevel"))}'
+                f' cap={rnd.choice(("butt", "round", "square"))}' + rnd.choice(('', f' dash={rnd.uniform(1, 9):.1f},{rnd.uniform(1, 5):.1f}'))
+            )
+
+        groups = (0, 0, 200, 201, 202)
+        edit('p id=3 d=M10,10L110,20L100,80L20,70Z\ng id=200 t=0.9,-0.2,0.2,0.9,5,8\ng id=201 clip=3\ng id=202 p=200 o=60 blend=screen', how='all')
+        for step in range(250):
+            op = rnd.choice('kkkkpppaaaaaaaaaaaaaaaaaaaaxxrf')
+            eid = 1000 + rnd.randrange(12)
+            where = f' g={rnd.choice(groups)}' if rnd.random() < 0.5 else ''
+            if op == 'k':
+                rec = f'k id={eid}{where} pts={coord()},{rnd.uniform(0, 8):.1f} fill=#{rnd.randrange(1 << 32):08x} cap={rnd.choice(("round", "butt"))}'
+            elif op == 'p':
+                rec = f'p id={eid}{where} d=M{coord()} fill=none {style()}'
+            elif op == 'f':
+                rec = f'p id={eid}{where} d=M{coord()}L{coord()}L{coord()} fill=#{rnd.randrange(1 << 32):08x} rule={rnd.choice(("nz", "eo"))} {style()}'
+            elif op == 'r':
+                rec = f'u id={eid}{where} s=5000 t=1,0,0,1,{coord()} {style()}'
+            elif op == 'x':
+                rec = f'x id={eid}'
+            else:
+                rec = rnd.choice((
+                    f'a id={eid} pts={coord()},{rnd.uniform(0, 8):.1f}',
+                    f'a id={eid} pts={coord()},{rnd.uniform(0, 8):.1f},{coord()},{rnd.uniform(0, 8):.1f}',
+                    f'a id={eid} d=L{coord()}',
+                    f'a id={eid} d=Q{coord()},{coord()}',
+                    f'a id={eid} d=C{coord()},{coord()},{coord()}L{coord()}',
+                    f'a id={eid} d=Z',
+                    f'a id={eid} d=M{coord()}L{coord()}',
+                ))
+            if step == 100:
+                rec += '\ns id=5000 d=M-4,-4L4,-4L4,4L-4,4Z'
+            for i in sizes:
+                # an append to an element of the other kind fails, and whatever came before it in the patch stays
+                send_command(s, f'a=e,i={i}', rec + '\n')
+            update(f'step {step}: {rec}')
+
     def test_graphics_quota_enforcement(self):
         s = self.create_screen()
         g = s.grman

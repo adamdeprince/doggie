@@ -1187,7 +1187,6 @@ handle_add_command(GraphicsManager *self, const GraphicsCommand *g, const uint8_
         if (is_query) vector_doc_free(doc);
         else {
             img->vector = doc;
-            img->vector_dirty = true;
             img->used_storage = vector_doc_size(doc);
             self->used_storage += img->used_storage;
         }
@@ -2059,15 +2058,16 @@ get_coalesced_frame_data(GraphicsManager *self, Image *img, const Frame *f) {
 // Vector images {{{
 
 static bool
-vector_lookup(void *ctx, uint32_t image_id, VectorImageData *out) {
+vector_lookup(void *ctx, uint32_t image_id, bool with_pixels, VectorImageData *out) {
     GraphicsManager *self = ctx;
     Image *img = img_by_client_id(self, image_id);
     if (!img || img->vector || !img->root_frame_data_loaded) return false;
+    out->width = img->width;
+    out->height = img->height;
+    if (!with_pixels) return true;
     CoalescedFrameData cfd = get_coalesced_frame_data(self, img, &img->root_frame);
     if (!cfd.buf) return false;
     out->data = cfd.buf;
-    out->width = img->width;
-    out->height = img->height;
     out->is_opaque = cfd.is_opaque;
     return true;
 }
@@ -2077,23 +2077,44 @@ render_vector_image(GraphicsManager *self, Image *img, unsigned width, unsigned 
     return vector_doc_render(img->vector, width, height, vector_lookup, self);
 }
 
+// Rasterizes what has to be drawn again of a vector image shown at width x
+// height: all of it when there are no pixels of that size to patch, otherwise
+// the part the records applied since the last time changed. Returns the pixels
+// of rect, or NULL when nothing changed or on failure.
+static uint8_t *
+render_vector_damage(GraphicsManager *self, Image *img, unsigned width, unsigned height, bool all, VectorRect *rect) {
+    *rect = (VectorRect){0, 0, width, height};
+    if (!all && !vector_doc_damage(img->vector, width, height, rect)) {
+        vector_doc_clear_damage(img->vector);  // it was all off the image
+        return NULL;
+    }
+    uint8_t *ans = vector_doc_render_rect(img->vector, width, height, *rect, vector_lookup, self);
+    if (ans) vector_doc_clear_damage(img->vector);
+    return ans;
+}
+
 #define MAX_VECTOR_PIXELS (16u * 1024u * 1024u)
 
-// Rasterizes a vector image at the size it is shown at, when that changed or the document did
+// Brings the texture of a vector image up to date, at the size the image is
+// shown at. A change of that size draws all of it, a change to the document
+// only the rectangle that change reaches.
 static void
 update_vector_texture(GraphicsManager *self, Image *img, double width, double height) {
     if (!self->window_id || width < 1 || height < 1) return;
     double scale = sqrt(MAX_VECTOR_PIXELS / (width * height));
     if (scale < 1) width *= scale, height *= scale;
     uint32_t w = (uint32_t)lround(width), h = (uint32_t)lround(height);
-    if (!img->vector_dirty && w == img->vector_tex_width && h == img->vector_tex_height) return;
-    uint8_t *data = render_vector_image(self, img, w, h);
+    const bool has_pixels = img->texture && img->texture->id && w == img->vector_tex_width && h == img->vector_tex_height;
+    VectorRect rect;
+    uint8_t *data = render_vector_damage(self, img, w, h, !has_pixels, &rect);
     if (!data) return;
-    if (img->texture) send_image_to_gpu(&img->texture->id, data, w, h, false, false, true, true, REPEAT_CLAMP);
+    if (img->texture) {
+        if (rect.width == w && rect.height == h) send_image_to_gpu(&img->texture->id, data, w, h, false, false, true, true, REPEAT_CLAMP);
+        else update_image_on_gpu(img->texture->id, data, rect.x, rect.y, rect.width, rect.height);
+    }
     free(data);
     img->vector_tex_width = w;
     img->vector_tex_height = h;
-    img->vector_dirty = false;
 }
 
 // }}}
@@ -2330,13 +2351,13 @@ handle_vector_edit_command(GraphicsManager *self, GraphicsCommand *g, Image *img
     if (!img) return NULL;
     const size_t before = vector_doc_size(img->vector);
     const char *err = vector_doc_apply(img->vector, load_data->data, load_data->data_sz);
-    if (err) ABRT("EINVAL", "%s", err);
+    // the records before one that could not be applied stay applied, so the image changed either way
     img->used_storage = vector_doc_size(img->vector);
     self->used_storage = self->used_storage - MIN(self->used_storage, before) + img->used_storage;
-    img->vector_dirty = true;
     img->atime = monotonic();
     *is_dirty = true;
     set_layers_dirty(self);
+    if (err) ABRT("EINVAL", "%s", err);
     return img;
 }
 
@@ -3324,10 +3345,67 @@ W(update_layers) {
     return ans;
 }
 
+static Image *
+vector_image_for_tests(GraphicsManager *self, unsigned long client_id) {
+    Image *img = img_by_client_id(self, client_id);
+    if (!img || !img->vector) {
+        PyErr_SetString(PyExc_KeyError, "No vector image with that id");
+        return NULL;
+    }
+    return img;
+}
+
+// For tests: a vector image rasterized from nothing at the given size
+W(render_vector_image) {
+    unsigned long id;
+    unsigned int width, height;
+    PA("kII", &id, &width, &height);
+    Image *img = vector_image_for_tests(self, id);
+    if (!img) return NULL;
+    uint8_t *data = render_vector_image(self, img, width, height);
+    if (!data) {
+        PyErr_SetString(PyExc_RuntimeError, "Failed to rasterize the vector image");
+        return NULL;
+    }
+    PyObject *ans = PyBytes_FromStringAndSize((const char *)data, (Py_ssize_t)width * height * 4);
+    free(data);
+    return ans;
+}
+
+// For tests: what update_vector_texture() does, with a bytearray standing in
+// for the texture. Returns the rectangle that was drawn again, None when
+// there was nothing to draw.
+W(update_vector_pixels) {
+    unsigned long id;
+    unsigned int width, height;
+    PyObject *pixels;
+    PA("kIIO!", &id, &width, &height, &PyByteArray_Type, &pixels);
+    Image *img = vector_image_for_tests(self, id);
+    if (!img) return NULL;
+    const Py_ssize_t sz = (Py_ssize_t)width * height * 4;
+    const bool has_pixels = PyByteArray_GET_SIZE(pixels) == sz;
+    VectorRect rect;
+    uint8_t *data = render_vector_damage(self, img, width, height, !has_pixels, &rect);
+    if (!data) Py_RETURN_NONE;
+    if (!has_pixels && PyByteArray_Resize(pixels, sz) != 0) {
+        free(data);
+        return NULL;
+    }
+    uint8_t *dest = (uint8_t *)PyByteArray_AS_STRING(pixels) + ((size_t)rect.y * width + rect.x) * 4;
+    for (unsigned y = 0; y < rect.height; y++) memcpy(dest + (size_t)y * width * 4, data + (size_t)y * rect.width * 4, (size_t)rect.width * 4);
+    free(data);
+    return Py_BuildValue("IIII", rect.x, rect.y, rect.width, rect.height);
+}
+
 #define M(x, va) {#x, (PyCFunction)py##x, va, ""}
 
 static PyMethodDef methods[] = {
-    M(image_for_client_id, METH_O), M(image_for_client_number, METH_O), M(update_layers, METH_VARARGS), {NULL} /* Sentinel */
+    M(image_for_client_id, METH_O),
+    M(image_for_client_number, METH_O),
+    M(update_layers, METH_VARARGS),
+    M(render_vector_image, METH_VARARGS),
+    M(update_vector_pixels, METH_VARARGS),
+    {NULL} /* Sentinel */
 };
 
 static PyObject *

@@ -398,6 +398,14 @@ copy_rectangle_texture_to_texture(GLuint rect_tex_id, GLuint *tex_id, GLsizei wi
     glDeleteFramebuffers(1, &fb);
 }
 
+// Replaces a rectangle of an RGBA image sent with send_image_to_gpu()
+void
+update_image_on_gpu(GLuint tex_id, const void *data, GLint x, GLint y, GLsizei width, GLsizei height) {
+    glBindTexture(GL_TEXTURE_2D, tex_id);
+    glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
+    glTexSubImage2D(GL_TEXTURE_2D, 0, x, y, width, height, GL_RGBA, GL_UNSIGNED_BYTE, data);
+}
+
 // }}}
 
 // Rounded rect {{{
