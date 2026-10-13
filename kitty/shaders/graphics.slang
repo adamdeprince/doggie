@@ -5,6 +5,7 @@
 import blit_common;
 import alpha_blend;
 import utils;
+import gamut;
 
 extern static const bool is_alpha_mask = false;
 extern static const bool texture_is_not_premultiplied = true;
@@ -27,14 +28,28 @@ uniform Sampler2D image;
 
 [shader("fragment")]
 float4
-fragment_main(float2 texcoord: TEXCOORD, uniform float3 amask_fg, uniform float4 amask_bg_premult, uniform float extra_alpha)
+fragment_main(
+    float2 texcoord: TEXCOORD,
+    uniform float3 amask_fg,
+    uniform float4 amask_bg_premult,
+    uniform float extra_alpha,
+    uniform uint image_gamut,
+    uniform uint output_gamut)
     : SV_Target {
     float4 color = image.Sample(texcoord);
     if (is_alpha_mask) {
         color = float4(amask_fg, color.r);
         color = vec4_premul(color);
         color = alpha_blend_premul(color, amask_bg_premult);
-    } else color.a *= extra_alpha;
+    } else {
+        // An image in a gamut of its own is converted to that of the window,
+        // which has to be done on colors that are not multiplied by alpha
+        if (image_gamut != GAMUT_SRGB) {
+            if (texture_is_not_premultiplied) color.rgb = convert_from_gamut(color.rgb, image_gamut, output_gamut);
+            else if (color.a > 0.f) color.rgb = convert_from_gamut(color.rgb / color.a, image_gamut, output_gamut) * color.a;
+        }
+        color.a *= extra_alpha;
+    }
 
     if (texture_is_not_premultiplied) color = vec4_premul(color);
 

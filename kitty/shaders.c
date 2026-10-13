@@ -1160,9 +1160,13 @@ draw_graphics(int program, ImageRenderData *data, GLuint start, GLuint count, fl
     glActiveTexture(GL_TEXTURE0 + GRAPHICS_UNIT);
     GLint src_rect_loc = program_uniform_location(program, "src_rect");
     GLint dest_rect_loc = program_uniform_location(program, "dest_rect");
+    // Images tagged with a gamut are converted to that of the window, the alpha mask program draws none
+    const GLint image_gamut_loc = try_program_uniform_location(program, "image_gamut"), output_gamut_loc = try_program_uniform_location(program, "output_gamut");
+    if (output_gamut_loc >= 0) glUniform1ui(output_gamut_loc, output_gamut());
     for (GLuint i = 0; i < count;) {
         ImageRenderData *group = data + start + i;
         glBindTexture(GL_TEXTURE_2D, group->texture_id);
+        if (image_gamut_loc >= 0) glUniform1ui(image_gamut_loc, group->gamut);
         if (group->group_count == 0) {
             i++;
             continue;
