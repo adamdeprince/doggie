@@ -359,8 +359,9 @@ def tool_outside(rig: Rig, tool: str = 'pen', tablet: str = 'intuos5') -> None:
 # Pads {{{
 def pads(rig: Rig) -> None:
     """Three pads are plugged in: keys and a ring with four modes, keys and a strip, a key and a dial.
-    The reports expected are those of the pad kind being added to the protocol: kind=3 with
-    button and state, ring and angle, strip and pos, dial and delta, group and mode"""
+    What is expected is what the tablet pointer protocol says of pads: each pad is described when it comes
+    to the window, and its reports are kind=3 with button and state, ring and angle, strip and pos, dial and
+    delta, group and mode"""
     for device, d in DEVICES.items():
         if device.startswith('pad:'):
             rig.command(op='add', device=device, **d)
@@ -373,31 +374,49 @@ def pads(rig: Rig) -> None:
             rig.expect('tablet-pointer', f'{name}: {note}', kind=3, **fields)
         time.sleep(0.02)
 
-    pad('intuos5', 'enters the window', ['enter', '$serial', 'tablet:intuos5', '$surface'])
+    def enters(name: str, mode: int = 0, **description: Any) -> None:
+        "The pad gets the focus, and the compositor says what mode its group is in, as wlroots and Mutter do after every enter"
+        rig.play(f'pad:{name}', ['enter', '$serial', 'tablet:intuos5', '$surface'])
+        rig.expect('tablet-pointer:device', f'{name}: is described', kind=3, groups=1, **description)
+        time.sleep(0.02)
+        pad(name, f'its group is in mode {mode}', ['mode_switch', '$time', '$serial', mode], to=f'group:{name}:0', group=0, mode=mode)
+
+    enters('intuos5', mode=2, buttons=9, rings=1, strips=0, dials=0, modes=4)
     for b in range(9):
         pad('intuos5', f'key {b} down', ['button', '$time', b, 1], button=b, state=1)
         pad('intuos5', f'key {b} up', ['button', '$time', b, 0], button=b, state=0)
     ring = 'ring:intuos5:0:0'
     for angle in (0, 45.5, 90, 180, 355):
-        pad('intuos5', f'ring at {angle} degrees', ['source', FINGER], ['angle', angle], ['frame', '$time'], to=ring, ring=0, angle=round(angle * 100))
-    pad('intuos5', 'finger off the ring', ['stop'], ['frame', '$time'], to=ring, ring=0, stop=1)
+        pad('intuos5', f'ring at {angle} degrees', ['source', FINGER], ['angle', angle], ['frame', '$time'], to=ring, ring=0, angle=round(angle * 100), src=1)
+    pad('intuos5', 'finger off the ring', ['source', FINGER], ['stop'], ['frame', '$time'], to=ring, ring=0, stop=1, src=1)
     pad('intuos5', 'mode 2 of 4', ['mode_switch', '$time', '$serial', 1], to='group:intuos5:0', group=0, mode=1)
     pad('intuos5', 'key 0 in the new mode', ['button', '$time', 0, 1], ['button', '$time', 0, 0], button=0, state=1)
     rig.expect('tablet-pointer', 'intuos5: key 0 up', kind=3, button=0, state=0)
-    pad('intuos5', 'leaves', ['leave', '$serial', '$surface'])
+    # keys that are down when the pad goes elsewhere are let go, and their real releases are then not reported
+    pad('intuos5', 'key 3 held', ['button', '$time', 3, 1], button=3, state=1)
+    pad('intuos5', 'key 5 held', ['button', '$time', 5, 1], button=5, state=1)
+    rig.play('pad:intuos5', ['leave', '$serial', '$surface'])
+    rig.expect('tablet-pointer', 'intuos5: key 3 let go as the pad leaves', kind=3, button=3, state=0)
+    rig.expect('tablet-pointer', 'intuos5: key 5 let go as the pad leaves', kind=3, button=5, state=0)
+    time.sleep(0.02)
+    rig.play('pad:intuos5', ['button', '$time', 3, 0], ['button', '$time', 5, 0])
+    time.sleep(0.02)
 
     strip = 'strip:intuos3:0:0'
-    pad('intuos3', 'enters the window', ['enter', '$serial', 'tablet:intuos5', '$surface'])
+    enters('intuos3', buttons=4, rings=0, strips=1, dials=0, modes=1)
     for pos in (0, 16384, 32768, 65535):
-        pad('intuos3', f'strip at {pos}', ['source', FINGER], ['position', pos], ['frame', '$time'], to=strip, strip=0, pos=pos)
-    pad('intuos3', 'finger off the strip', ['stop'], ['frame', '$time'], to=strip, strip=0, stop=1)
+        pad('intuos3', f'strip at {pos}', ['source', FINGER], ['position', pos], ['frame', '$time'], to=strip, strip=0, pos=pos, src=1)
+    pad('intuos3', 'finger off the strip', ['source', FINGER], ['stop'], ['frame', '$time'], to=strip, strip=0, stop=1, src=1)
     pad('intuos3', 'leaves', ['leave', '$serial', '$surface'])
 
     dial = 'dial:huion:0:0'
-    pad('huion', 'enters the window', ['enter', '$serial', 'tablet:intuos5', '$surface'])
+    has_dial = dial in named  # version 1 of tablet-v2 has no dials, the pad is then just its key
+    enters('huion', buttons=1, rings=0, strips=0, dials=1 if has_dial else 0, modes=1)
     for delta, what in ((120, 'one click'), (-240, 'two clicks back'), (30, 'a quarter of a click')):
-        if dial in named:  # version 1 of tablet-v2 has no dials, the pad is then just its key
+        if has_dial:
             pad('huion', f'dial {what}', ['delta', delta], ['frame', '$time'], to=dial, dial=0, delta=delta)
+    if has_dial:
+        pad('huion', 'dial moved twice before its frame', ['delta', 120], ['delta', 60], ['frame', '$time'], to=dial, dial=0, delta=180)
     pad('huion', 'key down', ['button', '$time', 0, 1], button=0, state=1)
     pad('huion', 'key up', ['button', '$time', 0, 0], button=0, state=0)
     pad('huion', 'leaves', ['leave', '$serial', '$surface'])

@@ -118,14 +118,19 @@ Sequences
                  pinched and scrolled with the pointer resting in the middle, as
                  on a compositor where tablets have a cursor of their own
 ``pads``         The three pads are plugged in while the terminal runs, then every
-                 key, the ring with a finger lift, a mode switch, the strip, the dial
+                 key, the ring with a finger lift, a mode switch, keys held while the
+                 pad leaves, the strip, the dial
 ================ ====================================================================
 
-``pads`` is last because a tree that does not handle pads may not survive it.
-What it expects are the reports of the pad kind that is being added to the
-tablet pointer protocol, ``kind=3`` with ``button`` and ``state``, ``ring``
-and ``angle``, ``strip`` and ``pos``, ``dial`` and ``delta``, ``group`` and
-``mode``. Change ``pads()`` in ``play.py`` when the protocol settles.
+``pads`` is last because a tree that destroys pads as they are announced does
+not survive it. What it expects is what the tablet pointer protocol says of
+pads: a description of each pad when it comes to the window, the mode of its
+group, which a compositor sends after every enter, and reports of ``kind=3``
+with ``button`` and ``state``, ``ring`` and ``angle``, ``strip`` and ``pos``,
+``dial`` and ``delta``, ``group`` and ``mode``, with the keys that are down
+let go when the pad leaves. The labels a program gives the controls are not
+played: ask for ``RIG_WAYLAND_DEBUG`` or read the ``request`` lines of
+``proxy.log`` to see them reach the compositor as ``set_feedback``.
 
 Settings
 -----------
