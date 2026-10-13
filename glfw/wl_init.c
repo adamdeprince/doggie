@@ -1267,6 +1267,8 @@ registryHandleGlobal(void *data UNUSED, struct wl_registry *registry, uint32_t n
         _glfw.wl.wp_cursor_shape_manager_v1 = wl_registry_bind(registry, name, &wp_cursor_shape_manager_v1_interface, 1);
     } else if (is(wp_fractional_scale_manager_v1)) {
         _glfw.wl.wp_fractional_scale_manager_v1 = wl_registry_bind(registry, name, &wp_fractional_scale_manager_v1_interface, 1);
+    } else if (is(wp_color_manager_v1)) {
+        _glfwWaylandBindColorManager(registry, name, version);
     } else if (is(wp_viewporter)) {
         _glfw.wl.wp_viewporter = wl_registry_bind(registry, name, &wp_viewporter_interface, 1);
     } else if (is(org_kde_kwin_blur_manager)) {
@@ -1411,6 +1413,7 @@ get_compositor_missing_capabilities(void) {
     *p = 0;
     C(viewporter, wp_viewporter);
     C(fractional_scale, wp_fractional_scale_manager_v1);
+    C(color_management, color.manager);
     if (!_glfw.wl.org_kde_kwin_blur_manager && !_glfw.wl.ext_background_effect_manager_v1) p += snprintf(p, sizeof(buf) - (p - buf), "%s ", "blur");
     C(server_side_decorations, decorationManager);
     C(cursor_shape, wp_cursor_shape_manager_v1);
@@ -1585,6 +1588,7 @@ _glfwPlatformTerminate(void) {
     if (_glfw.wl.wp_cursor_shape_manager_v1) wp_cursor_shape_manager_v1_destroy(_glfw.wl.wp_cursor_shape_manager_v1);
     if (_glfw.wl.wp_viewporter) wp_viewporter_destroy(_glfw.wl.wp_viewporter);
     if (_glfw.wl.wp_fractional_scale_manager_v1) wp_fractional_scale_manager_v1_destroy(_glfw.wl.wp_fractional_scale_manager_v1);
+    _glfwWaylandTerminateColorManager();
     if (_glfw.wl.org_kde_kwin_blur_manager) org_kde_kwin_blur_manager_destroy(_glfw.wl.org_kde_kwin_blur_manager);
     if (_glfw.wl.ext_background_effect_manager_v1) ext_background_effect_manager_v1_destroy(_glfw.wl.ext_background_effect_manager_v1);
     if (_glfw.wl.zwlr_layer_shell_v1) zwlr_layer_shell_v1_destroy(_glfw.wl.zwlr_layer_shell_v1);

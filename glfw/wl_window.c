@@ -39,6 +39,7 @@
 #include <errno.h>
 #include <string.h>
 #include <fcntl.h>
+#include <math.h>
 #include <poll.h>
 #include <sys/mman.h>
 #include <assert.h>
@@ -708,6 +709,7 @@ create_surface(_GLFWwindow *window, const _GLFWwndconfig *wndconfig) {
         }
     }
     window->wl.window_fully_created = !window->wl.expect_scale_from_compositor;
+    _glfwWaylandColorManagementCreate(window);
     if ((_glfw.wl.ext_background_effect_manager_v1 || _glfw.wl.org_kde_kwin_blur_manager) && wndconfig->blur_radius > 0)
         _glfwPlatformSetWindowBlur(window, wndconfig->blur_radius);
 
@@ -1602,6 +1604,7 @@ _glfwPlatformDestroyWindow(_GLFWwindow *window) {
 
     if (window->wl.wp_fractional_scale_v1) wp_fractional_scale_v1_destroy(window->wl.wp_fractional_scale_v1);
     if (window->wl.wp_viewport) wp_viewport_destroy(window->wl.wp_viewport);
+    _glfwWaylandColorManagementDestroy(window);
     if (window->wl.org_kde_kwin_blur) org_kde_kwin_blur_release(window->wl.org_kde_kwin_blur);
     if (window->wl.ext_background_effect_surface_v1) ext_background_effect_surface_v1_destroy(window->wl.ext_background_effect_surface_v1);
 
@@ -1798,6 +1801,78 @@ _glfwPlatformGetWindowContentScale(_GLFWwindow *window, float *xscale, float *ys
     if (yscale) *yscale = fscale;
 }
 
+// Display gamut {{{
+typedef struct xy {
+    float x, y;
+} xy;
+
+static float
+polygon_area(const xy *p, size_t n) {
+    float twice = 0;
+    for (size_t i = 0; i < n; i++) {
+        const xy q = p[(i + 1) % n];
+        twice += p[i].x * q.y - q.x * p[i].y;
+    }
+    return fabsf(twice) / 2;
+}
+
+// The part of a triangle that lies within the triangle clip, as a polygon of at most six corners
+static size_t
+clip_triangle(const xy *triangle, const xy *clip, xy *out) {
+    xy a[8], b[8];
+    size_t n = 3;
+    memcpy(a, triangle, 3 * sizeof(xy));
+    // which side of an edge of clip is its inside depends on which way round its corners go
+    const float winding = (clip[1].x - clip[0].x) * (clip[2].y - clip[0].y) - (clip[1].y - clip[0].y) * (clip[2].x - clip[0].x);
+    if (winding == 0) return 0;
+    for (size_t e = 0; e < 3 && n; e++) {
+        const xy c0 = clip[e], c1 = clip[(e + 1) % 3];
+#define side(p) (((c1.x - c0.x) * ((p).y - c0.y) - (c1.y - c0.y) * ((p).x - c0.x)) * winding)
+        size_t m = 0;
+        for (size_t i = 0; i < n; i++) {
+            const xy cur = a[i], prev = a[(i + n - 1) % n];
+            const float sc = side(cur), sp = side(prev);
+            if ((sc >= 0) != (sp >= 0)) {
+                // the corner where the edge from prev to cur crosses the edge of clip
+                const float t = sp / (sp - sc);
+                b[m++] = (xy){prev.x + t * (cur.x - prev.x), prev.y + t * (cur.y - prev.y)};
+            }
+            if (sc >= 0) b[m++] = cur;
+        }
+#undef side
+        memcpy(a, b, m * sizeof(xy));
+        n = m;
+    }
+    memcpy(out, a, n * sizeof(xy));
+    return n;
+}
+
+// The widest of Rec. 2020, Display P3 and sRGB that a display with the given
+// primaries, as CIE 1931 xy chromaticities of red, green and blue, covers. A
+// gamut counts as covered when the display can show nine tenths of its area in
+// the xy diagram: panels sold as wide gamut rarely reach every corner of the
+// standard they are sold for. A display that covers none of the three is still
+// sent sRGB, so that is the answer for it too.
+static GLFWdisplaygamut
+gamut_covered_by(const float *primaries) {
+    static const struct {
+        GLFWdisplaygamut gamut;
+        xy corners[3];
+    } widest_first[] = {
+        {GLFW_DISPLAY_GAMUT_REC2020, {{0.708f, 0.292f}, {0.170f, 0.797f}, {0.131f, 0.046f}}},
+        {GLFW_DISPLAY_GAMUT_P3, {{0.680f, 0.320f}, {0.265f, 0.690f}, {0.150f, 0.060f}}},
+    };
+    const xy display[3] = {{primaries[0], primaries[1]}, {primaries[2], primaries[3]}, {primaries[4], primaries[5]}};
+    if (polygon_area(display, 3) <= 0) return GLFW_DISPLAY_GAMUT_UNKNOWN;
+    for (size_t i = 0; i < arraysz(widest_first); i++) {
+        xy shared[8];
+        const size_t n = clip_triangle(widest_first[i].corners, display, shared);
+        if (polygon_area(shared, n) >= 0.9f * polygon_area(widest_first[i].corners, 3)) return widest_first[i].gamut;
+    }
+    return GLFW_DISPLAY_GAMUT_SRGB;
+}
+// }}}
+
 void
 _glfwPlatformGetWindowDisplayInfo(_GLFWwindow *window, GLFWdisplayinfo *info) {
     // The first output the window is on, the first output there is before the compositor has told us
@@ -1805,6 +1880,9 @@ _glfwPlatformGetWindowDisplayInfo(_GLFWwindow *window, GLFWdisplayinfo *info) {
     info->color = GLFW_DISPLAY_COLOR_RGB;
     info->bits = 8;
     info->scale = (float)_glfwWaylandWindowScale(window);
+    // Compositors with color management describe the display the window is on, the target being what it can actually show
+    GLFWcolordescription description;
+    if (_glfwPlatformGetWindowPreferredColorDescription(window, &description)) info->gamut = gamut_covered_by(description.target_chromaticities);
     if (!monitor || monitor->wl.currentMode < 0 || monitor->wl.currentMode >= monitor->modeCount) return;
     const GLFWvidmode *mode = monitor->modes + monitor->wl.currentMode;
     if (mode->refreshRate > 0) info->period_us = 1000000u / (unsigned)mode->refreshRate;

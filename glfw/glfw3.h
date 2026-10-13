@@ -2274,6 +2274,75 @@ typedef struct GLFWgammaramp {
     unsigned int size;
 } GLFWgammaramp;
 
+/*! @brief A color description: how pixel values relate to light.
+ *
+ *  Used both for what the display a window is on can show, see
+ *  @ref glfwGetWindowPreferredColorDescription, and for what the pixels a
+ *  window draws mean, see @ref glfwSetWindowColorDescription.
+ *
+ *  @ingroup window
+ */
+typedef enum {
+    /*! Not one of the named sets, see the chromaticities.
+     */
+    GLFW_COLOR_PRIMARIES_UNKNOWN,
+    GLFW_COLOR_PRIMARIES_SRGB,
+    GLFW_COLOR_PRIMARIES_DISPLAY_P3,
+    GLFW_COLOR_PRIMARIES_BT2020,
+    GLFW_COLOR_PRIMARIES_DCI_P3,
+    GLFW_COLOR_PRIMARIES_ADOBE_RGB,
+} GLFWcolorprimaries;
+typedef enum {
+    GLFW_COLOR_TRANSFER_UNKNOWN,
+    GLFW_COLOR_TRANSFER_GAMMA22,
+    /*! The two piece curve of IEC 61966-2-1.
+     */
+    GLFW_COLOR_TRANSFER_SRGB,
+    GLFW_COLOR_TRANSFER_BT1886,
+    /*! A pure power curve, with the exponent in transfer_exponent.
+     */
+    GLFW_COLOR_TRANSFER_POWER,
+    /*! Linear, defined below zero and above one as well.
+     */
+    GLFW_COLOR_TRANSFER_EXT_LINEAR,
+    GLFW_COLOR_TRANSFER_PQ,
+    GLFW_COLOR_TRANSFER_HLG,
+} GLFWcolortransfer;
+typedef enum {
+    GLFW_COLOR_INTENT_PERCEPTUAL,
+    GLFW_COLOR_INTENT_RELATIVE,
+    GLFW_COLOR_INTENT_SATURATION,
+    GLFW_COLOR_INTENT_ABSOLUTE,
+    GLFW_COLOR_INTENT_RELATIVE_BPC,
+} GLFWcolorintent;
+typedef struct GLFWcolordescription {
+    GLFWcolorprimaries primaries;
+    GLFWcolortransfer transfer;
+    float transfer_exponent;
+    /*! CIE 1931 xy chromaticities of red, green, blue and white, in that
+     *  order: of the primaries the pixel values are encoded with, and of the
+     *  target, the colors that can actually be shown, which a description
+     *  without a target of its own shares with the encoding. All zero when
+     *  unknown.
+     */
+    float chromaticities[8], target_chromaticities[8];
+    /*! In cd/m², zero when not given: the darkest and brightest the encoding
+     *  reaches and where its reference white, the white of ordinary content,
+     *  lies, then the darkest and brightest the target can show.
+     */
+    float min_luminance, max_luminance, reference_luminance;
+    float target_min_luminance, target_max_luminance;
+    /*! The maximum content and frame-average light levels, in cd/m², zero
+     *  when not given.
+     */
+    float max_cll, max_fall;
+    /*! Only when setting: use the predefined Windows scRGB description, sRGB
+     *  primaries with a linear curve where 1.0 is 80 cd/m², and ignore every
+     *  other member.
+     */
+    bool windows_scrgb;
+} GLFWcolordescription;
+
 /*! @brief Image data.
  *
  *  This describes a single 2D image.  See the documentation for each related
@@ -4283,6 +4352,53 @@ GLFWAPI float glfwGetWindowHDRHeadroom(GLFWwindow *window);
  *  effective when the window was created with the GLFW_COCOA_HDR hint.
  */
 GLFWAPI void glfwSetWindowHDRActive(GLFWwindow *window, bool active);
+
+/*! @brief Retrieves what the display a window is on can show.
+ *
+ *  This is the color description the system would like the window to draw
+ *  in: the primaries, transfer function and luminances of the display the
+ *  window is on, or of the one it is mostly on. When it changes, because the
+ *  window moved to another display or the display was switched into or out of
+ *  HDR, the [refresh callback](@ref glfwSetWindowRefreshCallback) is called.
+ *
+ *  @param[in] window The window to query.
+ *  @param[out] desc Where to store the description.
+ *  @return `true` if the description was stored, `false` when the system
+ *  does not say, which is always the case except on Wayland compositors that
+ *  implement color management, and there until the compositor has answered.
+ *
+ *  @thread_safety This function must only be called from the main thread.
+ *
+ *  @ingroup window
+ */
+GLFWAPI bool glfwGetWindowPreferredColorDescription(GLFWwindow *window, GLFWcolordescription *desc);
+
+/*! @brief Declares what the pixels a window draws mean.
+ *
+ *  Tells the system the color description of the contents of the window, so
+ *  that it converts them for whatever display they end up on. The
+ *  description takes effect with the next frame the window presents, which
+ *  must already be drawn for it. Without one, the system treats the window
+ *  as sRGB.
+ *
+ *  The primaries must be one of the named sets, or @ref
+ *  GLFW_COLOR_PRIMARIES_UNKNOWN with the chromaticities filled in. Luminances
+ *  that are zero are left at the defaults of the transfer function, as are a
+ *  target and light levels that are zero. An intent the system does not
+ *  offer is replaced by the perceptual one.
+ *
+ *  @param[in] window The window whose contents are described.
+ *  @param[in] desc The description, or `NULL` to go back to having none.
+ *  @param[in] intent How colors the display cannot show are mapped.
+ *  @return `true` if the system accepted the description, in which case the
+ *  window must draw accordingly, `false` if it cannot express it, in which
+ *  case nothing has changed. Removing the description always succeeds.
+ *
+ *  @thread_safety This function must only be called from the main thread.
+ *
+ *  @ingroup window
+ */
+GLFWAPI bool glfwSetWindowColorDescription(GLFWwindow *window, const GLFWcolordescription *desc, GLFWcolorintent intent);
 
 /*! @brief Sets the user pointer of the specified window.
  *

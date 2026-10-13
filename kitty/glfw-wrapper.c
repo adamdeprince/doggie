@@ -248,6 +248,12 @@ load_glfw(const char* path) {
     *(void **) (&glfwSetWindowHDRActive_impl) = dlsym(handle, "glfwSetWindowHDRActive");
     if (glfwSetWindowHDRActive_impl == NULL) fail("Failed to load glfw function glfwSetWindowHDRActive with error: %s", dlerror());
 
+    *(void **) (&glfwGetWindowPreferredColorDescription_impl) = dlsym(handle, "glfwGetWindowPreferredColorDescription");
+    if (glfwGetWindowPreferredColorDescription_impl == NULL) fail("Failed to load glfw function glfwGetWindowPreferredColorDescription with error: %s", dlerror());
+
+    *(void **) (&glfwSetWindowColorDescription_impl) = dlsym(handle, "glfwSetWindowColorDescription");
+    if (glfwSetWindowColorDescription_impl == NULL) fail("Failed to load glfw function glfwSetWindowColorDescription with error: %s", dlerror());
+
     *(void **) (&glfwSetWindowUserPointer_impl) = dlsym(handle, "glfwSetWindowUserPointer");
     if (glfwSetWindowUserPointer_impl == NULL) fail("Failed to load glfw function glfwSetWindowUserPointer with error: %s", dlerror());
 
