@@ -379,8 +379,11 @@ initExtensions(void) {
         glfw_dlsym(_glfw.x11.xi.GetProperty, _glfw.x11.xi.handle, "XIGetProperty");
 
         if (XQueryExtension(_glfw.x11.display, "XInputExtension", &_glfw.x11.xi.majorOpcode, &_glfw.x11.xi.eventBase, &_glfw.x11.xi.errorBase)) {
+            // The newest version this code speaks. The server answers with
+            // the older of this and its own, 2.4 being where the touchpad
+            // gestures are
             _glfw.x11.xi.major = 2;
-            _glfw.x11.xi.minor = 1;
+            _glfw.x11.xi.minor = 4;
 
             if (XIQueryVersion(_glfw.x11.display, &_glfw.x11.xi.major, &_glfw.x11.xi.minor) == Success) { _glfw.x11.xi.available = true; }
         }

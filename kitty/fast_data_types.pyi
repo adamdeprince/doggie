@@ -1417,7 +1417,9 @@ def send_mouse_event(
 def send_scroll_report(
     screen: Screen, x_offset: float, y_offset: float, offset_type: int = 0, momentum: int = 0, phase: int = 0, mods: int = 0, x: float = 0, y: float = 0
 ) -> bool: ...
-def send_gesture_report(screen: Screen, kind: int, phase: int, x: int, y: int, mods: int = 0, delta: float = 0, dx: int = 0, dy: int = 0) -> bool: ...
+def send_gesture_report(
+    screen: Screen, kind: int, phase: int, x: int, y: int, mods: int = 0, delta: float = 0, dx: int = 0, dy: int = 0, fingers: int = 0
+) -> bool: ...
 def send_pointer_report(
     screen: Screen, kind: int, phase: int, device: int, contact: int, x: int, y: int, buttons: int = 0, mods: int = 0, tool: int = 1, valid: int = 0,
     p: int = 0, tx: int = 0, ty: int = 0, twist: int = 0, tangent: int = 0, z: int = 0, dist: int = 0, wheel: int = 0, wclicks: int = 0,

@@ -72,6 +72,7 @@ typedef struct {
 typedef struct GestureState {
     bool active;
     int x, y, mods;
+    unsigned fingers;  // zero when the system does not say
     double total;
 } GestureState;
 
@@ -213,8 +214,8 @@ typedef struct {
 
     CursorRenderInfo cursor_render_info;
     struct {
-        unsigned version;  // of the gesture protocol the child asked for, 0 when off
-        GestureState gestures[5];  // indexed by GestureKind
+        unsigned mode;  // the kinds of gesture the child asked for, see docs/gesture-protocol.rst, 0 when off
+        GestureState gestures[6];  // indexed by GestureKind
     } gesture;
 
     DisableLigature disable_ligatures;
@@ -398,11 +399,11 @@ bool screen_is_cell_selected(Screen *, index_type x, index_type y);
 bool screen_invert_colors(Screen *self);
 void screen_update_cell_data(Screen *self, void *address, FONTS_DATA_HANDLE, bool cursor_has_moved);
 bool screen_has_hdr_content(Screen *self);
-typedef enum GestureKind { GESTURE_PINCH = 1, GESTURE_ROTATE, GESTURE_SWIPE, GESTURE_SMART_ZOOM } GestureKind;
+typedef enum GestureKind { GESTURE_PINCH = 1, GESTURE_ROTATE, GESTURE_SWIPE, GESTURE_SMART_ZOOM, GESTURE_HOLD } GestureKind;
 typedef enum GesturePhase { GESTURE_BEGIN = 1, GESTURE_UPDATE, GESTURE_END, GESTURE_CANCEL } GesturePhase;
 void screen_gesture_osc(Screen *self, const char *data, size_t sz);
 void screen_gesture_cancel(Screen *self);
-bool screen_gesture_report(Screen *self, int kind, int phase, int x, int y, int mods, double delta, int dx, int dy);
+bool screen_gesture_report(Screen *self, int kind, int phase, int x, int y, int mods, double delta, int dx, int dy, unsigned fingers);
 bool screen_is_cursor_visible(const Screen *self);
 unsigned screen_multi_cursor_count(const Screen *self);
 bool screen_selection_range_for_line(Screen *self, index_type y, index_type *start, index_type *end);

@@ -1159,6 +1159,12 @@ glfwSetTabletCallback(GLFWwindow *handle, GLFWtabletfun cbfun) {
     return cbfun;
 }
 
+GLFWAPI unsigned
+glfwGetSupportedGestures(void) {
+    _GLFW_REQUIRE_INIT_OR_RETURN(0);
+    return _glfwPlatformSupportedGestures();
+}
+
 GLFWAPI GLFWdropeventfun
 glfwSetDropEventCallback(GLFWwindow *handle, GLFWdropeventfun cbfun) {
     _GLFWwindow *window = (_GLFWwindow *)handle;

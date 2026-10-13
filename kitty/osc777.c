@@ -41,7 +41,7 @@ screen_reset_extension_modes(Screen *self) {
     self->pointer.mode = 0;
     // gesture
     screen_gesture_cancel(self);
-    self->gesture.version = 0;
+    self->gesture.mode = 0;
     // scroll
     self->scroll_reports = 0;
     // frame

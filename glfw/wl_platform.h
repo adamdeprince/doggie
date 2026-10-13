@@ -415,6 +415,7 @@ typedef struct _GLFWlibraryWayland {
     struct zwp_tablet_manager_v2 *tablet_manager;
     struct zwp_tablet_seat_v2 *tablet_seat;
     _GLFWWaylandTabletTool *tablet_tool;  // the tool in proximity, if any
+    uint32_t swipe_fingers;
     struct zxdg_output_manager_v1 *xdg_output_manager;
     struct zwlr_virtual_pointer_manager_v1 *virtual_pointer_manager;
     struct zwlr_virtual_pointer_v1 *virtual_pointer;

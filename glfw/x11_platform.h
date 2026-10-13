@@ -512,6 +512,9 @@ typedef struct _GLFWlibraryX11 {
         // from those valuators with the same time.
         Time last_smooth_scroll_time;
         int master_pointer_id;
+        // The touchpad gestures in progress, see handle_xi_gesture_event()
+        double pinch_scale, swipe_dx, swipe_dy;
+        int swipe_fingers;
         Atom LIBINPUT_SCROLL_METHOD_ENABLED, LIBINPUT_TAPPING;
         XITabletDevice tablet_devices[8];
         unsigned num_tablet_devices;

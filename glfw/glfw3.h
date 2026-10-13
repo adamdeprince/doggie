@@ -646,6 +646,8 @@ typedef enum GLFWGestureKind {
     GLFW_GESTURE_ROTATE = 2,
     GLFW_GESTURE_SWIPE = 3,
     GLFW_GESTURE_SMART_ZOOM = 4,
+    // Fingers resting on the trackpad without moving
+    GLFW_GESTURE_HOLD = 5,
 } GLFWGestureKind;
 
 typedef enum GLFWGesturePhase {
@@ -668,6 +670,9 @@ typedef struct GLFWGestureEvent {
     double delta;
     // The direction of a swipe, -1, 0 or 1 on each axis, positive right and down
     int dx, dy;
+    // The number of fingers making the gesture, given with GLFW_GESTURE_BEGIN,
+    // zero when the system does not say
+    unsigned fingers;
 } GLFWGestureEvent;
 // A graphics tablet tool is reported with everything it measures beyond the
 // pointer position. The pointer events for the same input follow only when
@@ -5348,6 +5353,15 @@ GLFWAPI GLFWtouchfun glfwSetTouchCallback(GLFWwindow *window, GLFWtouchfun callb
 GLFWAPI GLFWgesturefun glfwSetGestureCallback(GLFWwindow *window, GLFWgesturefun callback);
 
 GLFWAPI GLFWtabletfun glfwSetTabletCallback(GLFWwindow *window, GLFWtabletfun callback);
+
+/*! @brief The gestures the window system can report.
+ *
+ *  A bit set with the bit `1 << (kind - 1)` set for every @ref GLFWGestureKind
+ *  the window system this process is connected to delivers.
+ *
+ *  @ingroup input
+ */
+GLFWAPI unsigned glfwGetSupportedGestures(void);
 
 GLFWAPI GLFWliveresizefun glfwSetLiveResizeCallback(GLFWwindow *window, GLFWliveresizefun callback);
 
