@@ -1906,6 +1906,52 @@ class TestGraphics(BaseTest):
         self.ae(pixel(img, 2, 2), (255, 0, 0, 255))
         self.ae(pixel(img, 7, 7), (0, 255, 0, 255))
 
+    def test_vector_dash_limit(self):
+        # A dash pattern far finer than its path is long would cut it into more dashes than memory or time allow
+        import signal
+        s = self.create_screen()
+        g = s.grman
+
+        def draw(payload, image_id):
+            # the default action of the alarm ends the process, so a hang fails the run instead of stalling it
+            signal.signal(signal.SIGALRM, signal.SIG_DFL)
+            signal.alarm(60)
+            try:
+                start = time.monotonic()
+                res = parse_full_response(send_command(s, f'a=T,f=200,s=20,v=20,i={image_id}', payload))
+                return res, time.monotonic() - start
+            finally:
+                signal.alarm(0)
+
+        def pixel(img, x, y):
+            o = (y * img['width'] + x) * 4
+            return tuple(img['data'][o:o + 4])
+
+        # Beyond the budget the stroke is solid: a pattern of a millionth of a unit along a line of a million units
+        res, took = draw('p id=1 d=M0,10L1000000,10 stroke=#000000 w=4 fill=none dash=0.000001,0.000001', 1)
+        self.ae((res.code, res.msg), ('OK', ''))
+        self.assertLess(took, 10)
+        img = g.image_for_client_id(1)
+        self.ae([pixel(img, x, 10)[3] for x in (0, 7, 13, 19)], [255] * 4)
+        # the step of the dashes vanishing against the position along the path
+        res, took = draw('p id=1 d=M1e15,10L-1e15,10 stroke=#000000 w=4 fill=none dash=1,1', 2)
+        self.ae((res.code, res.msg), ('OK', ''))
+        self.assertLess(took, 10)
+        # a budget for the whole path, not for each subpath: the first two of these are dashed, the rest is solid
+        many = ''.join(f'M0,{y}.5L1000,{y}.5' for y in range(0, 20, 2))
+        res, took = draw(f'p id=1 d={many} stroke=#000000 w=1 fill=none dash=0.01,0.01', 3)
+        self.ae((res.code, res.msg), ('OK', ''))
+        self.assertLess(took, 10)
+        img = g.image_for_client_id(3)
+        coverage = [pixel(img, 10, y)[3] for y in range(0, 20, 2)]
+        self.assertTrue(all(100 < a < 156 for a in coverage[:2]), coverage)
+        self.ae(coverage[2:], [255] * 8)
+        # below the budget the dashes are drawn as before
+        res, took = draw('p id=1 d=M0,10L20,10 stroke=#000000 w=4 fill=none dash=4,4 cap=butt', 4)
+        self.ae((res.code, res.msg), ('OK', ''))
+        img = g.image_for_client_id(4)
+        self.ae([pixel(img, x, 10)[3] for x in (1, 5, 9, 13)], [255, 0, 255, 0])
+
     def test_vector_image_damage(self):
         # A patch to a vector image draws only the part of it that changed.
         # The pixels kept up that way must be those of drawing all of it.
