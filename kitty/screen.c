@@ -817,6 +817,7 @@ dealloc(Screen *self) {
     free(self->last_rendered_window_char.canvas);
     free(self->extra_cursors.locations);
     free(self->paused_rendering.extra_cursors.locations);
+    free(self->ink.strokes);
     free(self->pointer.contacts);
     free(self->pointer.pad_buttons);
     if (self->lc) {
