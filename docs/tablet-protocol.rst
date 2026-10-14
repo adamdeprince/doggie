@@ -448,9 +448,10 @@ Windows gives the judgement as the confidence flag of a pointer, and the HID
 usage tables have it as *Touch Valid* in the report of a contact, where a
 terminal that reads the digitizer finds it. Android judges too, and says so
 late: it cancels the one finger it has come to take for a palm, which is a
-``cancel`` of that contact with ``conf=0``. AppKit marks the touches on a
-trackpad that it takes to be resting there, and says nothing of the others.
-Wayland and X11 do not say.
+``cancel`` of that contact with ``conf=0``. AppKit has a mark for the
+touches on a trackpad that it takes to be resting there and says nothing of
+the others, and was not seen to set it, see `Implementations`_. Wayland and
+X11 do not say.
 
 Tool actions
 ~~~~~~~~~~~~~~~
@@ -733,8 +734,8 @@ Implementations
 -------------------
 
 * silkie, this fork of kitty: tools on macOS, Wayland and X11; fingers on
-  the touchpad on macOS, with whether the system takes them to be resting,
-  and on touchscreens on Wayland, with contact shape, and on X11, without;
+  the touchpad on macOS and on touchscreens on Wayland, with contact shape,
+  and on X11, without;
   pads on Wayland, with the groups of their controls; tool actions on macOS;
   the number of the tablet on macOS and Wayland; the size of a tablet and
   whether it is a display on Wayland; the place of a tool on its tablet on
@@ -758,12 +759,13 @@ Of what a tablet says of itself silkie sends what the window system gives
 it, which the notes below go through: ``tablet`` on macOS and Wayland, the
 groups of the controls of a pad on Wayland, ``w``, ``h`` and ``direct`` on
 Wayland, where they are had from the kernel, ``rx`` and ``ry``, with ``w``
-and ``h`` under some drivers, on X11, and ``conf`` for a touch at rest on
-macOS. It can write every field of this page, and its tests do, but nothing
-it reads has ``grip``, ``pcolor``, ``pwidth``, ``pstyle``, or the actions
-``6`` to ``8``, so it never sends them. It describes a tool or a pad again
-when what it said of it has changed, which at present only a pad on Wayland
-does.
+and ``h`` under some drivers, on X11. It can write every field of this page,
+and its tests do, but nothing it reads has ``grip``, ``pcolor``, ``pwidth``,
+``pstyle``, or the actions ``6`` to ``8``, so it never sends them, and
+``conf`` it has from a mark of AppKit that no touch was seen to carry, so it
+does not claim ``caps`` bit ``256`` anywhere. It describes a tool or a pad
+again when what it said of it has changed, which at present only a pad on
+Wayland does.
 
 * On macOS, tablet data arrives with the mouse events of the tablet driver.
   Tilt is scaled from the driver's fraction of maximum tilt assuming 60
@@ -784,26 +786,28 @@ does.
   to be in points at 72 to the inch. Trackpad fingers are reported alongside
   the mouse and scroll events the system makes from them. A trackpad that
   measures force gives ``p`` and ``stage`` once it has been pressed for the
-  first time. AppKit marks the touches it takes to be resting on the pad,
-  which its documentation gives as a thumb or another touch at rest, and
-  silkie asks it for those too: a resting touch is ``conf=0``, a touch that
-  comes to rest or stops resting is reported even when it has not moved, and
-  ``caps`` has bit ``256``. Of a touch it has not marked AppKit says nothing,
-  so every other touch has no ``conf``. That is not a formality: on the
-  trackpad of a MacBook Pro a palm laid on the pad came as a touch like any
-  other and not as a resting one, so a touch without the mark is not known
-  to be meant. Until silkie asked for them, AppKit left a resting touch out,
-  ended one that came to rest and began it again when it moved off. A
-  program without mode bit ``64`` still sees that, with one difference that
-  is meant: a finger that comes to rest now ends with a ``cancel`` where it
-  ended with an ``up``, since a finger that came to rest did not tap. The
-  Wacom tool types, the double tap, the force and the resting touches are
-  written from the documentation of AppKit and have not been tried with the
-  hardware; in particular no touch has yet been seen to be marked as
-  resting, and until one has it is not known that a trackpad of today marks
-  any. There are no pad reports: AppKit has no events for the
-  controls of a pad, which an application gets only through the request
-  interface of Wacom's own driver.
+  first time. AppKit has a mark for the touches it takes to be resting on
+  the pad, which its documentation gives as a thumb or another touch at
+  rest, and silkie asks it for those too: a touch with the mark is
+  ``conf=0``, and one that comes to rest or stops resting is reported even
+  when it has not moved. Of a touch without the mark AppKit says nothing, so
+  such a touch has no ``conf``. On the trackpad of a 16 inch MacBook Pro
+  under macOS 26 the mark was never seen: a palm laid on the pad, and a
+  thumb held still at its edge while another finger moved, both came as
+  touches like any other. So silkie does not claim ``caps`` bit ``256`` on
+  macOS, a program there gets no ``conf`` and judges palms for itself, and
+  no other interface of AppKit says what a touch is. The code is left in for
+  a trackpad that does set the mark: a program that turns on mode bit ``64``
+  regardless is sent such a touch with ``conf=0``, a program that does not
+  has it kept back, as AppKit itself keeps it back from a view that has not
+  asked, with one difference that is meant: a finger that comes to rest ends
+  with a ``cancel`` where AppKit would have ended it with an ``up``, since a
+  finger that came to rest did not tap. ``kitty --debug-input`` writes
+  ``accidental`` after a touch that has the mark. The Wacom tool types, the
+  double tap and the force are written from the documentation of AppKit and
+  have not been tried with the hardware. There are no pad reports: AppKit
+  has no events for the controls of a pad, which an application gets only
+  through the request interface of Wacom's own driver.
 * On Wayland, tools come through the ``tablet-v2`` protocol, which reports
   every measurement above, identifies the tool and names the tablet, and
   fingers through ``wl_touch``, with ``shape`` and ``orientation`` on a seat
