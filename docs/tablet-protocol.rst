@@ -19,27 +19,20 @@ Framing
 
 Frames are ``OSC 777`` with the ``tablet-pointer`` selector::
 
-    <OSC> 777 ; tablet-pointer ; <fields> <ST>
+    <OSC> 777 ; tablet-pointer ; v=1 : op=query : id=42 <ST>
 
-``<OSC>`` is ``<ESC> ]`` and ``<ST>`` is ``<ESC> \``; ``BEL`` is also
-accepted as a terminator. Fields are ASCII ``key=value`` pairs separated by
-colons, in any order, with decimal integers that carry no leading ``+``.
-Keys are case sensitive. A frame from a program is at most 127 bytes after
-the selector. A frame with a value out of range or a missing required field
-is rejected as a whole, and a rejected or incomplete frame must never reach a
-program as keystrokes. Spaces in the examples below are for clarity only.
+They are framed as :doc:`extension-framing` says, which is also where the
+units, the clock of ``t``, the reports that may be merged and the refusal of
+a mode are described for every extension. ``v``, the protocol version, is
+``1``, and ``op`` is one of ``query``, ``cap``, ``mode``, ``device``,
+``label`` and ``event``.
 
-Every frame has ``v``, the protocol version, which is ``1``, and ``op``, one
-of ``query``, ``cap``, ``mode``, ``device``, ``label`` and ``event``. A frame
-with any other version is ignored.
-
-The protocol grows without a new version. A program ignores a frame whose
-``op`` it does not know, a report whose ``kind`` it does not know, and any
-field and any bit of ``valid`` it does not know, and treats a ``tool`` value
-it does not know as ``0``. A new kind of report is sent only to a program
-that asked for it with a mode bit of its own, so a program is never sent
-what it was not written for. Only a change in the meaning of something that
-exists needs a new version.
+The protocol grows without a new version. Beyond what every extension
+ignores, a program ignores a report whose ``kind`` it does not know and any
+bit of ``valid`` it does not know, and treats a ``tool`` value it does not
+know as ``0``. A new kind of report is sent only to a program that asked for
+it with a mode bit of its own, so a program is never sent what it was not
+written for.
 
 Discovery
 -------------
@@ -117,16 +110,23 @@ The mode is local to the window, is reset by ``RIS``, and changing it
 cancels every active contact and lets go of every held key of a pad.
 Programs must turn it off when they exit, suspend or fail, and turn it back
 on when resumed. Multiplexers keep it with the rest of the terminal state,
-restore it on reconnect, and turn it off when detaching. There is no user
-setting that overrides the program's choice.
+restore it on reconnect, and turn it off when detaching. A terminal may let
+its user refuse a mode, or some of its bits, for every program or for some.
+A refused bit reads back as off and nothing it would have turned on is
+reported. kitty refuses bit ``8``, the hardware identifiers, unless its user
+allows them with :opt:`tablet_hardware_ids`, since a serial number says
+whose pen it is and the program asking may be on another machine. A refusal
+shows in the mode, not in ``caps``, which says what the terminal can report
+on the system it runs on.
 
 A ``mode`` request without a ``mode`` field reads the state instead of
 changing it, and is answered with::
 
     <OSC> 777 ; tablet-pointer ; v=1 : op=mode : mode=3 <ST>
 
-A terminal keeps only the bits it supports, so a program that asked for
-more than the terminal has finds out by reading the mode back. A program
+A terminal keeps only the bits it supports and that its user has not
+refused, so a program that asked for more than it was given finds out by
+reading the mode back. A program
 resuming after a reconnection reads the mode to learn whether it survived,
 rather than assuming it did.
 
@@ -293,10 +293,11 @@ default to zero, except ``tool``, which defaults to ``1``:
 ``device``       Identifies the tool or touch device for as long as it is in
                  proximity, a non-negative 31 bit integer, ``0`` when the
                  system does not tell devices apart
-``t``            The time of the event in milliseconds on a monotonic clock of
-                 the terminal's choosing, or of its delivery when the system
-                 does not time stamp it, useful only for differences between
-                 reports
+``t``            The time of the event in milliseconds on the clock the
+                 terminal uses for every extension, see
+                 :doc:`extension-framing`: when the system says it happened,
+                 or when the terminal learnt of it where the system does not
+                 say
 ``tu``           Microseconds past ``t``, ``0`` to ``999``, present only when
                  the system stamps events more finely than a millisecond. A
                  report without it is on a grid of whole milliseconds
@@ -697,6 +698,15 @@ begins with a ``down``.
 Programs must tolerate a lost ``hover``, a repeated cancel, and a fresh
 ``down`` for a contact they still have open, which replaces the earlier
 stroke.
+
+A terminal or relay that cannot keep up may merge some reports, as
+:doc:`extension-framing` says. Of this protocol's reports only ``move`` and
+``hover`` may be merged: consecutive ones of one contact, with no other
+report of that contact between them and the same ``buttons``, into one with
+the absolute values of the last and the sum of ``wheel`` and of ``wclicks``,
+and with them the frame reports of the groups they were in. Every other
+report, of a pad, a device, an action or a correction included, arrives as
+it was sent.
 
 A multiplexer translates ``x,y`` of on-screen contacts by the pane's origin
 (borders included) and scroll offset, forwards every other field unchanged,

@@ -1452,6 +1452,9 @@ class Parser:
     def tab_title_wrap(self, val: str, ans: dict[str, typing.Any]) -> None:
         ans['tab_title_wrap'] = tab_title_wrap(val)
 
+    def tablet_hardware_ids(self, val: str, ans: dict[str, typing.Any]) -> None:
+        ans['tablet_hardware_ids'] = to_bool(val)
+
     def term(self, val: str, ans: dict[str, typing.Any]) -> None:
         ans['term'] = str(val)
 

@@ -1215,6 +1215,22 @@ a drag will detach the tab. This is worked around for compositors that support
 """,
 )
 
+opt(
+    'tablet_hardware_ids',
+    'no',
+    option_type='to_bool',
+    ctype='bool',
+    long_text="""
+Whether a program may be told the hardware identifiers of pens and tablets with
+the :doc:`/tablet-protocol`: the serial number of a pen, the identifier of its
+type, and the vendor and product ids of a tablet. A serial number tells whose
+pen it is, and the program asking may be running on another machine, so by
+default a program that asks for them with bit :code:`8` of the mode is refused:
+the bit reads back as off and no identifier is sent. Everything else about a
+pen, a tablet or a pad is reported as before.
+""",
+)
+
 # mouse.mousemap {{{
 agr(
     'mouse.mousemap',

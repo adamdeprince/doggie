@@ -4,6 +4,7 @@
 #include "to-c.h"
 
 
+
 static void
 convert_from_python_font_size(PyObject *val, Options *opts) {
     opts->font_size = PyFloat_AsDouble(val);
@@ -768,6 +769,19 @@ convert_from_opts_drag_threshold(PyObject *py_opts, Options *opts) {
     PyObject *ret = PyObject_GetAttrString(py_opts, "drag_threshold");
     if (ret == NULL) return;
     convert_from_python_drag_threshold(ret, opts);
+    Py_DECREF(ret);
+}
+
+static void
+convert_from_python_tablet_hardware_ids(PyObject *val, Options *opts) {
+    opts->tablet_hardware_ids = PyObject_IsTrue(val);
+}
+
+static void
+convert_from_opts_tablet_hardware_ids(PyObject *py_opts, Options *opts) {
+    PyObject *ret = PyObject_GetAttrString(py_opts, "tablet_hardware_ids");
+    if (ret == NULL) return;
+    convert_from_python_tablet_hardware_ids(ret, opts);
     Py_DECREF(ret);
 }
 
@@ -1696,6 +1710,8 @@ convert_opts_from_python_opts(PyObject *py_opts, Options *opts) {
     convert_from_opts_pointer_shape_when_dragging(py_opts, opts);
     if (PyErr_Occurred()) return false;
     convert_from_opts_drag_threshold(py_opts, opts);
+    if (PyErr_Occurred()) return false;
+    convert_from_opts_tablet_hardware_ids(py_opts, opts);
     if (PyErr_Occurred()) return false;
     convert_from_opts_repaint_delay(py_opts, opts);
     if (PyErr_Occurred()) return false;
