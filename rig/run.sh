@@ -96,7 +96,7 @@ env -u DISPLAY XDG_RUNTIME_DIR="$run" WAYLAND_DISPLAY=wayland-rig LIBGL_ALWAYS_S
     ${RIG_WAYLAND_DEBUG:+WAYLAND_DEBUG=1} $([ -e $mesa ] && echo __EGL_VENDOR_LIBRARY_FILENAMES=$mesa) \
     ${udev:+LD_LIBRARY_PATH="$run/udev${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"} \
     "$tree/kitty/launcher/kitty" --config NONE -o linux_display_server=wayland -o placement_strategy=top-left \
-    -o window_padding_width=0 -o confirm_os_window_close=0 --debug-input \
+    -o window_padding_width=0 -o confirm_os_window_close=0 -o tablet_hardware_ids=yes --debug-input \
     python3 "$here/client.py" --log "$run/client.log" --ready "$run/ready" --stop "$run/stop" --duration 600 ${RIG_CLIENT_ARGS:-} \
     >"$run/kitty.log" 2>&1 &
 kitty=$!
