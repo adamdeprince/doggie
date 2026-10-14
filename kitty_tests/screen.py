@@ -9,6 +9,7 @@ from kitty.marks import marker_from_function, marker_from_regex, marker_from_tex
 from kitty.window import pagerhist
 
 from .base import BaseTest, draw_multicell, parse_bytes
+from .extension_frames import assert_extension_frames
 
 
 class TestScreen(BaseTest):
@@ -901,6 +902,8 @@ class TestScreen(BaseTest):
         parse_bytes(s, b'\x1b]777;caps;garbage\x1b\\')
         self.ae(c.wtcbuf, b'')
         self.ae(str(s.line(0)), '')
+        # A frame from a program follows the rules every extension shares, see docs/extension-framing.rst
+        assert_extension_frames(self, s, 'caps')
 
     def test_caps_reset(self):
         # The request and a shell prompt both turn the extension modes off. No

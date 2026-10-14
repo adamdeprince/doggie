@@ -18,14 +18,14 @@ Framing
 
 Messages are ``OSC 777`` with the ``caps`` selector::
 
-    <OSC> 777 ; caps ; <fields> <ST>
+    <OSC> 777 ; caps ; v=1 : op=query : id=42 <ST>
 
-``<OSC>`` is ``<ESC> ]`` and ``<ST>`` is ``<ESC> \``; ``BEL`` is also
-accepted as a terminator. Fields are ASCII ``key=value`` pairs separated by
-colons, in any order, with decimal integers that carry no leading ``+``. A
-message with a missing required field or an unknown version is ignored as a
-whole and never reaches a program as keystrokes. Spaces in the examples below
-are for clarity only.
+They follow the rules that every extension of the family shares, which
+:doc:`extension-framing` gives: the syntax of the fields, which frames are
+rejected, the units, the clock, and which reports may be merged under load.
+``v``, the protocol version, is ``1``, and ``op`` is one of ``query``,
+``cap`` and ``reset``. The terminal sends only replies, which are never
+merged or dropped.
 
 Listing the extensions
 -------------------------
@@ -82,7 +82,11 @@ Most selectors have a per-window mode that a program turns on with
 
 and the ``cap`` reply of every selector that has a mode carries a ``mode``
 field with the same value, so a single ``query`` tells a program both what the
-selector offers and whether its mode is on. The reply uses the version number
+selector offers and whether its mode is on. A terminal may let its user refuse
+a mode, or some of its bits, for every program or for some; a refused bit
+reads back as off and nothing it would have turned on is reported, so a
+program reads a mode back after setting it rather than assume it was
+granted. The reply uses the version number
 the request asked for. A selector the terminal does not speak answers neither,
 which is what the listing above is for.
 
