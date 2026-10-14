@@ -1,0 +1,1 @@
+.. include:: ../latency-protocol.rst

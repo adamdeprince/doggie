@@ -1105,7 +1105,7 @@ def docs_url(which: str = '', local_docs_root: str | None = '') -> str:
             return which
         base, frag = which.partition('#')[::2]
         base = base.strip('/')
-    if ld:
+    if ld and os.path.isfile(os.path.join(ld, (base or 'index') + '.html')):
         base = base or 'index'
         url = f'file://{ld}/' + quote(base) + '.html'
     else:

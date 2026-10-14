@@ -1669,6 +1669,84 @@ convert_from_opts_remap_modifiers(PyObject *py_opts, Options *opts) {
     Py_DECREF(ret);
 }
 
+static void
+convert_from_python_csi_limit(PyObject *val, Options *opts) {
+    opts->csi_limit = PyLong_AsUnsignedLong(val);
+}
+
+static void
+convert_from_opts_csi_limit(PyObject *py_opts, Options *opts) {
+    PyObject *ret = PyObject_GetAttrString(py_opts, "csi_limit");
+    if (ret == NULL) return;
+    convert_from_python_csi_limit(ret, opts);
+    Py_DECREF(ret);
+}
+
+static void
+convert_from_python_escape_limit(PyObject *val, Options *opts) {
+    opts->escape_limit = PyLong_AsUnsignedLong(val);
+}
+
+static void
+convert_from_opts_escape_limit(PyObject *py_opts, Options *opts) {
+    PyObject *ret = PyObject_GetAttrString(py_opts, "escape_limit");
+    if (ret == NULL) return;
+    convert_from_python_escape_limit(ret, opts);
+    Py_DECREF(ret);
+}
+
+static void
+convert_from_python_vector_depth_limit(PyObject *val, Options *opts) {
+    opts->vector_depth_limit = PyLong_AsUnsignedLong(val);
+}
+
+static void
+convert_from_opts_vector_depth_limit(PyObject *py_opts, Options *opts) {
+    PyObject *ret = PyObject_GetAttrString(py_opts, "vector_depth_limit");
+    if (ret == NULL) return;
+    convert_from_python_vector_depth_limit(ret, opts);
+    Py_DECREF(ret);
+}
+
+static void
+convert_from_python_vector_dash_limit(PyObject *val, Options *opts) {
+    opts->vector_dash_limit = PyLong_AsUnsignedLong(val);
+}
+
+static void
+convert_from_opts_vector_dash_limit(PyObject *py_opts, Options *opts) {
+    PyObject *ret = PyObject_GetAttrString(py_opts, "vector_dash_limit");
+    if (ret == NULL) return;
+    convert_from_python_vector_dash_limit(ret, opts);
+    Py_DECREF(ret);
+}
+
+static void
+convert_from_python_vector_raster_limit(PyObject *val, Options *opts) {
+    opts->vector_raster_limit = PyLong_AsUnsignedLong(val);
+}
+
+static void
+convert_from_opts_vector_raster_limit(PyObject *py_opts, Options *opts) {
+    PyObject *ret = PyObject_GetAttrString(py_opts, "vector_raster_limit");
+    if (ret == NULL) return;
+    convert_from_python_vector_raster_limit(ret, opts);
+    Py_DECREF(ret);
+}
+
+static void
+convert_from_python_vector_curve_limit(PyObject *val, Options *opts) {
+    opts->vector_curve_limit = PyLong_AsUnsignedLong(val);
+}
+
+static void
+convert_from_opts_vector_curve_limit(PyObject *py_opts, Options *opts) {
+    PyObject *ret = PyObject_GetAttrString(py_opts, "vector_curve_limit");
+    if (ret == NULL) return;
+    convert_from_python_vector_curve_limit(ret, opts);
+    Py_DECREF(ret);
+}
+
 static bool
 convert_opts_from_python_opts(PyObject *py_opts, Options *opts) {
     convert_from_opts_font_size(py_opts, opts);
@@ -1926,6 +2004,18 @@ convert_opts_from_python_opts(PyObject *py_opts, Options *opts) {
     convert_from_opts_wayland_enable_ime(py_opts, opts);
     if (PyErr_Occurred()) return false;
     convert_from_opts_remap_modifiers(py_opts, opts);
+    if (PyErr_Occurred()) return false;
+    convert_from_opts_csi_limit(py_opts, opts);
+    if (PyErr_Occurred()) return false;
+    convert_from_opts_escape_limit(py_opts, opts);
+    if (PyErr_Occurred()) return false;
+    convert_from_opts_vector_depth_limit(py_opts, opts);
+    if (PyErr_Occurred()) return false;
+    convert_from_opts_vector_dash_limit(py_opts, opts);
+    if (PyErr_Occurred()) return false;
+    convert_from_opts_vector_raster_limit(py_opts, opts);
+    if (PyErr_Occurred()) return false;
+    convert_from_opts_vector_curve_limit(py_opts, opts);
     if (PyErr_Occurred()) return false;
     return true;
 }

@@ -206,7 +206,18 @@ class TestBuild(BaseTest):
             t('#ref=action-copy', f'actions{suffix}#copy')
             t('#ref=doc-/marks', f'marks{suffix}')
 
-        run_tests(partial(docs_url, local_docs_root='/docs'), 'file:///docs/')
+        with tempfile.TemporaryDirectory() as docs:
+            for name in ('index', 'conf', 'kittens/ssh', 'remote-control', 'actions', 'marks', 'hdr-protocol'):
+                path = os.path.join(docs, name + '.html')
+                os.makedirs(os.path.dirname(path), exist_ok=True)
+                with open(path, 'w'):
+                    pass
+            local_url = partial(docs_url, local_docs_root=docs)
+            run_tests(local_url, f'file://{docs}/')
+            self.ae(local_url('hdr-protocol#images'), f'file://{docs}/hdr-protocol.html#images')
+            os.unlink(os.path.join(docs, 'conf.html'))
+            self.ae(local_url('conf#fonts'), website_url('conf') + '#fonts')
+            self.ae(local_url('#ref=confloc'), website_url('conf') + '#confloc')
         w = website_url()
         run_tests(partial(docs_url, local_docs_root=None), w, '/')
         self.ae(docs_url('#ref=issues-123'), 'https://github.com/kovidgoyal/kitty/issues/123')

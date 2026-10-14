@@ -110,7 +110,7 @@ Equivalents
 --------------
 
 The patterns are those the systems with such hardware already offer, under
-the nearest name each has. The first column of systems is the only one kitty
+the nearest name each has. The first column of systems is the only one Silkie
 plays; the others are for terminals on those systems.
 
 ================ ============================ ============================================ =====================================
@@ -132,10 +132,10 @@ Pattern          macOS trackpad,              Windows pen or dial,              
 Where a cell is empty the system has nothing close, and the terminal drops
 the request.
 
-In kitty
+In Silkie
 -----------
 
-kitty plays the taps on the trackpad on macOS, with the generic tap standing
+Silkie plays the taps on the trackpad on macOS, with the generic tap standing
 in for ``click`` and ``complete``, and the user turns them off with
 :opt:`haptic_feedback`. It has no way to drive a pen or a dial on any system
 it runs on, so ``caps`` is ``1`` on macOS and ``0`` elsewhere, and requests

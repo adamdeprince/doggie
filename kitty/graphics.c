@@ -2176,16 +2176,21 @@ render_vector_damage(GraphicsManager *self, Image *img, unsigned width, unsigned
     return ans;
 }
 
-#define MAX_VECTOR_PIXELS (16u * 1024u * 1024u)
+unsigned long kitty_vector_depth_limit(void) { return OPT(vector_depth_limit); }
+unsigned long kitty_vector_dash_limit(void) { return OPT(vector_dash_limit); }
+unsigned long kitty_vector_curve_limit(void) { return OPT(vector_curve_limit); }
 
 // Brings the texture of a vector image up to date, at the size the image is
 // shown at. A change of that size draws all of it, a change to the document
-// only the rectangle that change reaches.
+// only the rectangle that change reaches. vector_raster_limit 0 keeps that size.
 static void
 update_vector_texture(GraphicsManager *self, Image *img, double width, double height) {
     if (!self->window_id || width < 1 || height < 1) return;
-    double scale = sqrt(MAX_VECTOR_PIXELS / (width * height));
-    if (scale < 1) width *= scale, height *= scale;
+    const unsigned long cap = OPT(vector_raster_limit);
+    if (cap && width * height > (double)cap) {
+        double scale = sqrt((double)cap / (width * height));
+        if (scale < 1) width *= scale, height *= scale;
+    }
     uint32_t w = (uint32_t)lround(width), h = (uint32_t)lround(height);
     const bool has_pixels = img->texture && img->texture->id && w == img->vector_tex_width && h == img->vector_tex_height;
     VectorRect rect;

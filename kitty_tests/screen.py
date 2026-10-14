@@ -1836,7 +1836,7 @@ class TestScreen(BaseTest):
                 del t.ex
 
         t('XYZ', ('p;XYZ', False))
-        t('a' * VT_PARSER_BUFFER_SIZE, ('p;' + 'a' * (VT_PARSER_BUFFER_SIZE - 8), True), (';' + 'a' * 8, False))
+        t('a' * VT_PARSER_BUFFER_SIZE, ('p;' + 'a' * VT_PARSER_BUFFER_SIZE, False))
         t('', ('p;', False))
         t('!', ('p;!', False))
 

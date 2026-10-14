@@ -1824,7 +1824,7 @@ send_display_report(Screen *self, const char *op, int id, const DisplayInfo *d) 
 // A frame from the program, see docs/extension-framing.rst for what is rejected
 void
 screen_display_protocol(Screen *self, const char *data, size_t sz) {
-    ExtensionFields f;
+    EXTENSION_FIELDS(f);
     char reply[64];
     const char *op;
     long long mode = -1, id = -1;
@@ -1861,7 +1861,7 @@ screen_display_changed(Screen *self, const DisplayInfo *d) {
 // A frame from the program, see docs/extension-framing.rst for what is rejected
 void
 screen_latency(Screen *self, const char *data, size_t sz) {
-    ExtensionFields f;
+    EXTENSION_FIELDS(f);
     char reply[128];
     const char *op;
     long long mode = -1, id = -1;
@@ -1883,7 +1883,7 @@ screen_latency(Screen *self, const char *data, size_t sz) {
 // A frame from the program, see docs/extension-framing.rst for what is rejected
 void
 screen_frame_feedback(Screen *self, const char *data, size_t sz) {
-    ExtensionFields f;
+    EXTENSION_FIELDS(f);
     char reply[128];
     const char *op;
     long long mode = -1, id = -1;
@@ -1935,7 +1935,7 @@ screen_haptic(Screen *self, const char *data, size_t sz) {
     // The taps, numbered as cocoa_haptic_feedback() takes them
     static const char *const taps[] = {"generic", "alignment", "level", "click", "complete"};
     // A frame from the program, see docs/extension-framing.rst for what is rejected
-    ExtensionFields f;
+    EXTENSION_FIELDS(f);
     char reply[128];
     const char *op, *pattern, *target;
     long long id = -1, intensity = 100;

@@ -111,9 +111,9 @@ gesture, not a change of scroll phase, and no report of the frame
 presentation protocol. The page of each extension says which of its reports
 may be merged.
 
-kitty itself merges nothing. What it writes to a program waits in memory
+Silkie itself merges nothing. What it writes to a program waits in memory
 until the program reads it, up to 100 MiB for each window. A write that
-would take that past 100 MiB is dropped whole, and kitty logs an error
+would take that past 100 MiB is dropped whole, and Silkie logs an error
 saying so; a program that has left that much unread has stopped reading.
 
 Modes and consent
@@ -130,5 +130,5 @@ have turned on is reported, so a program reads the mode back rather than
 assume that what it asked for was granted. A terminal also keeps only the
 bits it knows, which a program learns in the same way.
 
-In kitty the user can refuse the hardware identifiers of the tablet pointer
+In Silkie the user can refuse the hardware identifiers of the tablet pointer
 protocol, and does so by default, see :opt:`tablet_hardware_ids`.

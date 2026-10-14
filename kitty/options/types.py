@@ -340,6 +340,7 @@ option_names = (
     'command_on_bell',
     'confirm_os_window_close',
     'copy_on_select',
+    'csi_limit',
     'cursor',
     'cursor_beam_thickness',
     'cursor_blink_interval',
@@ -368,6 +369,7 @@ option_names = (
     'enable_audio_bell',
     'enabled_layouts',
     'env',
+    'escape_limit',
     'exe_search_path',
     'file_transfer_confirmation_bypass',
     'filter_notification',
@@ -507,6 +509,10 @@ option_names = (
     'url_excluded_characters',
     'url_prefixes',
     'url_style',
+    'vector_curve_limit',
+    'vector_dash_limit',
+    'vector_depth_limit',
+    'vector_raster_limit',
     'visual_bell_color',
     'visual_bell_duration',
     'visual_window_select_characters',
@@ -576,6 +582,7 @@ class Options:
     command_on_bell: list[str] = ['none']
     confirm_os_window_close: tuple[int, bool] = (-1, False)
     copy_on_select: str = ''
+    csi_limit: int = 0
     cursor: kitty.fast_data_types.Color | None = Color(204, 204, 204)
     cursor_beam_thickness: float = 1.5
     cursor_blink_interval: tuple[float, kitty.options.utils.EasingFunction, kitty.options.utils.EasingFunction] = (-1.0, kitty.options.utils.EasingFunction(), kitty.options.utils.EasingFunction())
@@ -602,6 +609,7 @@ class Options:
     editor: str = '.'
     enable_audio_bell: bool = True
     enabled_layouts: list[str] = ['fat', 'grid', 'horizontal', 'splits', 'stack', 'tall', 'vertical']
+    escape_limit: int = 0
     file_transfer_confirmation_bypass: str = ''
     focus_follows_mouse: choices_for_focus_follows_mouse = 'no'
     font_family: FontSpec = FontSpec(family=None, style=None, postscript_name=None, full_name=None, system='monospace', axes=(), variable_name=None, features=(), created_from_string='monospace')
@@ -730,6 +738,10 @@ class Options:
     url_excluded_characters: str = ''
     url_prefixes: tuple[str, ...] = ('file', 'ftp', 'ftps', 'gemini', 'git', 'gopher', 'http', 'https', 'irc', 'ircs', 'kitty', 'mailto', 'news', 'sftp', 'ssh')
     url_style: int = 3
+    vector_curve_limit: int = 0
+    vector_dash_limit: int = 0
+    vector_depth_limit: int = 0
+    vector_raster_limit: int = 0
     visual_bell_color: kitty.fast_data_types.Color | None = None
     visual_bell_duration: tuple[float, kitty.options.utils.EasingFunction, kitty.options.utils.EasingFunction] = (0.0, kitty.options.utils.EasingFunction(), kitty.options.utils.EasingFunction())
     visual_window_select_characters: str = '1234567890ABCDEFGHIJKLMNOPQRSTUVWXYZ'

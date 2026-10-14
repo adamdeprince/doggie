@@ -174,8 +174,8 @@ Configuration
 ----------------
 
 The operating system reports most of these values, but not all. Nothing tells
-a terminal that it is on e-ink, so in kitty the :opt:`display_info` option
-declares whatever the OS cannot, overriding detection. Currently, kitty reports
+a terminal that it is on e-ink, so in Silkie the :opt:`display_info` option
+declares whatever the OS cannot, overriding detection. Currently, Silkie reports
 ``kind`` only on macOS, and ``gamut`` on macOS and on Wayland compositors that
 implement the color management protocol. There the compositor gives the
 primaries of the display, and ``gamut`` is the widest of the three whose area
@@ -189,14 +189,14 @@ HDR, which that page says when to expect on macOS and on Wayland.
 factor on macOS, the preferred scale of the surface on Wayland, fractional
 where the compositor says so, and the scale of the desktop taken from
 ``Xft.dpi`` on X11. On X11, and on Wayland with a compositor that states its
-fractional scale, the pixels kitty draws are the pixels of the panel. On macOS
+fractional scale, the pixels Silkie draws are the pixels of the panel. On macOS
 they are those of the framebuffer the system keeps for the display, which are
 the panel's own at the default resolution. At one of the scaled resolutions
 (*More Space* and its neighbours in the display settings) the system resamples
 that framebuffer onto the panel, as a Wayland compositor does for a window it
-could only give a whole number scale. A pixel kitty draws is then not exactly
+could only give a whole number scale. A pixel Silkie draws is then not exactly
 a pixel of the panel, which no application can avoid, and on macOS ``ppi``
-counts the pixels kitty draws.
+counts the pixels Silkie draws.
 
 ``ppi`` is ``0`` for a display that does not say how large it is, as a
 virtual one in a remote session or a virtual machine does not. Window systems

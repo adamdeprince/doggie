@@ -102,10 +102,10 @@ attribute, the ``56`` and ``57`` of the HDR brightness protocol, and the two
 combine: a Display P3 red at twice SDR white is
 ``<ESC>[38:2:1:255:0:0m<ESC>[56:200m``.
 
-In kitty
+In Silkie
 ------------
 
-In kitty the gamut is stored with the color of the cell and survives
+In Silkie the gamut is stored with the color of the cell and survives
 everything the color survives: scrollback, copying with formatting, and
 ``DECRQSS`` reports of the current SGR state, which include the id when it is
 not ``0``. On macOS the window draws in the colorspace selected by
@@ -133,7 +133,7 @@ a gamma of 2.2, the display the colors of a terminal are made for and what a
 compositor takes a window that declares nothing to be. Grays therefore have
 the same values in a wide window as in an sRGB one. The conversion between
 primaries is done in the linear light of the sRGB curve, as all blending in
-kitty is, which can move a saturated untagged color by one step in 255 from
+Silkie is, which can move a saturated untagged color by one step in 255 from
 what an sRGB window shows. A compositor that offers no gamma of 2.2 is given
 the sRGB curve instead. On a compositor without the protocol, and on X11, the
 window draws in sRGB.
@@ -151,5 +151,5 @@ The profile of a PNG is taken to be Display P3 or Rec. 2020 when each of its
 three primaries is within 0.005 in x and in y of the primary of that gamut,
 both adapted to the D50 white point profiles are made for. The pixels are
 then converted from the curve of the profile to the sRGB curve and nothing
-else. Other uses of PNG in kitty, such as background images and window logos,
+else. Other uses of PNG in Silkie, such as background images and window logos,
 are sRGB as before.

@@ -206,8 +206,19 @@ Detailed list of changes
   and group depth. Grow pen-point storage geometrically and detect cycles
   during ancestor traversal.
 
+- Input limits: ``csi_limit``, ``escape_limit``, ``vector_depth_limit``,
+  ``vector_dash_limit``, ``vector_raster_limit`` and ``vector_curve_limit``
+  default to ``0``, which means no limit. Set one to bound a program that
+  tries to exhaust memory or time. OSC 777 frames and ink colors grow to the
+  text that was sent. A CSI parameter past the range of an integer saturates.
+
 - Silkie ink: Grow active stroke storage with simultaneous tools and allocate
   generated records to their formatted size. Report append allocation failures.
+
+- Silkie: Add a project homepage in ``html/`` with feature summaries, source
+  installation, and an extension reference sharing a Goblin Core palette.
+  Include a developer and LLM reading guide linking terminal foundations,
+  upstream kitty and kitten manuals, and source on the ``silkie`` branch.
 
 - Allow docking kitty windows to the edges of other windows or of the tab, for
   status bars, file trees, etc. Create them with :code:`launch --type=window-dock`

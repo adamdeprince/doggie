@@ -11,6 +11,11 @@
 #include <stdbool.h>
 #include <stddef.h>
 
+// 0 means no limit. Defined next to the other options so vector.c does not include state.h.
+unsigned long kitty_vector_depth_limit(void);
+unsigned long kitty_vector_dash_limit(void);
+unsigned long kitty_vector_curve_limit(void);
+
 // A vector image: the element table of a graphics protocol f=200 image, see docs/vector-protocol.rst
 typedef struct VectorDoc VectorDoc;
 

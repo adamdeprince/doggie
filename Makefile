@@ -44,6 +44,7 @@ FORCE:
 man:
 	$(MAKE) -C docs man
 
+.PHONY: html
 html:
 	$(MAKE) -C docs html
 

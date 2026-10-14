@@ -309,7 +309,7 @@ def local_docs() -> str:
     if os.path.isdir(linux_ans):
         return linux_ans
     if from_source:
-        sq = os.path.join(d(base), 'docs', '_build', 'html')
+        sq = os.path.join(d(base), 'html')
         if os.path.isdir(sq):
             return sq
     for candidate in ('/usr', '/usr/local', '/opt/homebrew'):

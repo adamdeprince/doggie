@@ -102,7 +102,7 @@ that does not know the format responds with ``EINVAL``.
 Cursor
 ---------
 
-In kitty the brightness of the block cursor is a configuration option,
+In Silkie the brightness of the block cursor is a configuration option,
 :opt:`cursor_brightness`. A cursor brighter than any text makes it easy to
 find on a crowded screen.
 
@@ -129,7 +129,7 @@ a value obtained at startup is often smaller than one obtained a moment later.
 Configuration
 ----------------
 
-In kitty, HDR output is off by default and enabled with the :opt:`hdr` option.
+In Silkie, HDR output is off by default and enabled with the :opt:`hdr` option.
 The user can cap how bright anything gets with :opt:`hdr_max_headroom`, which
 the terminal applies before clamping to the headroom of the display, and that
 cap is what the query above reports.
@@ -154,7 +154,7 @@ white. It is ``1`` on a display that is not in HDR mode and changes when the
 display is switched into or out of it. A compositor that does not know the
 peak of a display, a virtual one for instance, reports the limit of the signal
 instead, which makes the headroom about ``49``; :opt:`hdr_max_headroom` is what
-keeps kitty from using that.
+keeps Silkie from using that.
 
 The values of an HDR window on Wayland are in the sRGB primaries unless
 :opt:`wayland_colorspace` asks for a wider gamut, see

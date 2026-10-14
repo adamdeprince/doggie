@@ -18,8 +18,8 @@
 #define BUF_SZ (1024u * 1024u)
 // The extra bytes are so loads of large integers such as for AVX 512 dont read past the end of the buffer
 #define BUF_EXTRA (512u / 8u)
-#define MAX_ESCAPE_CODE_LENGTH (BUF_SZ / 4u)
-#define MAX_CSI_PARAMS 256u
+// Dump lines only. A CSI may have any number of parameters; the report is truncated to this buffer.
+#define CSI_DUMP_BYTES (64u * 1024u)
 // Pending input smaller than this, typically the echo of typed characters, is
 // parsed without waiting for input_delay
 #define SMALL_PENDING_INPUT_THRESHOLD 1024u
@@ -75,7 +75,7 @@ _report_error(PyObject *dump_callback, id_type window_id, const char *fmt, ...) 
 
 static void
 _report_params(PyObject *dump_callback, id_type window_id, const char *name, int *params, unsigned int count, bool is_group, Region *r) {
-    static char buf[MAX_CSI_PARAMS * 3] = {0};
+    static char buf[CSI_DUMP_BYTES] = {0};
     unsigned int i, p = 0;
     if (r) p += snprintf(buf + p, sizeof(buf) - 2, "%u;%u;%u;%u;", r->top, r->left, r->bottom, r->right);
     const char *fmt = is_group ? "%i:" : "%i;";
@@ -91,7 +91,7 @@ _report_params(PyObject *dump_callback, id_type window_id, const char *name, int
 
 static void
 _report_params_with_first(PyObject *dump_callback, id_type window_id, const char *name, int first_param, int *params, unsigned count) {
-    static char buf[MAX_CSI_PARAMS * 3] = {0};
+    static char buf[CSI_DUMP_BYTES] = {0};
     unsigned int i, p = 0;
     p += snprintf(buf + p, sizeof(buf) - 2, "%d;", first_param);
     for (i = 0; i < count && p < arraysz(buf) - 20; i++) {
@@ -218,12 +218,13 @@ typedef enum { CSI_START, CSI_BODY, CSI_POST_SECONDARY } CSIState;
 typedef struct ParsedCSI {
     char primary, secondary, trailer;
     CSIState state;
-    unsigned num_params, num_digits;
-    bool is_valid;
+    unsigned num_params, num_digits, param_cap;
+    bool is_valid, over_limit;
+    size_t nbytes;
     uint64_t accumulator;
     int mult;
-    int params[MAX_CSI_PARAMS];
-    uint8_t is_sub_param[MAX_CSI_PARAMS];
+    int *params;
+    uint8_t *is_sub_param;
 } ParsedCSI;
 
 typedef struct PS {
@@ -234,6 +235,13 @@ typedef struct PS {
 
     VTEState vte_state;
     ParsedCSI csi;
+    // Payload of the OSC/APC/DCS/PM/SOS currently being read. The main buffer
+    // only has to hold a window of it; the bytes move here so a sequence longer
+    // than BUF_SZ can finish. escape_limit 0 keeps every byte.
+    uint8_t *esc_data;
+    size_t esc_len, esc_cap;
+    int esc_prev;
+    bool esc_active, esc_over;
 
     // these are temporary variables set only for duration of a parse call
     PyObject *dump_callback;
@@ -259,9 +267,34 @@ reset_csi(ParsedCSI *csi) {
     csi->state = CSI_START;
     csi->num_digits = 0;
     csi->is_valid = false;
+    csi->over_limit = false;
+    csi->nbytes = 0;
     csi->accumulator = 0;
     csi->mult = 1;
-    memset(csi->is_sub_param, 0, sizeof(csi->is_sub_param));
+    if (csi->is_sub_param && csi->param_cap) memset(csi->is_sub_param, 0, csi->param_cap);
+}
+
+// Grow the CSI parameter tables so index need-1 can be written. False on allocation failure.
+static bool
+csi_reserve(ParsedCSI *csi, unsigned need) {
+    if (need <= csi->param_cap) return true;
+    unsigned cap = csi->param_cap ? csi->param_cap : 16u;
+    while (cap < need) {
+        if (cap > UINT_MAX / 2u) {
+            cap = need;
+            break;
+        }
+        cap *= 2u;
+    }
+    int *params = realloc(csi->params, (size_t)cap * sizeof(int));
+    if (!params) return false;
+    csi->params = params;
+    uint8_t *sub = realloc(csi->is_sub_param, cap);
+    if (!sub) return false;
+    memset(sub + csi->param_cap, 0, cap - csi->param_cap);
+    csi->is_sub_param = sub;
+    csi->param_cap = cap;
+    return true;
 }
 // }}}
 
@@ -400,82 +433,89 @@ consume_esc(PS *self) {
 #undef CALL_ED1
 } // }}}
 
-// ST terminator {{{
-static bool
-find_st_terminator(PS *self, size_t *end_pos) {
-    const size_t sz = self->read.sz - self->read.pos;
-    const uint8_t *q = find_either_of_two_bytes(self->buf + self->read.pos, sz, BEL, ESC_ST);
-    if (q == NULL) {
-        self->read.pos += sz;
-        return false;
-    }
-    switch (*q) {
-        case ESC_ST:
-            if (q > self->buf && *(q - 1) == ESC) {
-                *end_pos = q - 1 - self->buf;
-                self->read.pos = *end_pos + 2;
-                return true;
-            }
-            self->read.pos = (q - self->buf) + 1;
-            break;
-        case BEL:
-            *end_pos = q - self->buf;
-            self->read.pos = *end_pos + 1;
-            return true;
-    }
-    return false;
-}
-// }}}
-
 // OSC {{{
 
 #include "parse-multicell-command.h"
 #include "parse-dnd-command.h"
 
-static bool
-is_osc_52(PS *self) {
-    return memcmp(self->buf + self->read.consumed, "52;", 3) == 0;
-}
-
 static void
-continue_osc_52(PS *self) {
-    self->read.pos -= 4;
-    self->read.consumed = self->read.pos;
-    self->buf[self->read.pos++] = '5';
-    self->buf[self->read.pos++] = '2';
-    self->buf[self->read.pos++] = ';';
-    self->buf[self->read.pos++] = ';';
+esc_reset(PS *self) {
+    free(self->esc_data);
+    self->esc_data = NULL;
+    self->esc_len = self->esc_cap = 0;
+    self->esc_prev = -1;
+    self->esc_active = false;
+    self->esc_over = false;
 }
 
+static bool
+esc_push(PS *self, uint8_t ch) {
+    if (self->esc_len + 2 > self->esc_cap) {
+        size_t cap = self->esc_cap ? self->esc_cap : 64u;
+        while (cap < self->esc_len + 2) {
+            if (cap > SIZE_MAX / 2u) return false;
+            cap *= 2u;
+        }
+        uint8_t *p = realloc(self->esc_data, cap);
+        if (!p) return false;
+        self->esc_data = p;
+        self->esc_cap = cap;
+    }
+    self->esc_data[self->esc_len++] = ch;
+    return true;
+}
 
+// Copies the sequence out of the parse window as it arrives, so the window can
+// slide and a payload larger than BUF_SZ still completes. escape_limit, when
+// not zero, discards a sequence that grows past it. The payload is NUL terminated
+// for the dispatchers, which read it as text.
 static bool
 accumulate_st_terminated_esc_code(PS *self, void(dispatch)(PS *, uint8_t *, size_t, bool)) {
-    size_t pos;
-    if (find_st_terminator(self, &pos)) {
-        // technically we should check MAX_ESCAPE_CODE_LENGTH here but lets be generous in what we accept since  we
-        // have a full escape code
-        uint8_t *buf = self->buf + self->read.consumed;
-        size_t sz = pos - self->read.consumed;
-        buf[sz] = 0; // ensure null termination, this is anyway an ST termination char
-        dispatch(self, buf, sz, false);
-        return true;
+    if (!self->esc_active) {
+        esc_reset(self);
+        self->esc_active = true;
     }
-    if (UNLIKELY((pos = self->read.pos - self->read.consumed) > MAX_ESCAPE_CODE_LENGTH)) {
-        if (self->vte_state == VTE_OSC && is_osc_52(self)) {
-            // null terminate
-            self->read.pos--;
-            uint8_t before = self->buf[self->read.pos];
-            self->buf[self->read.pos] = 0;
-            // send partial OSC 52
-            dispatch(self, self->buf + self->read.consumed, self->read.pos - self->read.consumed, true);
-            // continue OSC 52
-            self->buf[self->read.pos] = before;
-            continue_osc_52(self);
-            return accumulate_st_terminated_esc_code(self, dispatch);
+    const unsigned long limit = OPT(escape_limit);
+    size_t i = self->read.pos;
+    const size_t sz = self->read.sz;
+    while (i < sz) {
+        const uint8_t ch = self->buf[i++];
+        const bool term = ch == BEL || (self->esc_prev == ESC && ch == '\\');
+        if (term) {
+            if (ch != BEL && self->esc_len) self->esc_len--;
+            self->read.pos = i;
+            self->read.consumed = i;
+            if (!self->esc_over) {
+                if (!self->esc_data) {
+                    static uint8_t empty = 0;
+                    dispatch(self, &empty, 0, false);
+                } else {
+                    self->esc_data[self->esc_len] = 0;
+                    dispatch(self, self->esc_data, self->esc_len, false);
+                }
+            }
+            esc_reset(self);
+            return true;
         }
-        REPORT_ERROR("%s escape code too long (%zu bytes), ignoring it", vte_state_name(self->vte_state), pos);
-        return true;
+        if (!self->esc_over) {
+            if (limit && self->esc_len >= limit) {
+                self->esc_over = true;
+                free(self->esc_data);
+                self->esc_data = NULL;
+                self->esc_len = self->esc_cap = 0;
+                REPORT_ERROR("%s escape code too long, ignoring it", vte_state_name(self->vte_state));
+            } else if (!esc_push(self, ch)) {
+                self->esc_over = true;
+                free(self->esc_data);
+                self->esc_data = NULL;
+                self->esc_len = self->esc_cap = 0;
+                REPORT_ERROR("Out of memory reading %s escape code, ignoring it", vte_state_name(self->vte_state));
+            }
+        }
+        self->esc_prev = ch;
     }
+    self->read.pos = i;
+    self->read.consumed = i;
     return false;
 }
 
@@ -856,46 +896,91 @@ csi_letter(unsigned code) {
 
 static bool
 commit_csi_param(PS *self UNUSED, ParsedCSI *csi) {
-    if (!csi->num_digits) return true;
-    if (csi->num_params >= MAX_CSI_PARAMS) {
-        REPORT_ERROR("CSI escape code has too many parameters, ignoring it");
-        return false;
+    if (!csi->num_digits || csi->over_limit) return true;
+    if (!csi_reserve(csi, csi->num_params + 1)) {
+        csi->over_limit = true;
+        REPORT_ERROR("Out of memory reading CSI parameters, ignoring it");
+        return true;
     }
-    csi->params[csi->num_params++] = csi->mult * (int64_t)csi->accumulator;
+    // The screen takes an int. A value past that saturates; it is not a protocol limit.
+    int stored;
+    if (csi->mult < 0) stored = csi->accumulator > (uint64_t)INT_MAX + 1u ? INT_MIN : -(int)csi->accumulator;
+    else stored = csi->accumulator > (uint64_t)INT_MAX ? INT_MAX : (int)csi->accumulator;
+    csi->params[csi->num_params++] = stored;
     csi->num_digits = 0;
     csi->mult = 1;
     csi->accumulator = 0;
     return true;
 }
 
-#define MAX_CSI_DIGITS 16u
-
 static void
 csi_add_digit(ParsedCSI *csi, uint8_t ch) {
-    if (UNLIKELY(csi->num_digits >= MAX_CSI_DIGITS)) return;
     csi->num_digits++;
-    csi->accumulator = csi->accumulator * 10 + (ch - '0');
+    if (csi->accumulator > (UINT64_MAX - 9u) / 10u) {
+        csi->accumulator = UINT64_MAX;
+        return;
+    }
+    csi->accumulator = csi->accumulator * 10u + (uint64_t)(ch - '0');
+}
+
+static void
+csi_note_byte(ParsedCSI *csi) {
+    csi->nbytes++;
+    const unsigned long limit = OPT(csi_limit);
+    if (limit && csi->nbytes > limit) csi->over_limit = true;
+}
+
+static bool
+csi_push_zero(ParsedCSI *csi) {
+    if (csi->over_limit) return true;
+    if (!csi_reserve(csi, csi->num_params + 1)) {
+        csi->over_limit = true;
+        return false;
+    }
+    csi->is_sub_param[csi->num_params] = 0;
+    csi->params[csi->num_params++] = 0;
+    return true;
+}
+
+static void
+csi_mark_next(ParsedCSI *csi, bool sub) {
+    if (csi->over_limit) return;
+    if (!csi_reserve(csi, csi->num_params + 1)) {
+        csi->over_limit = true;
+        return;
+    }
+    csi->is_sub_param[csi->num_params] = sub;
+}
+
+static void
+csi_finish(ParsedCSI *csi, uint8_t ch) {
+    csi->trailer = ch;
+    csi->is_valid = !csi->over_limit;
 }
 
 static void
 consume_csi_digit_run(ParsedCSI *csi, const uint8_t *buf, size_t *pos, const size_t sz) {
     // consume a run of parameter digits without re-entering the per-byte state machine
     size_t p = *pos;
-    while (p < sz && (uint8_t)(buf[p] - '0') <= 9) csi_add_digit(csi, buf[p++]);
+    while (p < sz && (uint8_t)(buf[p] - '0') <= 9) {
+        csi_note_byte(csi);
+        csi_add_digit(csi, buf[p++]);
+    }
     *pos = p;
 }
 
 static bool
-csi_parse_loop(PS *self, ParsedCSI *csi, const uint8_t *buf, size_t *pos, const size_t sz, const size_t start) {
+csi_parse_loop(PS *self, ParsedCSI *csi, const uint8_t *buf, size_t *pos, const size_t sz) {
     while (*pos < sz) {
         const uint8_t ch = buf[*pos];
         *pos += 1;
+        csi_note_byte(csi);
         switch (csi->state) {
             case CSI_START:
                 switch (ch) {
                     case CSI_NORMAL_MODE_EMBEDDINGS: dispatch_single_byte_control(self, ch); break;
                     case ';':
-                        csi->params[csi->num_params++] = 0;
+                        csi_push_zero(csi);
                         csi->state = CSI_BODY;
                         break;
                     case DIGIT:
@@ -921,8 +1006,7 @@ csi_parse_loop(PS *self, ParsedCSI *csi, const uint8_t *buf, size_t *pos, const 
                         }
                         break;
                     case CSI_TRAILER:
-                        csi->is_valid = true;
-                        csi->trailer = ch;
+                        csi_finish(csi, ch);
                         return true;
                     default: REPORT_ERROR("Invalid character in CSI: %s (0x%x), ignoring the sequence", csi_letter(ch), ch); return true;
                 }
@@ -931,8 +1015,7 @@ csi_parse_loop(PS *self, ParsedCSI *csi, const uint8_t *buf, size_t *pos, const 
                 switch (ch) {
                     case CSI_NORMAL_MODE_EMBEDDINGS: dispatch_single_byte_control(self, ch); break;
                     case CSI_TRAILER:
-                        csi->is_valid = true;
-                        csi->trailer = ch;
+                        csi_finish(csi, ch);
                         break;
                     default: REPORT_ERROR("Invalid character in CSI: %s (0x%x), ignoring the sequence", csi_letter(ch), ch); break;
                 }
@@ -956,17 +1039,16 @@ csi_parse_loop(PS *self, ParsedCSI *csi, const uint8_t *buf, size_t *pos, const 
                             csi->secondary = '-';
                         }
                         if (!commit_csi_param(self, csi)) return true;
-                        csi->is_valid = true;
-                        csi->trailer = ch;
+                        csi_finish(csi, ch);
                         return true;
                     case ':':
                         if (!commit_csi_param(self, csi)) return true;
-                        if (csi->num_params < MAX_CSI_PARAMS) csi->is_sub_param[csi->num_params] = true;
+                        csi_mark_next(csi, true);
                         break;
                     case ';':
                         if (!csi->num_digits) csi->num_digits++; // Empty means zero
                         if (!commit_csi_param(self, csi)) return true;
-                        if (csi->num_params < MAX_CSI_PARAMS) csi->is_sub_param[csi->num_params] = false;
+                        csi_mark_next(csi, false);
                         break;
                     case DIGIT:
                         csi_add_digit(csi, ch);
@@ -977,17 +1059,16 @@ csi_parse_loop(PS *self, ParsedCSI *csi, const uint8_t *buf, size_t *pos, const 
                 break;
         }
     }
-    if (UNLIKELY(*pos - start > MAX_ESCAPE_CODE_LENGTH)) {
-        REPORT_ERROR("CSI escape too long ignoring and truncating");
-        return true;
-    }
     return false;
 #undef COMMIT_PARAM
 }
 
 static bool
 consume_csi(PS *self) {
-    return csi_parse_loop(self, &self->csi, self->buf, &self->read.pos, self->read.sz, self->read.consumed);
+    // An unfinished CSI has already been reduced to ParsedCSI, so the window may slide.
+    const bool done = csi_parse_loop(self, &self->csi, self->buf, &self->read.pos, self->read.sz);
+    if (!done) self->read.consumed = self->read.pos;
+    return done;
 }
 
 static void
@@ -1061,14 +1142,14 @@ _parse_sgr(PS *self, ParsedCSI *csi) {
     if (csi->trailer == 'r') { // DECCARA
         region = &r;
         if (csi->num_params == 0) {
+            if (!csi_reserve(csi, 5)) return false;
             for (; csi->num_params < 5; csi->num_params++) csi->params[csi->num_params] = 0;
         }
         pos = parse_region(csi, region);
         report_name = "deccara";
         (void)report_name;
     } else if (csi->num_params == 0) {
-        csi->params[0] = 0;
-        csi->num_params++;
+        if (!csi_push_zero(csi)) return false;
     }
     enum State { NORMAL, SUB_PARAMS, COLOR, COLOR1, COLOR3 };
     enum State state = NORMAL;
@@ -1139,8 +1220,10 @@ _parse_sgr(PS *self, ParsedCSI *csi) {
 #ifndef DUMP_COMMANDS
 bool
 parse_sgr(Screen *screen, const uint8_t *buf, unsigned int num, const char *report_name UNUSED, bool is_deccara) {
-    ParsedCSI csi = {.mult = 1};
+    ParsedCSI csi = {0};
     size_t pos = 0;
+    bool ok;
+    csi.mult = 1;
     RAII_ALLOC(uint8_t, _buf, malloc(num + 3));
     if (!_buf) return false;
     memcpy(_buf, buf, num);
@@ -1153,8 +1236,10 @@ parse_sgr(Screen *screen, const uint8_t *buf, unsigned int num, const char *repo
     _buf[num] = 0;
     PS *state = (PS *)screen->vt_parser->state;
     state->screen = screen;
-    if (!csi_parse_loop(state, &csi, _buf, &pos, num, 0)) return false;
-    return _parse_sgr(state, &csi);
+    ok = csi_parse_loop(state, &csi, _buf, &pos, num) && _parse_sgr(state, &csi);
+    free(csi.params);
+    free(csi.is_sub_param);
+    return ok;
 }
 #endif
 
@@ -1732,6 +1817,9 @@ void
 free_vt_parser(Parser *self) {
     if (self->state) {
         PS *s = (PS *)self->state;
+        free(s->csi.params);
+        free(s->csi.is_sub_param);
+        free(s->esc_data);
         utf8_decoder_free(&s->utf8_decoder);
         pthread_mutex_destroy(&s->lock);
         free(self->state);
@@ -1744,6 +1832,7 @@ static void
 reset(PS *self) {
     SET_STATE(NORMAL);
     reset_csi(&self->csi);
+    esc_reset(self);
     utf8_decoder_reset(&self->utf8_decoder);
 }
 
@@ -1812,7 +1901,7 @@ alloc_vt_parser(id_type window_id) {
 #undef EXTRA_INIT
 #define EXTRA_INIT                                                                                                \
     if (0 != PyModule_AddIntConstant(module, "VT_PARSER_BUFFER_SIZE", BUF_SZ)) return 0;                          \
-    if (0 != PyModule_AddIntConstant(module, "VT_PARSER_MAX_ESCAPE_CODE_SIZE", MAX_ESCAPE_CODE_LENGTH)) return 0; \
+    if (0 != PyModule_AddIntConstant(module, "VT_PARSER_MAX_ESCAPE_CODE_SIZE", 0)) return 0; \
     if (!init_simd(module)) return 0;
 
 INIT_TYPE(Parser)

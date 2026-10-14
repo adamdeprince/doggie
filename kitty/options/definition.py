@@ -2757,7 +2757,7 @@ opt(
     option_type='positive_float',
     ctype='float',
     long_text="""
-The maximum brightness, as a multiple of SDR white, that kitty will use for HDR
+The maximum brightness, as a multiple of SDR white, that Silkie will use for HDR
 content. The display may offer more headroom than this, particularly at low
 brightness settings, but very bright text is unpleasant to look at. Requests for
 more brightness are clamped to this value. The display's own limit always applies.
@@ -3459,7 +3459,7 @@ opt(
     long_text="""
 Properties of the display that the operating system cannot report, used to
 answer programs that ask with the :doc:`display protocol </display-protocol>`.
-A space separated list of :code:`key=value` pairs that override what kitty
+A space separated list of :code:`key=value` pairs that override what Silkie
 detects, for example on an e-ink display::
 
     display_info kind=eink color=gray bits=4
@@ -3735,6 +3735,100 @@ so disable this if you know you dont need it. Changing this option
 by reloading the config is not supported, it will not have any effect.
 """,
 )
+egr()  # }}}
+
+
+# limits {{{
+agr(
+    'limits',
+    'Input limits',
+    """
+These limits apply to data a program writes to the terminal. Each one is a
+maximum. :code:`0`, the default, means there is no limit. Set one only to
+contain a program that tries to exhaust memory or time. Goblin View uses
+:code:`csi-limit` and :code:`escape-limit`. Goblin Skiff uses
+:code:`--csi-limit`, :code:`--escape-limit` and
+:code:`--vector-depth-limit`. The dash, raster and curve limits apply when
+Silkie rasterizes a vector image.
+""",
+)
+
+opt(
+    'csi_limit',
+    '0',
+    option_type='positive_int',
+    ctype='uint',
+    long_text="""
+The maximum number of bytes in one CSI sequence, which is everything after
+:code:`ESC [` up to and including its final byte. A longer sequence is ignored.
+:code:`0` means a CSI may be of any length. Cursor motion and editing that name
+a count are still clamped to the screen, which is as far as they can go.
+""",
+)
+
+opt(
+    'escape_limit',
+    '0',
+    option_type='positive_int',
+    ctype='uint',
+    long_text="""
+The maximum number of bytes in one OSC, APC, DCS, PM or SOS sequence, not
+counting its introducer and terminator. A longer sequence is discarded.
+:code:`0` means these sequences may be of any length, which is what a vector
+image, a sixel, a clipboard write or any other payload needs. Clipboard writes
+are still bounded by :opt:`clipboard_max_size`.
+""",
+)
+
+opt(
+    'vector_depth_limit',
+    '0',
+    option_type='positive_int',
+    ctype='uint',
+    long_text="""
+The maximum number of groups a vector element may be nested inside. Deeper
+elements are not drawn. :code:`0` means any depth. A cycle in the parent chain
+is rejected either way, so an unlimited depth cannot loop forever.
+""",
+)
+
+opt(
+    'vector_dash_limit',
+    '0',
+    option_type='positive_int',
+    ctype='uint',
+    long_text="""
+The maximum number of dash boundaries stroked for one path. A path that would
+need more is drawn solid. :code:`0` means every dash is stroked. A pattern much
+finer than the path is long can spend a long time in the rasterizer; set this
+if a program does that.
+""",
+)
+
+opt(
+    'vector_raster_limit',
+    '0',
+    option_type='positive_int',
+    ctype='uint',
+    long_text="""
+The maximum number of pixels in the raster of one vector image. A larger
+requested size is scaled down to fit. :code:`0` means the image is rasterized
+at the size it is shown.
+""",
+)
+
+opt(
+    'vector_curve_limit',
+    '0',
+    option_type='positive_int',
+    ctype='uint',
+    long_text="""
+The maximum number of line segments used to flatten one curve or circle while
+rasterizing a vector image. :code:`0` means as many segments as the flattening
+error asks for. A huge curve can otherwise ask for a very large number.
+""",
+)
+
 egr()  # }}}
 
 

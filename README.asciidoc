@@ -1,16 +1,34 @@
-= kitty - the fast, feature-rich, cross-platform, GPU based terminal
+= Silkie - a terminal emulator with richer input and graphics
 
-If you live in the terminal, *kitty* is made for **you**!
+Silkie is a terminal emulator for macOS and Linux, forked from kitty. It adds
+tablet and touch input, gestures, terminal-side ink, vector graphics, HDR,
+and display and presentation feedback.
 
-See https://sw.kovidgoyal.net/kitty/[the kitty website].
+The main branch is https://github.com/adamdeprince/silkie/tree/silkie[`silkie`].
 
-image:https://github.com/kovidgoyal/kitty/workflows/CI/badge.svg["Build status", link="https://github.com/kovidgoyal/kitty/actions?query=workflow%3ACI"]
+The link:html/index.html[Silkie homepage] explains the project, features, and
+installation. The link:html/developer-guide.html[developer and LLM guide] connects
+terminal conventions, kitty's protocols and kitten tools, and Silkie's additions.
+The link:html/reference.html[extension reference] specifies those additions.
 
-https://sw.kovidgoyal.net/kitty/faq/[Frequently Asked Questions]
+Build and run Silkie from this branch with `./dev.sh build`, then
+`./kitty/launcher/kitty`. See link:html/install.html[installation details].
 
-To ask other questions about kitty usage, use either the https://github.com/kovidgoyal/kitty/discussions/[discussions on GitHub] or the
-https://www.reddit.com/r/KittyTerminal[Reddit community]
+Build the website with:
 
-Packaging status in various repositories:
+[source,sh]
+----
+python3 -m venv /tmp/silkie-site-venv
+/tmp/silkie-site-venv/bin/python -m pip install -r docs/silkie/requirements.txt
+make html SPHINXBUILD=/tmp/silkie-site-venv/bin/sphinx-build
+----
 
-image:https://repology.org/badge/vertical-allrepos/kitty-terminal.svg?columns=3&header=kitty["Packaging status", link="https://repology.org/project/kitty-terminal/versions"]
+Open `html/index.html`. This build needs Sphinx and Furo, and does
+not require a compiled terminal. Its pages include the extension specifications
+from `docs/` and use one shared stylesheet in `docs/silkie/_static/silkie.css`.
+
+kitty extends traditional VT/xterm-style terminal protocols; kittens are its
+companion tools and plugins. For inherited behavior, see the
+https://sw.kovidgoyal.net/kitty/[kitty manual],
+https://sw.kovidgoyal.net/kitty/protocol-extensions/[kitty protocol specifications],
+and https://sw.kovidgoyal.net/kitty/kittens_intro/[kitten documentation].

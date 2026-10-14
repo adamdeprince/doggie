@@ -1,0 +1,35 @@
+{% extends "base.html" %}
+{% block htmltitle %}<title>Silkie — a terminal emulator with richer input and graphics</title>{% endblock %}
+{% block body %}
+{{ super() }}
+{% include "partials/icons.html" %}
+<a class="skip-to-content" href="#main-content">Skip to content</a>
+<header class="site-header">
+  <a class="site-brand" href="{{ pathto('index') }}" aria-label="Silkie home"><span class="brand-mark" aria-hidden="true">s<span>_</span></span>silkie</a>
+  <nav aria-label="Main navigation">
+    <a href="#features">Features</a>
+    <a href="#install">Install</a>
+    <a href="#documentation">Documentation</a>
+    <a href="https://github.com/adamdeprince/silkie/tree/silkie">Source <span aria-hidden="true">↗</span></a>
+  </nav>
+  <button class="theme-toggle" aria-label="Toggle Light / Dark / Auto color theme">
+    <svg class="theme-icon-when-auto-light"><use href="#svg-sun-with-moon"></use></svg>
+    <svg class="theme-icon-when-auto-dark"><use href="#svg-moon-with-sun"></use></svg>
+    <svg class="theme-icon-when-dark"><use href="#svg-moon"></use></svg>
+    <svg class="theme-icon-when-light"><use href="#svg-sun"></use></svg>
+  </button>
+</header>
+<main class="home-content" id="main-content">
+  <p class="site-eyebrow">Silkie / Terminal emulator / macOS + Linux</p>
+  {{ body }}
+</main>
+<footer class="site-footer">
+  <p><strong>Silkie</strong> · Built on kitty by Kovid Goyal and contributors.</p>
+  <nav aria-label="Footer navigation">
+    <a href="https://github.com/adamdeprince/silkie/tree/silkie">Source · silkie branch</a>
+    <a href="https://sw.kovidgoyal.net/kitty/">kitty documentation</a>
+    <a href="https://sw.kovidgoyal.net/kitty/kittens_intro/">Kitten documentation</a>
+    <a href="{{ pathto('developer-guide') }}">Developer &amp; LLM guide</a>
+  </nav>
+</footer>
+{% endblock %}

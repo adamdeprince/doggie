@@ -111,6 +111,8 @@ This feature is independent of mouse reporting. The changed pointer shapes apply
 regardless of whether the terminal program has enabled mouse reporting or not.
 
 
+.. _pointer_image_shapes:
+
 Image shapes
 -------------------
 

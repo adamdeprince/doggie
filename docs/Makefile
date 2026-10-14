@@ -22,12 +22,20 @@ SPHINXAUTOBUILD = sphinx-autobuild
 SPHINXPROJ    = kitty
 SOURCEDIR     = .
 BUILDDIR      = _build
+HTMLDIR       = ../html
 
 # Put it first so that "make" without argument is like "make help".
 help:
 	@$(SPHINXBUILD) -M help "$(SOURCEDIR)" "$(BUILDDIR)" $(SPHINXOPTS) $(O)
 
 .PHONY: help Makefile
+
+# The website introduces Silkie and documents its additions. Inherited kitty behavior is
+# linked upstream; the existing configuration remains available for man pages.
+html dirhtml linkcheck develop-docs: SOURCEDIR = silkie
+
+html: Makefile
+	$(SPHINXBUILD) -b html -d "$(BUILDDIR)/silkie-doctrees" "$(SOURCEDIR)" "$(HTMLDIR)" $(SPHINXOPTS) $(O)
 
 # Catch-all target: route all unknown targets to Sphinx using the new
 # "make mode" option.  $(O) is meant as a shortcut for $(SPHINXOPTS).
@@ -36,4 +44,4 @@ help:
 
 
 develop-docs:
-	$(SPHINXAUTOBUILD) --ignore "$(abspath $(SOURCEDIR))/generated/*" --watch ../kitty --watch ../kittens -b dirhtml "$(SOURCEDIR)" "$(BUILDDIR)" $(SPHINXOPTS)
+	$(SPHINXAUTOBUILD) --ignore "$(abspath $(BUILDDIR))/*" --ignore "$(abspath .)/generated/*" --watch . --watch ../kitty/options/definition.py -b html "$(SOURCEDIR)" "$(HTMLDIR)" $(SPHINXOPTS)

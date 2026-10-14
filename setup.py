@@ -1706,11 +1706,11 @@ def copy_html_docs(ddir: str) -> None:
     safe_makedirs(os.path.dirname(htmldir))
     with suppress(FileNotFoundError):
         shutil.rmtree(htmldir)
-    src = 'docs/_build/html'
-    if not os.path.exists(src):
+    src = 'html'
+    if not os.path.isfile(os.path.join(src, 'index.html')):
         raise SystemExit("""\
-The kitty html docs are missing. If you are building from git then run:
-make && make docs
+The Silkie HTML reference is missing. Build it with:
+make html
 (needs the sphinx documentation system to be installed)
 """)
     shutil.copytree(src, htmldir)
@@ -1744,7 +1744,7 @@ def create_linux_bundle_gunk(ddir: str, args: Options) -> None:
     in_src_launcher = base / (f'{libdir_name}/kitty/kitty/launcher/kitty')
     launcher = base / 'bin/kitty'
     skip_docs = False
-    if not os.path.exists('docs/_build/html'):
+    if not os.path.isfile('html/index.html') or not os.path.isdir('docs/_build/man'):
         kitten_exe = os.path.join(os.path.dirname(str(launcher)), 'kitten')
         if os.path.exists(kitten_exe):
             os.environ['KITTEN_EXE_FOR_DOCS'] = kitten_exe

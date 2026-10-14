@@ -21,8 +21,7 @@
 #define M_PI 3.14159265358979323846
 #endif
 
-#define MAX_DASHES (1u << 18) // dashes in the stroke of one path, beyond which a subpath is stroked solid
-#define TOLERANCE 0.25        // flattening error in device pixels
+#define TOLERANCE 0.25 // flattening error in device pixels
 #define SUBSAMPLES 16         // scanlines per pixel row
 
 // Geometry {{{
@@ -233,7 +232,8 @@ flatten_path(const Path *path, Mat m, double tol, PolyList *out) {
                 double dd = sqrt(ddx * ddx + ddy * ddy);
                 unsigned n = (unsigned)ceil(sqrt(0.75 * dd / tol));
                 if (n < 1) n = 1;
-                if (n > 1024) n = 1024;
+                // vector_curve_limit 0 keeps every segment the error bound asks for.
+                if (kitty_vector_curve_limit() && n > kitty_vector_curve_limit()) n = (unsigned)kitty_vector_curve_limit();
                 for (unsigned k = 1; k <= n; k++) {
                     double t = (double)k / n, mt = 1 - t;
                     double w0 = mt * mt * mt, w1 = 3 * mt * mt * t, w2 = 3 * mt * t * t, w3 = t * t * t;
@@ -481,7 +481,7 @@ emit_circle(StrokeOut *o, double cx, double cy, double r, double tol) {
     if (polygon_misses(box, 4, o->m, o->clip)) return true;
     unsigned n = r > tol ? (unsigned)ceil(M_PI / acos(1 - tol / r)) : 6;
     if (n < 6) n = 6;
-    if (n > 256) n = 256;
+    if (kitty_vector_curve_limit() && n > kitty_vector_curve_limit()) n = (unsigned)kitty_vector_curve_limit();
     double *pts = malloc(2 * n * sizeof(double));
     if (!pts) return false;
     for (unsigned i = 0; i < n; i++) {
@@ -592,7 +592,8 @@ dash_polyline(const Poly *p, const double *dash, unsigned ndash, double phase, P
     }
     // each period of the pattern ends ndash dashes and gaps, and the phase and the ends of the path add a period at most
     const double needed = total > 0 ? (plen / total + 2) * ndash : 0;
-    const bool solid = total <= 0 || n < 2 || !(needed <= (double)*budget);
+    // A null budget means every dash is drawn. A set budget draws the path solid past it.
+    const bool solid = total <= 0 || n < 2 || (budget && !(needed <= (double)*budget));
     if (solid) {
         Poly *q = polylist_new(out);
         if (!q) return false;
@@ -601,7 +602,7 @@ dash_polyline(const Poly *p, const double *dash, unsigned ndash, double phase, P
             if (!poly_add(q, p->pts[2 * i], p->pts[2 * i + 1])) return false;
         return true;
     }
-    *budget -= (size_t)needed;
+    if (budget) *budget -= (size_t)needed;
     // Rounding cannot make the loops below run much past the count above, this only guarantees they end
     size_t steps = 2 * (size_t)needed + 16;
     unsigned idx = 0;
@@ -947,9 +948,11 @@ static int
 elem_matrix(const VectorDoc *d, const Elem *e, Mat *out) {
     Mat m = e->has_t ? e->t : identity;
     uint32_t p = e->parent;
-    size_t remaining = d->live;
+    size_t remaining = d->live, depth = 0;
+    const unsigned long depth_limit = kitty_vector_depth_limit();
     while (p) {
-        if (!remaining--) return -1;
+        if (!remaining--) return -1; // a cycle in the parent chain
+        if (depth_limit && ++depth > depth_limit) return -1;
         const Elem *g = lookup(d, p);
         if (!g || g->type != 'g') return 0;
         if (g->has_t) m = mat_mul(g->t, m);
@@ -1843,10 +1846,11 @@ add_polys(const Render *r, const PolyList *polys, EdgeList *el) {
 static bool
 stroke_polys(PolyList *polys, const Elem *style, double hw, Mat m, Rect clip, double tol, EdgeList *el) {
     StrokeOut out = {el, m, clip};
-    size_t budget = MAX_DASHES;
+    size_t budget_store = kitty_vector_dash_limit();
+    size_t *budget = budget_store ? &budget_store : NULL;
     for (size_t i = 0; i < polys->count; i++) {
         PolyList pieces = {0};
-        bool ok = dash_polyline(polys->item + i, style->dash, style->ndash, style->dash_phase, &pieces, &budget);
+        bool ok = dash_polyline(polys->item + i, style->dash, style->ndash, style->dash_phase, &pieces, budget);
         for (size_t k = 0; ok && k < pieces.count; k++)
             ok = stroke_polyline(&out, pieces.item[k].pts, pieces.item[k].count / 2, pieces.item[k].closed, hw, style->cap, style->join, style->miter_limit, tol);
         polylist_free(&pieces);

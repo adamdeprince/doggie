@@ -1,0 +1,1 @@
+.. include:: ../ink-protocol.rst

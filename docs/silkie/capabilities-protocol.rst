@@ -1,0 +1,1 @@
+.. include:: ../capabilities-protocol.rst

@@ -82,13 +82,13 @@ changing it, and is answered with::
 A program resuming after a reconnection reads the mode to learn whether it
 survived, rather than assuming it did.
 
-In kitty
+In Silkie
 ------------
 
 The two times reported are the :opt:`input_delay` and :opt:`repaint_delay`
 options. While a window has the mode on, output arriving from its program
 wakes the terminal immediately and is parsed without waiting for the input
 delay, and the window is drawn on the same tick. The repaint delay already
-does not apply to output in kitty, so turning the mode on changes only the
+does not apply to output in Silkie, so turning the mode on changes only the
 input side. Input to the program is written to it as soon as it is produced,
 with or without the mode.

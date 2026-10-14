@@ -926,6 +926,9 @@ class Parser:
     def copy_on_select(self, val: str, ans: dict[str, typing.Any]) -> None:
         ans['copy_on_select'] = copy_on_select(val)
 
+    def csi_limit(self, val: str, ans: dict[str, typing.Any]) -> None:
+        ans['csi_limit'] = positive_int(val)
+
     def cursor(self, val: str, ans: dict[str, typing.Any]) -> None:
         ans['cursor'] = to_color_or_none(val)
 
@@ -1016,6 +1019,9 @@ class Parser:
     def env(self, val: str, ans: dict[str, typing.Any]) -> None:
         for k, v in env(val, ans["env"]):
             ans["env"][k] = v
+
+    def escape_limit(self, val: str, ans: dict[str, typing.Any]) -> None:
+        ans['escape_limit'] = positive_int(val)
 
     def exe_search_path(self, val: str, ans: dict[str, typing.Any]) -> None:
         for k, v in store_multiple(val, ans["exe_search_path"]):
@@ -1531,6 +1537,18 @@ class Parser:
 
     def url_style(self, val: str, ans: dict[str, typing.Any]) -> None:
         ans['url_style'] = url_style(val)
+
+    def vector_curve_limit(self, val: str, ans: dict[str, typing.Any]) -> None:
+        ans['vector_curve_limit'] = positive_int(val)
+
+    def vector_dash_limit(self, val: str, ans: dict[str, typing.Any]) -> None:
+        ans['vector_dash_limit'] = positive_int(val)
+
+    def vector_depth_limit(self, val: str, ans: dict[str, typing.Any]) -> None:
+        ans['vector_depth_limit'] = positive_int(val)
+
+    def vector_raster_limit(self, val: str, ans: dict[str, typing.Any]) -> None:
+        ans['vector_raster_limit'] = positive_int(val)
 
     def visual_bell_color(self, val: str, ans: dict[str, typing.Any]) -> None:
         ans['visual_bell_color'] = to_color_or_none(val)
