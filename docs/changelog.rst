@@ -202,6 +202,10 @@ Detailed list of changes
 0.50.0 [future]
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
+- Silkie vectors: Remove fixed limits on numeric-token length, element count,
+  and group depth. Grow pen-point storage geometrically and detect cycles
+  during ancestor traversal.
+
 - Allow docking kitty windows to the edges of other windows or of the tab, for
   status bars, file trees, etc. Create them with :code:`launch --type=window-dock`
   or :code:`launch --type=tab-dock`, see :ref:`docks`
