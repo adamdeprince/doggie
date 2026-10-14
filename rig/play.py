@@ -511,12 +511,20 @@ def touch(rig: Rig) -> None:
 
     downs = [['down', '$serial', '$time', '$surface', i, 300 + 100 * i, 400] for i in range(3)]
     shapes = [['shape', 0, 20, 12], ['orientation', 0, 45]]
+    # The shape of a contact is in wl_touch from version 6. The proxy sends nothing a client did not bind the version
+    # for, so a terminal that bound an older seat is sent no shape and must report none
+    touch_versions = rig.alive()['interfaces'].get('wl_touch') or [0]
+    shaped = (
+        {'valid': 128, 'major': px(20), 'minor': px(12), 'angle': 4500}
+        if min(touch_versions) >= 6
+        else {'valid': 0, 'major': 'absent', 'minor': 'absent', 'angle': 'absent'}
+    )
     frame(
-        'three fingers down, the first with a shape',
+        'three fingers down, the first with a shape' if min(touch_versions) >= 6 else 'three fingers down, too old a seat for shapes',
         *downs,
         *shapes,
         expect=[
-            {'phase': 1, 'contact': 0, 'x': px(300), 'buttons': 1, 'valid': 128, 'major': px(20), 'minor': px(12), 'angle': 4500},
+            {'phase': 1, 'contact': 0, 'x': px(300), 'buttons': 1, **shaped},
             {'phase': 1, 'contact': 1, 'x': px(400), 'buttons': 1},
             {'phase': 1, 'contact': 2, 'x': px(500), 'buttons': 1},
         ],
