@@ -18,6 +18,7 @@
 #include <fcntl.h>
 #include <sys/mman.h>
 #include <stdlib.h>
+#include <stdarg.h>
 
 #include <zlib.h>
 #include <structmember.h>
@@ -2008,14 +2009,33 @@ ink_point(const GraphicsManager *self, const Image *img, const ImageRef *ref, ui
 }
 
 static bool
-ink_apply(GraphicsManager *self, Image *img, const char *records, int sz) {
-    if (sz <= 0) return false;
+ink_apply(GraphicsManager *self, Image *img, const char *format, ...) {
+    va_list args, copy;
+    va_start(args, format);
+    va_copy(copy, args);
+    const int sz = vsnprintf(NULL, 0, format, copy);
+    va_end(copy);
+    char *records = sz > 0 ? malloc((size_t)sz + 1) : NULL;
+    if (!records) {
+        va_end(args);
+        log_error("Cannot format ink record: allocation or formatting failed");
+        return false;
+    }
+    const int written = vsnprintf(records, (size_t)sz + 1, format, args);
+    va_end(args);
+    if (written != sz) {
+        free(records);
+        log_error("Cannot format ink record");
+        return false;
+    }
     const size_t before = vector_doc_size(img->vector);
     const char *err = vector_doc_apply(img->vector, (const uint8_t *)records, (size_t)sz);
+    free(records);
     img->used_storage = vector_doc_size(img->vector);
     self->used_storage = self->used_storage - MIN(self->used_storage, before) + img->used_storage;
     img->atime = monotonic();
     set_layers_dirty(self);
+    if (err) log_error("Cannot apply ink record: %s", err);
     return err == NULL;
 }
 
@@ -2033,11 +2053,7 @@ grman_ink_start(GraphicsManager *self, const InkView *view, uint32_t image, uint
         if (!under || ref->z_index > under->z_index || (ref->z_index == under->z_index && ref->internal_id > under->internal_id)) under = ref;
     }
     if (!under || !ink_point(self, img, under, group, view, &p.x, &p.y)) return false;
-    char records[256];
-    int n = snprintf(records, sizeof(records), "k id=%u", element);
-    if (group) n += snprintf(records + n, sizeof(records) - n, " g=%u", group);
-    n += snprintf(records + n, sizeof(records) - n, " pts=%.17g,%.17g,%.17g fill=%s\n", p.x, p.y, p.width, fill);
-    if (!ink_apply(self, img, records, n)) return false;
+    if (!ink_apply(self, img, "k id=%u g=%u pts=%.17g,%.17g,%.17g fill=%s\n", element, group, p.x, p.y, p.width, fill)) return false;
     *target = (InkStrokeTarget){.image = img->internal_id, .placement = under->internal_id};
     return true;
 }
@@ -2049,17 +2065,14 @@ grman_ink_append(GraphicsManager *self, const InkView *view, InkStrokeTarget tar
     if (!ref) return false;  // the image or the placement the stroke began in has gone
     // a position that cannot be taken into the group is left out, the stroke goes on with the next
     if (!ink_point(self, img, ref, group, view, &p.x, &p.y)) return true;
-    char records[128];
-    ink_apply(self, img, records, snprintf(records, sizeof(records), "a id=%u pts=%.17g,%.17g,%.17g\n", element, p.x, p.y, p.width));
-    return true;
+    return ink_apply(self, img, "a id=%u pts=%.17g,%.17g,%.17g\n", element, p.x, p.y, p.width);
 }
 
 void
 grman_ink_remove(GraphicsManager *self, InkStrokeTarget target, uint32_t element) {
     Image *img = img_by_internal_id(self, target.image);
     if (!img || !img->vector) return;
-    char records[32];
-    ink_apply(self, img, records, snprintf(records, sizeof(records), "x id=%u\n", element));
+    ink_apply(self, img, "x id=%u\n", element);
 }
 
 // }}}

@@ -202,6 +202,9 @@ Detailed list of changes
 0.50.0 [future]
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
+- Silkie ink: Grow active stroke storage with simultaneous tools and allocate
+  generated records to their formatted size. Report append allocation failures.
+
 - Allow docking kitty windows to the edges of other windows or of the tab, for
   status bars, file trees, etc. Create them with :code:`launch --type=window-dock`
   or :code:`launch --type=tab-dock`, see :ref:`docks`

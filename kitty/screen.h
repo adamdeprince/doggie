@@ -291,9 +291,9 @@ typedef struct {
     } pointer;
     struct {
         bool on;
-        unsigned num_strokes;
+        size_t num_strokes, capacity;
         InkBrush brush;
-        InkStroke strokes[4];  // those being drawn, one for each tool that is down
+        InkStroke *strokes; // grows with the number of tools drawing at once
     } ink;
 } Screen;
 

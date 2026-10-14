@@ -330,6 +330,7 @@ Implementation notes for silkie
 A report is turned into its record and applied before the report is written
 to the program, and the image is drawn again with the next frame through the
 partial redraw of :doc:`vector images <vector-protocol>`, which draws only
-the rectangle around the new piece of the stroke. silkie draws for four
-tools at once. The points of a stroke count toward the image storage quota
+the rectangle around the new piece of the stroke. Silkie grows its active
+stroke storage as tools begin drawing; there is no fixed limit on simultaneous
+tools. The points of a stroke count toward the image storage quota
 like those a program sends.

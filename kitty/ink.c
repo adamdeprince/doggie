@@ -63,7 +63,7 @@ number(double v, char *buf, size_t sz) {
 
 static void
 end_strokes(Screen *self) {
-    for (size_t i = 0; i < arraysz(self->ink.strokes); i++) self->ink.strokes[i].active = false;
+    for (size_t i = 0; i < self->ink.capacity; i++) self->ink.strokes[i].active = false;
     self->ink.num_strokes = 0;
 }
 
@@ -76,6 +76,7 @@ screen_ink_off(Screen *self) {
 
 void
 screen_ink_reset(Screen *self) {
+    free(self->ink.strokes);
     zero_at_ptr(&self->ink);
 }
 
@@ -148,7 +149,7 @@ screen_ink(Screen *self, const char *data, size_t sz) {
 
 static InkStroke *
 stroke_of(Screen *self, const PointerReport *r) {
-    for (size_t i = 0; self->ink.num_strokes && i < arraysz(self->ink.strokes); i++) {
+    for (size_t i = 0; self->ink.num_strokes && i < self->ink.capacity; i++) {
         InkStroke *s = self->ink.strokes + i;
         if (s->active && s->device == r->device && s->contact == r->contact) return s;
     }
@@ -183,10 +184,27 @@ start_stroke(Screen *self, PointerReport *r) {
     InkBrush *b = &self->ink.brush;
     if (!self->ink.on || !b->remaining || r->tool < 0 || r->tool > 8 || !(b->tools & (1u << r->tool))) return;
     InkStroke *s = NULL;
-    for (size_t i = 0; i < arraysz(self->ink.strokes) && !s; i++) {
+    for (size_t i = 0; i < self->ink.capacity && !s; i++) {
         if (!self->ink.strokes[i].active) s = self->ink.strokes + i;
     }
-    if (!s) return;
+    if (!s) {
+        const size_t capacity = self->ink.capacity;
+        const size_t max = SIZE_MAX / sizeof(InkStroke);
+        if (capacity == max) {
+            log_error("Cannot grow ink stroke storage: size overflow");
+            return;
+        }
+        const size_t nc = capacity > max / 2 ? max : (capacity ? capacity * 2 : 8);
+        InkStroke *strokes = realloc(self->ink.strokes, nc * sizeof(InkStroke));
+        if (!strokes) {
+            log_error("Cannot grow ink stroke storage: out of memory");
+            return;
+        }
+        memset(strokes + capacity, 0, (nc - capacity) * sizeof(InkStroke));
+        self->ink.strokes = strokes;
+        self->ink.capacity = nc;
+        s = strokes + capacity;
+    }
     const InkView view = view_of(self);
     InkStrokeTarget target;
     if (!grman_ink_start(self->grman, &view, b->image, b->group, b->next_id, b->fill, point_of(r, b->w0, b->w1, b->exponent), &target)) return;

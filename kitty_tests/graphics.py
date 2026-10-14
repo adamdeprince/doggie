@@ -2130,7 +2130,10 @@ class TestGraphics(BaseTest):
         on_top = (0, 11 * ch, 100, 80, 0, 0, 100, 80)
         self.ae(report(1, 99, 11 * ch + 2, 65535), 8)  # inside the first placement as well
         report(3, 99, 11 * ch + 2)
-        same_as(stroke(7, pts, '#800080') + stroke(8, [point(99, 11 * ch + 2, 65535, on_top, 1, 6), point(99, 11 * ch + 2, 0, on_top, 1, 6)], '#800080'), scene, 2)
+        same_as(
+            stroke(7, pts, '#800080') + stroke(8, [point(99, 11 * ch + 2, 65535, on_top, 1, 6), point(99, 11 * ch + 2, 0, on_top, 1, 6)], '#800080'),
+            scene, 2,
+        )
 
         # when the image goes the stroke on it is over, and the reports go on
         self.ae(report(1, 130.5, 140, 40000), 9)
@@ -2139,6 +2142,22 @@ class TestGraphics(BaseTest):
         self.assertIsNone(report(3, 140, 140))
         self.assertIsNone(report(1, 130.5, 140, 40000))
         report(3, 130.5, 140)
+
+        # More simultaneous tools than the old four-slot array, followed by reuse and reset.
+        parse_bytes(s, b'\x1b[H')
+        self.ae(gr(base, a='T', f=200, i=1, s=100, v=80).code, 'OK')
+        self.ae(ink('op=brush:i=1:k=10000:n=1000:w1=2'), '')
+        for batch in range(3):
+            for device in range(128):
+                self.ae(report(1, 20, 20, device=1000 + device), 10000 + batch * 128 + device)
+            for device in range(128):
+                report(2, 30, 30, device=1000 + device)
+                report(3, 40, 40, device=1000 + device)
+        self.ae(elements(), 2 + 384)
+        ink('op=mode:mode=0')
+        ink('op=mode:mode=1')
+        self.ae(report(1, 20, 20, device=1000), 10384)
+        report(3, 40, 40, device=1000)
 
         # without tool reports there is nothing to ink, and a reset forgets the brush
         self.ae(ink('op=brush:i=1:k=600:w1=3'), '')
