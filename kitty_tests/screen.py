@@ -1133,6 +1133,8 @@ class TestScreen(BaseTest):
         # The capabilities are still only the trackpad's
         parse_bytes(s, b'\x1b]777;haptic;v=1:op=query:id=8\x1b\\')
         self.ae(c.wtcbuf, f'\x1b]777;haptic;v=1:op=cap:id=8:caps={1 if is_macos else 0}\x1b\\'.encode())
+        # A frame from a program follows the rules every extension shares, see docs/extension-framing.rst
+        assert_extension_frames(self, s, 'haptic')
 
     def test_cursor_hidden(self):
         s = self.create_screen()
