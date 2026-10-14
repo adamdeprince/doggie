@@ -1685,8 +1685,10 @@ handleTouches(_GLFWwindow *window, NSView *view, NSEvent *event, GLFWTouchEventT
         if (state != GLFW_TOUCH_POINT_PRESSED) down_before++;
         if (state != GLFW_TOUCH_POINT_RELEASED) down_after++;
         device = touch.deviceSize;
-        // The system judges whether a touch is a finger at work or a thumb or palm at rest, and can change its
-        // mind while the touch is down. A touch it changes its mind about is reported even when it did not move
+        // The system marks a touch it takes to be at rest on the pad, and can change its mind while the touch is down.
+        // A touch it changes its mind about is reported even when it did not move. Of a touch it does not mark it says
+        // nothing: a palm laid on the pad was seen to come as a touch like any other, so such a touch is not known to
+        // be meant
         const bool resting = touch.isResting;
         if (state == GLFW_TOUCH_POINT_STATIONARY && resting != touch_resting[id]) state = GLFW_TOUCH_POINT_MOVED;
         touch_resting[id] = resting;
@@ -1694,7 +1696,7 @@ handleTouches(_GLFWwindow *window, NSView *view, NSEvent *event, GLFWTouchEventT
         points[n++] = (GLFWTouchPoint){
             .id = id,
             .state = state,
-            .confidence = resting ? GLFW_TOUCH_ACCIDENTAL : GLFW_TOUCH_INTENDED,
+            .confidence = resting ? GLFW_TOUCH_ACCIDENTAL : GLFW_TOUCH_CONFIDENCE_UNKNOWN,
             .x = touch.normalizedPosition.x,
             .y = 1 - touch.normalizedPosition.y,
         };

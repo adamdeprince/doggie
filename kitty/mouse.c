@@ -2103,7 +2103,7 @@ screen_tablet_pointer(Screen *screen, const char *data, size_t sz) {
 }
 
 static id_type touch_pointer_window;  // the window that captured the fingers in progress
-static bool touch_pointer_meant;      // one of those fingers is down that the system does not take for an accident
+static bool touch_pointer_at_rest;    // those of them that are down are all ones the system takes for an accident
 
 static TabletTool *
 tablet_tool(uint64_t device) {
@@ -2348,13 +2348,17 @@ touch_pointer_event(const GLFWTouchEvent *ev) {
     OSWindow *osw = global_state.callback_os_window;
     Window *w = NULL;
     // A contact the system takes for an accident, as a thumb resting on a touchpad, does not keep a sequence open: a
-    // finger that lands when only such contacts are down begins a sequence of its own, with a window of its own. Only
-    // a system that judges its contacts has such sequences, on any other a sequence is what it was before there was conf
-    const GLFWTouchPoint *meant = NULL;
-    for (size_t i = 0; i < ev->num_points && !meant; i++) {
-        if (ev->points[i].state != GLFW_TOUCH_POINT_RELEASED && ev->points[i].confidence != GLFW_TOUCH_ACCIDENTAL) meant = ev->points + i;
+    // finger that lands when only such contacts are down begins a sequence of its own, with a window of its own. A
+    // system that marks no contact as an accident has no such sequence, and there a sequence is what it always was
+    const GLFWTouchPoint *meant = NULL;  // the first contact that is down and is not taken for an accident
+    bool accident_down = false;
+    for (size_t i = 0; i < ev->num_points; i++) {
+        const GLFWTouchPoint *p = ev->points + i;
+        if (p->state == GLFW_TOUCH_POINT_RELEASED) continue;
+        if (p->confidence == GLFW_TOUCH_ACCIDENTAL) accident_down = true;
+        else if (!meant) meant = p;
     }
-    const bool begins_again = ev->type == GLFW_TOUCH_UPDATE && meant && meant->confidence == GLFW_TOUCH_INTENDED && !touch_pointer_meant;
+    const bool begins_again = ev->type == GLFW_TOUCH_UPDATE && meant && touch_pointer_at_rest;
     bool moved_window = false;
     if (ev->type == GLFW_TOUCH_BEGIN || begins_again) {
         if (ev->indirect) w = pointer_window(POINTER_TOUCH);
@@ -2376,8 +2380,8 @@ touch_pointer_event(const GLFWTouchEvent *ev) {
         }
         touch_pointer_window = w ? w->id : 0;
     } else if (touch_pointer_window) w = window_for_window_id(touch_pointer_window);
-    touch_pointer_meant = meant != NULL;
-    if (ev->type == GLFW_TOUCH_END || ev->type == GLFW_TOUCH_CANCEL) touch_pointer_window = 0, touch_pointer_meant = false;
+    touch_pointer_at_rest = !meant && accident_down;
+    if (ev->type == GLFW_TOUCH_END || ev->type == GLFW_TOUCH_CANCEL) touch_pointer_window = 0, touch_pointer_at_rest = false;
     if (!w) return false;
     Screen *screen = w->render_data.screen;
     const WindowGeometry *g = &w->render_data.geometry;
