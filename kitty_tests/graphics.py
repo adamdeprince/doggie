@@ -14,6 +14,7 @@ from io import BytesIO
 from kitty.fast_data_types import base64_decode, base64_encode, load_png_data, shm_unlink, shm_write
 
 from .base import BaseTest, parse_bytes
+from .extension_frames import assert_extension_frames
 
 try:
     from PIL import Image
@@ -1979,6 +1980,8 @@ class TestGraphics(BaseTest):
         parse_bytes(s, b'\x1b]777;ink;garbage\x1b\\')
         self.ae(c.wtcbuf, b'')
         self.ae(str(s.line(0)), '')
+        # A frame from a program follows the rules every extension shares, see docs/extension-framing.rst
+        assert_extension_frames(self, s, 'ink')
 
         parse_bytes(s, b'\x1b[2;3H')  # the image goes at the third column of the second line
         self.ae(gr(base, a='T', f=200, i=1, s=100, v=80, C=1).code, 'OK')
@@ -1992,7 +1995,7 @@ class TestGraphics(BaseTest):
         for bad in (
             'k=100:w1=5', 'i=1:w1=5', 'i=1:k=100', 'i=0:k=100:w1=5', 'i=1:k=0:w1=5', 'i=1:k=100:n=0:w1=5', 'i=1:k=4294967295:n=2:w1=5',
             'i=1:k=100:w1=-1', 'i=1:k=100:w1=5:w0=x', 'i=1:k=100:w1=5:e=0', 'i=1:k=100:w1=5:fill=none', 'i=1:k=100:w1=5:fill=red',
-            'i=1:k=100:w1=5:tools=0', 'i=1:k=100:w1=5:tools=512', 'i=1:k=1x:w1=5', 'i=1:k=100:w1=inf',
+            'i=1:k=100:w1=5:tools=0', 'i=1:k=100:w1=5:tools=512', 'i=1:k=1x:w1=5', 'i=1:k=100:w1=inf', 'i=1:k=100:w1=5:w1=6',
         ):
             self.ae(ink('op=brush:' + bad), '')
             self.ae(ink('op=mode'), '\x1b]777;ink;v=1:op=mode:mode=0\x1b\\', bad)
