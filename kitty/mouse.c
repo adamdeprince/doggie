@@ -1700,10 +1700,25 @@ gesture_mode_bit(int kind) {
     return kind == GESTURE_HOLD ? 2 : 1;
 }
 
+// The time of a report: t in milliseconds on monotonic(), the clock of every
+// extension, and the microseconds past it when the system stamps its events
+// that finely. The same computation as for the tablet pointer protocol
+static int
+write_gesture_time(char *buf, size_t sz, monotonic_t timestamp, bool fine) {
+    const monotonic_t when = MAX(0, timestamp);
+    int n = snprintf(buf, sz, ":t=%llu", (unsigned long long)(when / MONOTONIC_T_1e6));
+    if (fine) n += snprintf(buf + n, sz - n, ":tu=%u", (unsigned)(when / MONOTONIC_T_1e3 % 1000));
+    return n;
+}
+
 static void
-write_gesture_report(Screen *screen, int kind, int phase, int x, int y, int mods, double delta, double total, int dx, int dy, unsigned fingers) {
+write_gesture_report(
+    Screen *screen, int kind, int phase, monotonic_t timestamp, bool fine, int x, int y, int mods, double delta, double total, int dx, int dy,
+    unsigned fingers) {
     char buf[256];
-    int n = snprintf(buf, sizeof(buf), "777;gesture;v=1:op=event:kind=%d:phase=%d:x=%d:y=%d:mods=%d", kind, phase, x, y, mods);
+    int n = snprintf(buf, sizeof(buf), "777;gesture;v=1:op=event:kind=%d:phase=%d", kind, phase);
+    n += write_gesture_time(buf + n, sizeof(buf) - n, timestamp, fine);
+    n += snprintf(buf + n, sizeof(buf) - n, ":x=%d:y=%d:mods=%d", x, y, mods);
     switch (kind) {
         case GESTURE_PINCH: n += snprintf(buf + n, sizeof(buf) - n, ":scale=%d:total=%d", (int)round(delta * 1000), (int)round(total * 1000)); break;
         case GESTURE_ROTATE: n += snprintf(buf + n, sizeof(buf) - n, ":angle=%d:total=%d", (int)round(delta * 100), (int)round(total * 100)); break;
@@ -1714,11 +1729,12 @@ write_gesture_report(Screen *screen, int kind, int phase, int x, int y, int mods
 }
 
 bool
-screen_gesture_report(Screen *screen, int kind, int phase, int x, int y, int mods, double delta, int dx, int dy, unsigned fingers) {
+screen_gesture_report(
+    Screen *screen, int kind, int phase, monotonic_t timestamp, bool fine, int x, int y, int mods, double delta, int dx, int dy, unsigned fingers) {
     if (kind < GESTURE_PINCH || kind > GESTURE_HOLD || !(screen->gesture.mode & gesture_mode_bit(kind))) return false;
     GestureState *g = screen->gesture.gestures + kind;
     if (phase == GESTURE_BEGIN) {
-        if (g->active) write_gesture_report(screen, kind, GESTURE_CANCEL, g->x, g->y, g->mods, 0, g->total, 0, 0, g->fingers);
+        if (g->active) write_gesture_report(screen, kind, GESTURE_CANCEL, timestamp, fine, g->x, g->y, g->mods, 0, g->total, 0, 0, g->fingers);
         g->active = true;
         g->total = kind == GESTURE_PINCH ? 1 : 0;
         g->fingers = fingers;  // the system tells the number of fingers when a gesture begins
@@ -1728,18 +1744,21 @@ screen_gesture_report(Screen *screen, int kind, int phase, int x, int y, int mod
     g->mods = mods;
     if (kind == GESTURE_PINCH) g->total *= 1 + delta;
     else g->total += delta;
-    write_gesture_report(screen, kind, phase, x, y, mods, delta, g->total, dx, dy, g->fingers);
+    write_gesture_report(screen, kind, phase, timestamp, fine, x, y, mods, delta, g->total, dx, dy, g->fingers);
     if (phase >= GESTURE_END) g->active = false;
     return true;
 }
 
+// Cancels the gestures in progress. The system said nothing, so they are
+// cancelled at the time the terminal decided to
 void
 screen_gesture_cancel(Screen *screen) {
+    const monotonic_t now = monotonic();
     for (int kind = GESTURE_PINCH; kind <= GESTURE_HOLD; kind++) {
         GestureState *g = screen->gesture.gestures + kind;
         if (!g->active) continue;
         g->active = false;
-        write_gesture_report(screen, kind, GESTURE_CANCEL, g->x, g->y, g->mods, 0, g->total, 0, 0, g->fingers);
+        write_gesture_report(screen, kind, GESTURE_CANCEL, now, false, g->x, g->y, g->mods, 0, g->total, 0, 0, g->fingers);
     }
 }
 
@@ -1791,20 +1810,24 @@ gesture_event(const GLFWGestureEvent *ev) {
 #undef coord
     const int mods = (ev->keyboard_modifiers & GLFW_MOD_SHIFT ? 1 : 0) | (ev->keyboard_modifiers & GLFW_MOD_ALT ? 2 : 0) |
                      (ev->keyboard_modifiers & GLFW_MOD_CONTROL ? 4 : 0) | (ev->keyboard_modifiers & GLFW_MOD_SUPER ? 8 : 0);
-    return screen_gesture_report(w->render_data.screen, ev->kind, ev->phase, x, y, mods, ev->delta, ev->dx, ev->dy, ev->fingers);
+    return screen_gesture_report(
+        w->render_data.screen, ev->kind, ev->phase, ev->timestamp, ev->timestamp_is_fine, x, y, mods, ev->delta, ev->dx, ev->dy, ev->fingers);
 }
 
+// t is in milliseconds and tu in microseconds past it, absent when negative
 static PyObject *
 send_gesture_report(PyObject *self UNUSED, PyObject *args, PyObject *kw) {
     Screen *screen;
-    int kind, phase, x, y, mods = 0, dx = 0, dy = 0;
+    int kind, phase, x, y, mods = 0, dx = 0, dy = 0, tu = -1;
     unsigned fingers = 0;
+    unsigned long long t = 0;
     double delta = 0;
-    static const char *kwlist[] = {"screen", "kind", "phase", "x", "y", "mods", "delta", "dx", "dy", "fingers", NULL};
+    static const char *kwlist[] = {"screen", "kind", "phase", "x", "y", "mods", "delta", "dx", "dy", "fingers", "t", "tu", NULL};
     if (!PyArg_ParseTupleAndKeywords(
-            args, kw, "O!iiii|idiiI", (char **)kwlist, &Screen_Type, &screen, &kind, &phase, &x, &y, &mods, &delta, &dx, &dy, &fingers))
+            args, kw, "O!iiii|idiiIKi", (char **)kwlist, &Screen_Type, &screen, &kind, &phase, &x, &y, &mods, &delta, &dx, &dy, &fingers, &t, &tu))
         return NULL;
-    if (screen_gesture_report(screen, kind, phase, x, y, mods, delta, dx, dy, fingers)) Py_RETURN_TRUE;
+    const monotonic_t timestamp = (monotonic_t)t * MONOTONIC_T_1e6 + (monotonic_t)MAX(tu, 0) * MONOTONIC_T_1e3;
+    if (screen_gesture_report(screen, kind, phase, timestamp, tu >= 0, x, y, mods, delta, dx, dy, fingers)) Py_RETURN_TRUE;
     Py_RETURN_FALSE;
 }
 // }}}

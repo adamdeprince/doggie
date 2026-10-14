@@ -679,13 +679,14 @@ static const struct wl_keyboard_listener keyboardListener = {
 };
 
 static void
-inputGesture(GLFWGestureKind kind, GLFWGesturePhase phase, double delta, int dx, int dy, uint32_t fingers) {
+inputGesture(GLFWGestureKind kind, GLFWGesturePhase phase, uint32_t time, double delta, int dx, int dy, uint32_t fingers) {
     _GLFWwindow *window = _glfw.wl.pointerFocus;
     if (!window) return;
     GLFWGestureEvent ev = {
         .kind = kind,
         .phase = phase,
         .keyboard_modifiers = _glfw.wl.xkb.states.modifiers,
+        .timestamp = event_time_to_monotonic(time),
         .x = window->wl.cursorPosX,
         .y = window->wl.cursorPosY,
         .delta = delta,
@@ -702,17 +703,17 @@ holdGestureHandleBegin(
     void *data UNUSED,
     struct zwp_pointer_gesture_hold_v1 *gesture UNUSED,
     uint32_t serial UNUSED,
-    uint32_t time UNUSED,
+    uint32_t time,
     struct wl_surface *surface UNUSED,
     uint32_t fingers) {
     glfw_cancel_momentum_scroll();
-    inputGesture(GLFW_GESTURE_HOLD, GLFW_GESTURE_BEGIN, 0, 0, 0, fingers);
+    inputGesture(GLFW_GESTURE_HOLD, GLFW_GESTURE_BEGIN, time, 0, 0, 0, fingers);
 }
 
 static void
-holdGestureHandleEnd(void *data UNUSED, struct zwp_pointer_gesture_hold_v1 *gesture UNUSED, uint32_t serial UNUSED, uint32_t time UNUSED, int32_t cancelled) {
+holdGestureHandleEnd(void *data UNUSED, struct zwp_pointer_gesture_hold_v1 *gesture UNUSED, uint32_t serial UNUSED, uint32_t time, int32_t cancelled) {
     // A hold is cancelled when its fingers start to move, which makes it some other gesture
-    inputGesture(GLFW_GESTURE_HOLD, cancelled ? GLFW_GESTURE_CANCEL : GLFW_GESTURE_END, 0, 0, 0, 0);
+    inputGesture(GLFW_GESTURE_HOLD, cancelled ? GLFW_GESTURE_CANCEL : GLFW_GESTURE_END, time, 0, 0, 0, 0);
 }
 
 static const struct zwp_pointer_gesture_hold_v1_listener holdGestureListener = {
@@ -727,34 +728,34 @@ pinchGestureHandleBegin(
     void *data UNUSED,
     struct zwp_pointer_gesture_pinch_v1 *gesture UNUSED,
     uint32_t serial UNUSED,
-    uint32_t time UNUSED,
+    uint32_t time,
     struct wl_surface *surface UNUSED,
     uint32_t fingers) {
     _glfw.wl.pinch_scale = 1;
-    inputGesture(GLFW_GESTURE_PINCH, GLFW_GESTURE_BEGIN, 0, 0, 0, fingers);
-    inputGesture(GLFW_GESTURE_ROTATE, GLFW_GESTURE_BEGIN, 0, 0, 0, fingers);
+    inputGesture(GLFW_GESTURE_PINCH, GLFW_GESTURE_BEGIN, time, 0, 0, 0, fingers);
+    inputGesture(GLFW_GESTURE_ROTATE, GLFW_GESTURE_BEGIN, time, 0, 0, 0, fingers);
 }
 
 static void
 pinchGestureHandleUpdate(
     void *data UNUSED,
     struct zwp_pointer_gesture_pinch_v1 *gesture UNUSED,
-    uint32_t time UNUSED,
+    uint32_t time,
     wl_fixed_t dx UNUSED,
     wl_fixed_t dy UNUSED,
     wl_fixed_t scale,
     wl_fixed_t rotation) {
     const double s = wl_fixed_to_double(scale), r = wl_fixed_to_double(rotation);
-    if (s > 0 && _glfw.wl.pinch_scale > 0) inputGesture(GLFW_GESTURE_PINCH, GLFW_GESTURE_UPDATE, s / _glfw.wl.pinch_scale - 1, 0, 0, 0);
+    if (s > 0 && _glfw.wl.pinch_scale > 0) inputGesture(GLFW_GESTURE_PINCH, GLFW_GESTURE_UPDATE, time, s / _glfw.wl.pinch_scale - 1, 0, 0, 0);
     _glfw.wl.pinch_scale = s;
-    if (r != 0) inputGesture(GLFW_GESTURE_ROTATE, GLFW_GESTURE_UPDATE, r, 0, 0, 0);
+    if (r != 0) inputGesture(GLFW_GESTURE_ROTATE, GLFW_GESTURE_UPDATE, time, r, 0, 0, 0);
 }
 
 static void
-pinchGestureHandleEnd(void *data UNUSED, struct zwp_pointer_gesture_pinch_v1 *gesture UNUSED, uint32_t serial UNUSED, uint32_t time UNUSED, int32_t cancelled) {
+pinchGestureHandleEnd(void *data UNUSED, struct zwp_pointer_gesture_pinch_v1 *gesture UNUSED, uint32_t serial UNUSED, uint32_t time, int32_t cancelled) {
     const GLFWGesturePhase phase = cancelled ? GLFW_GESTURE_CANCEL : GLFW_GESTURE_END;
-    inputGesture(GLFW_GESTURE_PINCH, phase, 0, 0, 0, 0);
-    inputGesture(GLFW_GESTURE_ROTATE, phase, 0, 0, 0, 0);
+    inputGesture(GLFW_GESTURE_PINCH, phase, time, 0, 0, 0, 0);
+    inputGesture(GLFW_GESTURE_ROTATE, phase, time, 0, 0, 0, 0);
 }
 
 static const struct zwp_pointer_gesture_pinch_v1_listener pinchGestureListener = {
@@ -784,12 +785,12 @@ swipeGestureHandleUpdate(void *data UNUSED, struct zwp_pointer_gesture_swipe_v1 
 }
 
 static void
-swipeGestureHandleEnd(void *data UNUSED, struct zwp_pointer_gesture_swipe_v1 *gesture UNUSED, uint32_t serial UNUSED, uint32_t time UNUSED, int32_t cancelled) {
+swipeGestureHandleEnd(void *data UNUSED, struct zwp_pointer_gesture_swipe_v1 *gesture UNUSED, uint32_t serial UNUSED, uint32_t time, int32_t cancelled) {
     const double ax = fabs(_glfw.wl.swipe_dx), ay = fabs(_glfw.wl.swipe_dy);
     if (cancelled || (ax < 1 && ay < 1)) return;
     const int dx = ax >= ay ? (_glfw.wl.swipe_dx > 0 ? 1 : -1) : 0, dy = ax < ay ? (_glfw.wl.swipe_dy > 0 ? 1 : -1) : 0;
-    inputGesture(GLFW_GESTURE_SWIPE, GLFW_GESTURE_BEGIN, 0, dx, dy, _glfw.wl.swipe_fingers);
-    inputGesture(GLFW_GESTURE_SWIPE, GLFW_GESTURE_END, 0, dx, dy, 0);
+    inputGesture(GLFW_GESTURE_SWIPE, GLFW_GESTURE_BEGIN, time, 0, dx, dy, _glfw.wl.swipe_fingers);
+    inputGesture(GLFW_GESTURE_SWIPE, GLFW_GESTURE_END, time, 0, dx, dy, 0);
 }
 
 static const struct zwp_pointer_gesture_swipe_v1_listener swipeGestureListener = {

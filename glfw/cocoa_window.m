@@ -490,6 +490,26 @@ translateFlags(NSUInteger flags) {
     return mods;
 }
 
+// The time the system generated an event, as monotonic() time. Event
+// timestamps are on the clock of systemUptime. Its offset from monotonic() is
+// measured once and kept while it stays right to within a millisecond, so that
+// the times of two events differ by exactly what their timestamps do, to the
+// microsecond, however late each one is delivered
+static monotonic_t
+eventTimestamp(NSEvent *event) {
+    static monotonic_t offset = 0;
+    static bool have_offset = false;
+    const monotonic_t now = monotonic(), measured = now - s_double_to_monotonic_t([[NSProcessInfo processInfo] systemUptime]);
+    if (!have_offset || measured < offset || measured - offset > MONOTONIC_T_1e6) {
+        // Half a millisecond below the measurement, so that the clocks have
+        // room to drift either way
+        offset = measured - MONOTONIC_T_1e6 / 2;
+        have_offset = true;
+    }
+    const monotonic_t ans = s_double_to_monotonic_t([event timestamp]) + offset;
+    return MIN(ans, now);
+}
+
 // Apply remap_modifier to Cocoa modifier flags. This has to happen BEFORE the
 // flags are used to produce text - UCKeyTranslate() below, and Cocoa's own
 // interpretKeyEvents: - for the same reason as on Linux: Option produces text
@@ -1448,6 +1468,8 @@ handleGestureEvent(_GLFWwindow *window, NSEvent *event, GLFWGestureKind kind, GL
         .kind = kind,
         .phase = phase,
         .keyboard_modifiers = translateFlags([event modifierFlags]),
+        .timestamp = eventTimestamp(event),
+        .timestamp_is_fine = true,
         .x = pos.x,
         .y = [window->ns.view frame].size.height - pos.y,
         .delta = delta,

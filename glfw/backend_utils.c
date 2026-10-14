@@ -381,6 +381,34 @@ pollForEvents(EventLoopData *eld, monotonic_t timeout, watch_callback_func displ
     return read_ok;
 }
 
+// Converts the millisecond time of an input event to monotonic() time. The base
+// of these times is unspecified and they wrap, so the event is placed by its
+// age, which is measured against CLOCK_MONOTONIC, the clock compositors and X
+// servers use. monotonic() runs on a different clock that drifts against that
+// one, so the offset between the two is measured once and kept for as long as
+// it stays right to within a millisecond. Events a number of milliseconds apart
+// then come out exactly that far apart, however late each one is delivered
+monotonic_t
+event_time_to_monotonic(uint32_t time) {
+    static monotonic_t offset = 0;
+    static bool have_offset = false;
+    const monotonic_t now = monotonic();
+    struct timespec ts;
+    if (clock_gettime(CLOCK_MONOTONIC, &ts) != 0) return now;
+    const monotonic_t clock_now = (monotonic_t)ts.tv_sec * MONOTONIC_T_1e9 + (monotonic_t)ts.tv_nsec, clock_ms = clock_now / MONOTONIC_T_1e6;
+    const uint32_t age_ms = (uint32_t)clock_ms - time;
+    // An implausible age means the event was stamped with some other clock
+    if (age_ms > 1000) return now;
+    const monotonic_t measured = now - clock_now;
+    if (!have_offset || measured < offset || measured - offset > MONOTONIC_T_1e6) {
+        // Half a millisecond below the measurement, so that the answer is
+        // never later than now and the clocks have room to drift either way
+        offset = measured - MONOTONIC_T_1e6 / 2;
+        have_offset = true;
+    }
+    return ms_to_monotonic_t(clock_ms - (monotonic_t)age_ms) + offset;
+}
+
 // Duplicate a UTF-8 encoded string
 // but cut it so that it has at most max_length bytes plus the null byte.
 // This does not take combining characters into account.

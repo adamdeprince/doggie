@@ -1453,13 +1453,15 @@ handle_xi_motion_event(_GLFWwindow *window, XIDeviceEvent *de) {
 
 #ifdef XI_GesturePinchBegin
 static void
-input_xi_gesture(Window event_window, double x, double y, int state, GLFWGestureKind kind, GLFWGesturePhase phase, double delta, int dx, int dy, int fingers) {
+input_xi_gesture(
+    Window event_window, Time time, double x, double y, int state, GLFWGestureKind kind, GLFWGesturePhase phase, double delta, int dx, int dy, int fingers) {
     _GLFWwindow *window = NULL;
     if (XFindContext(_glfw.x11.display, event_window, _glfw.x11.context, (XPointer *)&window) != 0) return;
     GLFWGestureEvent ev = {
         .kind = kind,
         .phase = phase,
         .keyboard_modifiers = translateState(state),
+        .timestamp = event_time_to_monotonic((uint32_t)time),
         .x = x,
         .y = y,
         .delta = delta,
@@ -1481,7 +1483,8 @@ handle_xi_gesture_event(int evtype, void *data) {
         case XI_GesturePinchUpdate:
         case XI_GesturePinchEnd: {
             const XIGesturePinchEvent *pe = data;
-#define pinch(kind, phase, delta, fingers) input_xi_gesture(pe->event, pe->event_x, pe->event_y, pe->mods.effective, kind, phase, delta, 0, 0, fingers)
+#define pinch(kind, phase, delta, fingers) \
+    input_xi_gesture(pe->event, pe->time, pe->event_x, pe->event_y, pe->mods.effective, kind, phase, delta, 0, 0, fingers)
             if (evtype == XI_GesturePinchBegin) {
                 _glfw.x11.xi.pinch_scale = 1;
                 pinch(GLFW_GESTURE_PINCH, GLFW_GESTURE_BEGIN, 0, pe->detail);
@@ -1513,7 +1516,8 @@ handle_xi_gesture_event(int evtype, void *data) {
                 const double ax = fabs(_glfw.x11.xi.swipe_dx), ay = fabs(_glfw.x11.xi.swipe_dy);
                 if ((se->flags & XIGestureSwipeEventCancelled) || (ax < 1 && ay < 1)) break;
                 const int dx = ax >= ay ? (_glfw.x11.xi.swipe_dx > 0 ? 1 : -1) : 0, dy = ax < ay ? (_glfw.x11.xi.swipe_dy > 0 ? 1 : -1) : 0;
-#define swipe(phase, fingers) input_xi_gesture(se->event, se->event_x, se->event_y, se->mods.effective, GLFW_GESTURE_SWIPE, phase, 0, dx, dy, fingers)
+#define swipe(phase, fingers) \
+    input_xi_gesture(se->event, se->time, se->event_x, se->event_y, se->mods.effective, GLFW_GESTURE_SWIPE, phase, 0, dx, dy, fingers)
                 swipe(GLFW_GESTURE_BEGIN, _glfw.x11.xi.swipe_fingers);
                 swipe(GLFW_GESTURE_END, 0);
 #undef swipe

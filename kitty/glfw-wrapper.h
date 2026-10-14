@@ -381,6 +381,10 @@ typedef struct GLFWGestureEvent {
     GLFWGestureKind kind;
     GLFWGesturePhase phase;
     int keyboard_modifiers;
+    // When the system generated the event, on the same clock as monotonic(), and
+    // whether the system stamps its events more finely than a millisecond
+    monotonic_t timestamp;
+    bool timestamp_is_fine;
     // In window content coordinates, the same as the cursor position
     double x, y;
     // Since the previous event of this gesture: for a pinch the change in

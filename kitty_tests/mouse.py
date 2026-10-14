@@ -1,6 +1,7 @@
 #!/usr/bin/env python
 # License: GPL v3 Copyright: 2016, Kovid Goyal <kovid at kovidgoyal.net>
 
+import re
 from functools import partial
 
 from kitty.fast_data_types import (
@@ -11,6 +12,7 @@ from kitty.fast_data_types import (
     MOUSE_SELECTION_WORD_AND_LINE_FROM_POINT,
     create_mock_window,
     mock_mouse_selection,
+    monotonic,
     send_gesture_report,
     send_mock_mouse_event_to_window,
 )
@@ -429,8 +431,12 @@ class TestMouse(BaseTest):
             c.clear()
             return send_gesture_report(s, kind, phase, 256, 512, **kw)
 
-        def ev(fields):
-            return f'\x1b]777;gesture;v=1:op=event:{fields}:x=256:y=512:'.encode()
+        def ev(fields, t='0'):
+            return f'\x1b]777;gesture;v=1:op=event:{fields}:t={t}:x=256:y=512:'.encode()
+
+        def made():
+            # The terminal cancels at the time it decides to, which is not known here
+            return re.sub(rb':t=[0-9]+:', b':t=T:', c.wtcbuf)
 
         # caps is what the window system delivers, and the tests have none
         send('v=1:op=query:id=42')
@@ -452,7 +458,7 @@ class TestMouse(BaseTest):
         self.ae(c.wtcbuf, ev('kind=2:phase=2') + b'mods=0:angle=-1250:total=-1250\x1b\\')
         # Turning the mode off cancels the gestures in progress, whose remaining reports are then dropped
         send('v=1:op=mode:mode=0')
-        self.ae(c.wtcbuf, ev('kind=1:phase=4') + b'mods=0:scale=0:total=750\x1b\\' + ev('kind=2:phase=4') + b'mods=0:angle=0:total=-1250\x1b\\')
+        self.ae(made(), ev('kind=1:phase=4', 'T') + b'mods=0:scale=0:total=750\x1b\\' + ev('kind=2:phase=4', 'T') + b'mods=0:angle=0:total=-1250\x1b\\')
         send('v=1:op=mode:mode=1')
         self.assertFalse(report(1, 3))
         report(3, 1, dx=1)
@@ -474,7 +480,7 @@ class TestMouse(BaseTest):
         # A hold has a mode bit of its own, so a program that asked for mode 1 never sees one
         self.assertFalse(report(5, 1, fingers=4))
         send('v=1:op=mode:mode=2')
-        self.ae(c.wtcbuf, ev('kind=1:phase=4') + b'mods=0:scale=0:total=1000\x1b\\')
+        self.ae(made(), ev('kind=1:phase=4', 'T') + b'mods=0:scale=0:total=1000\x1b\\')
         send('v=1:op=mode')
         self.ae(c.wtcbuf, b'\x1b]777;gesture;v=1:op=mode:mode=2\x1b\\')
         self.assertFalse(report(1, 1))
@@ -492,15 +498,33 @@ class TestMouse(BaseTest):
         self.ae(c.wtcbuf, ev('kind=5:phase=3') + b'mods=0\x1b\\')
         # Bits the terminal does not know are dropped, and a read says what is left
         send('v=1:op=mode:mode=13')
-        self.ae(c.wtcbuf, ev('kind=2:phase=4') + b'mods=0:angle=0:total=0\x1b\\')
+        self.ae(made(), ev('kind=2:phase=4', 'T') + b'mods=0:angle=0:total=0\x1b\\')
         send('v=1:op=mode')
         self.ae(c.wtcbuf, b'\x1b]777;gesture;v=1:op=mode:mode=1\x1b\\')
         report(4, 1)
         self.ae(c.wtcbuf, ev('kind=4:phase=1') + b'mods=0\x1b\\')
         c.clear()
         s.reset()
-        self.ae(c.wtcbuf, ev('kind=4:phase=4') + b'mods=0\x1b\\')
+        self.ae(made(), ev('kind=4:phase=4', 'T') + b'mods=0\x1b\\')
         self.assertFalse(report(4, 3))
+
+        # Every report has the time the system gave the event, on the clock of every extension, with the microseconds
+        # past the millisecond where the system stamps that finely
+        send('v=1:op=mode:mode=1')
+        report(1, 1, t=408211, tu=73)
+        self.ae(c.wtcbuf, ev('kind=1:phase=1', '408211:tu=73') + b'mods=0:scale=0:total=1000\x1b\\')
+        report(1, 2, delta=0.5, t=408215, tu=0)
+        self.ae(c.wtcbuf, ev('kind=1:phase=2', '408215:tu=0') + b'mods=0:scale=500:total=1500\x1b\\')
+        # A begin for a gesture still open cancels it at the time of the begin
+        report(1, 1, t=408300)
+        self.ae(c.wtcbuf, ev('kind=1:phase=4', '408300') + b'mods=0:scale=0:total=1500\x1b\\' + ev('kind=1:phase=1', '408300') + b'mods=0:scale=0:total=1000\x1b\\')
+        # The terminal's own cancel is stamped when it is made, on the same clock
+        c.clear()
+        before = int(monotonic() * 1000)
+        send('v=1:op=mode:mode=0')
+        t = int(re.search(rb':t=([0-9]+):', c.wtcbuf).group(1))
+        self.assertGreaterEqual(t, before - 1)
+        self.assertLessEqual(t, int(monotonic() * 1000) + 1)
 
     def test_gesture_frames(self):
         # A frame from a program follows the rules every extension shares, see docs/extension-framing.rst
