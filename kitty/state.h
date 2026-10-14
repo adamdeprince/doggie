@@ -148,6 +148,7 @@ typedef struct Options {
     } url_prefixes;
     char_type *url_excluded_characters;
     bool detect_urls;
+    bool tablet_hardware_ids;
     struct {
         regex_t *items;
         size_t count;

@@ -46,6 +46,7 @@ please do so by opening issues in the `GitHub bug tracker
    haptic-protocol
    tablet-protocol
    ink-protocol
+   extension-framing
    unscroll
    color-stack
    deccara

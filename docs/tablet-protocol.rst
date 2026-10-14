@@ -19,27 +19,20 @@ Framing
 
 Frames are ``OSC 777`` with the ``tablet-pointer`` selector::
 
-    <OSC> 777 ; tablet-pointer ; <fields> <ST>
+    <OSC> 777 ; tablet-pointer ; v=1 : op=query : id=42 <ST>
 
-``<OSC>`` is ``<ESC> ]`` and ``<ST>`` is ``<ESC> \``; ``BEL`` is also
-accepted as a terminator. Fields are ASCII ``key=value`` pairs separated by
-colons, in any order, with decimal integers that carry no leading ``+``.
-Keys are case sensitive. A frame from a program is at most 127 bytes after
-the selector. A frame with a value out of range or a missing required field
-is rejected as a whole, and a rejected or incomplete frame must never reach a
-program as keystrokes. Spaces in the examples below are for clarity only.
+They are framed as :doc:`extension-framing` says, which is also where the
+units, the clock of ``t``, the reports that may be merged and the refusal of
+a mode are described for every extension. ``v``, the protocol version, is
+``1``, and ``op`` is one of ``query``, ``cap``, ``mode``, ``device``,
+``label`` and ``event``.
 
-Every frame has ``v``, the protocol version, which is ``1``, and ``op``, one
-of ``query``, ``cap``, ``mode``, ``device``, ``label`` and ``event``. A frame
-with any other version is ignored.
-
-The protocol grows without a new version. A program ignores a frame whose
-``op`` it does not know, a report whose ``kind`` it does not know, and any
-field and any bit of ``valid`` it does not know, and treats a ``tool`` value
-it does not know as ``0``. A new kind of report is sent only to a program
-that asked for it with a mode bit of its own, so a program is never sent
-what it was not written for. Only a change in the meaning of something that
-exists needs a new version.
+The protocol grows without a new version. Beyond what every extension
+ignores, a program ignores a report whose ``kind`` it does not know and any
+bit of ``valid`` it does not know, and treats a ``tool`` value it does not
+know as ``0``. A new kind of report is sent only to a program that asked for
+it with a mode bit of its own, so a program is never sent what it was not
+written for.
 
 Discovery
 -------------
@@ -117,16 +110,23 @@ The mode is local to the window, is reset by ``RIS``, and changing it
 cancels every active contact and lets go of every held key of a pad.
 Programs must turn it off when they exit, suspend or fail, and turn it back
 on when resumed. Multiplexers keep it with the rest of the terminal state,
-restore it on reconnect, and turn it off when detaching. There is no user
-setting that overrides the program's choice.
+restore it on reconnect, and turn it off when detaching. A terminal may let
+its user refuse a mode, or some of its bits, for every program or for some.
+A refused bit reads back as off and nothing it would have turned on is
+reported. kitty refuses bit ``8``, the hardware identifiers, unless its user
+allows them with :opt:`tablet_hardware_ids`, since a serial number says
+whose pen it is and the program asking may be on another machine. A refusal
+shows in the mode, not in ``caps``, which says what the terminal can report
+on the system it runs on.
 
 A ``mode`` request without a ``mode`` field reads the state instead of
 changing it, and is answered with::
 
     <OSC> 777 ; tablet-pointer ; v=1 : op=mode : mode=3 <ST>
 
-A terminal keeps only the bits it supports, so a program that asked for
-more than the terminal has finds out by reading the mode back. A program
+A terminal keeps only the bits it supports and that its user has not
+refused, so a program that asked for more than it was given finds out by
+reading the mode back. A program
 resuming after a reconnection reads the mode to learn whether it survived,
 rather than assuming it did.
 
@@ -293,10 +293,11 @@ default to zero, except ``tool``, which defaults to ``1``:
 ``device``       Identifies the tool or touch device for as long as it is in
                  proximity, a non-negative 31 bit integer, ``0`` when the
                  system does not tell devices apart
-``t``            The time of the event in milliseconds on a monotonic clock of
-                 the terminal's choosing, or of its delivery when the system
-                 does not time stamp it, useful only for differences between
-                 reports
+``t``            The time of the event in milliseconds on the clock the
+                 terminal uses for every extension, see
+                 :doc:`extension-framing`: when the system says it happened,
+                 or when the terminal learnt of it where the system does not
+                 say
 ``tu``           Microseconds past ``t``, ``0`` to ``999``, present only when
                  the system stamps events more finely than a millisecond. A
                  report without it is on a grid of whole milliseconds
@@ -701,6 +702,15 @@ Programs must tolerate a lost ``hover``, a repeated cancel, and a fresh
 ``down`` for a contact they still have open, which replaces the earlier
 stroke.
 
+A terminal or relay that cannot keep up may merge some reports, as
+:doc:`extension-framing` says. Of this protocol's reports only ``move`` and
+``hover`` may be merged: consecutive ones of one contact, with no other
+report of that contact between them and the same ``buttons``, into one with
+the absolute values of the last and the sum of ``wheel`` and of ``wclicks``,
+and with them the frame reports of the groups they were in. Every other
+report, of a pad, a device, an action or a correction included, arrives as
+it was sent.
+
 A multiplexer translates ``x,y`` of on-screen contacts by the pane's origin
 (borders included) and scroll offset, forwards every other field unchanged,
 delivers each stroke and each finger sequence only to the pane it began in,
@@ -739,11 +749,12 @@ Implementations
 * silkie, this fork of kitty: tools on macOS, Wayland and X11; fingers on
   the touchpad on macOS and on touchscreens on Wayland, with contact shape,
   and on X11, without;
-  pads on Wayland, with the groups of their controls; tool actions on macOS;
+  pads on Wayland, with the groups of their controls, and the keys of pads
+  on X11; tool actions on macOS;
   the number of the tablet on macOS and Wayland; the size of a tablet and
-  whether it is a display on Wayland; the place of a tool on its tablet on
-  X11. ``kitty --debug-input`` logs the tablet, pad and touch events it
-  sees.
+  whether it is a display on Wayland and X11; the place of a tool on its
+  tablet on X11. ``kitty --debug-input`` logs the tablet, pad and touch
+  events it sees.
 * Inkline, Goblin Skiff and GoblinView carry a codec for an earlier draft of
   this protocol and are being brought up to this specification.
 
@@ -761,14 +772,39 @@ stamp tablet and touch events in whole milliseconds.
 Of what a tablet says of itself silkie sends what the window system gives
 it, which the notes below go through: ``tablet`` on macOS and Wayland, the
 groups of the controls of a pad on Wayland, ``w``, ``h`` and ``direct`` on
-Wayland, where they are had from the kernel, ``rx`` and ``ry``, with ``w``
-and ``h`` under some drivers, on X11. It can write every field of this page,
+Wayland and X11, where they are had from the kernel or the driver, and ``rx``
+and ``ry`` on X11. It can write every field of this page,
 and its tests do, but nothing it reads has ``grip``, ``pcolor``, ``pwidth``,
 ``pstyle``, or the actions ``6`` to ``8``, so it never sends them, and
 ``conf`` it has from a mark of AppKit that no touch was seen to carry, so it
 does not claim ``caps`` bit ``256`` anywhere. It describes a tool or a pad
 again when what it said of it has changed, which at present only a pad on
 Wayland does.
+
+Tilt is defined here on the axes of the screen. A system that turns a
+tablet, for a left-handed user or for a pen display that stands rotated,
+turns the position with it, and not always the tilt, which the tablet
+measures on its own axes. silkie turns tilt where the system says how the
+tablet is turned, and passes it on as it is given where it does not:
+
+* libinput turns a tablet only by a half turn, for left-handed use, and
+  then turns tilt and twist with the position itself.
+* On Wayland, ``tablet-v2`` gives tilt on the axes of the tablet, and a
+  compositor that maps a tablet to a rotated output, or turns it by a
+  calibration of its own, says nothing of that. Tilt is passed on as
+  given, so on a pen display turned a quarter turn it is on the axes of
+  the panel, not of the screen.
+* On X11 the wacom driver's ``Wacom Rotation`` and the server's
+  ``Coordinate Transformation Matrix`` turn the position and leave tilt on
+  the axes of the tablet. silkie reads both, again whenever they change,
+  and turns tilt by them, when the matrix keeps the axes at right angles,
+  as a quarter turn, a half turn, a mirror or a map to part of the screen
+  does. Tilt is left out for a matrix that turns the tablet by any other
+  angle or flattens it. Twist is not turned.
+* AppKit gives tilt as the tablet driver reports it, after whatever
+  orientation the user set in the driver.
+
+None of this was tried with a turned tablet.
 
 * On macOS, tablet data arrives with the mouse events of the tablet driver.
   Tilt is scaled from the driver's fraction of maximum tilt assuming 60
@@ -868,16 +904,21 @@ Wayland does.
   and ``ry`` come from. The server puts it through the matrix by which the
   user maps the tablet to the screen or to one monitor, so silkie reads that
   matrix, again whenever it is changed, and undoes it; a matrix that cannot
-  be undone leaves ``rx`` and ``ry`` out. ``w`` and ``h`` are the range of
-  the position divided by the resolution the driver states for it, and are
-  left out when it states none, which is so with the libinput driver; no
-  driver that states one was at hand, so the sizes are untried. Those
-  drivers name the device node of a tool in its ``Device Node`` property, by
-  which the size and ``direct`` could be had from the kernel as on Wayland.
-  silkie does not read it: the node is one on the machine of the server, the
-  ids to tell that it is the same device are in another property, and the
-  libinput driver can cut the range of the position down to a part of the
-  tablet, whose size the kernel does not have. X has no tablet that tools
+  be undone leaves ``rx`` and ``ry`` out, and so does the area ratio of
+  the libinput driver, which stretches one axis of the position and cuts off
+  what falls past its end, by a factor silkie cannot learn exactly. ``w``
+  and ``h`` are the range of the position divided by the resolution the
+  driver states for it; no driver that states one was at hand, so those
+  sizes are untried. The libinput driver states none, and both drivers name
+  the device node of a tool in its ``Device Node`` property and its vendor
+  and product ids in ``Device Product ID``. Where the driver states no
+  resolution, silkie reads the size and ``direct`` of the node from the
+  kernel as on Wayland, the size in whole millimeters rounded down, and
+  believes them only when its connection to the X server is a local socket,
+  the node being one on the machine of the server, and when the kernel has
+  the device under those ids. This was tried against devices of the
+  server's test driver given those properties and a stand-in for libudev,
+  not with a tablet. X has no tablet that tools
   belong to, each tool being a device of its own, so there is no ``tablet``.
   The X server does not report a tool leaving proximity, so phase ``5``
   arrives only when the device goes away. Xwayland's tablet devices are
@@ -893,5 +934,24 @@ Wayland does.
   touchpad are not reported. The server also moves the pointer to where the
   first finger lands, which is not passed on as mouse reports. This was
   tried against Xwayland, which makes these events from the touches of its
-  compositor, not with a touchscreen. Pads are not reported on X11: the
-  wacom driver has a device for the pad, which is not read.
+  compositor, not with a touchscreen. Pads come from the libinput and
+  wacom drivers, which give a pad a device of its own of the type ``PAD``,
+  and ``caps`` claims them when the server has one of those drivers. Of a
+  pad, X has only its keys, as the buttons of that device: keys 0 to 2 are
+  buttons 1 to 3, the rest are from button 8 on, and buttons 4 to 7 are the
+  scrolling the drivers make of the rings and strips by default, which is
+  not reported. ``buttons`` in the description is the number of buttons of
+  the device less those four, which is the number of keys under the
+  libinput driver; the wacom driver can give a device more buttons than its
+  pad has keys. Rings and strips are not reported, and the description has
+  none: the libinput driver gives every pad the same axes for two rings and
+  two strips whatever it has, so how many it has cannot be told, and the
+  wacom driver passes on raw values whose direction and units it does not
+  state. There are no groups and no modes, which the libinput driver
+  publishes only in properties of its own that silkie does not read, and a
+  label has nowhere to go. A pad reports to the window with the keyboard
+  focus, but the server delivers its keys only to a window under the
+  pointer, so a pad key pressed with the pointer over another application
+  is not reported. This was tried against a device of the server's test
+  driver marked as a pad with the ``Wacom Tool Type`` property of the wacom
+  driver, not with a pad.

@@ -50,6 +50,8 @@
 
 // The XInput extension provides raw mouse motion input
 #include <X11/extensions/XInput2.h>
+// Its first version has the type of a device, which the second does not
+#include <X11/extensions/XInput.h>
 
 // The Shape extension provides custom window shapes
 #include <X11/extensions/shape.h>
@@ -139,6 +141,10 @@ typedef Status (*PFN_XIGetProperty)(
 #define XIQueryDevice _glfw.x11.xi.QueryDevice
 #define XIFreeDeviceInfo _glfw.x11.xi.FreeDeviceInfo
 #define XIGetProperty _glfw.x11.xi.GetProperty
+typedef XDeviceInfo *(*PFN_XListInputDevices)(Display *, int *);
+typedef void (*PFN_XFreeDeviceList)(XDeviceInfo *);
+#define XListInputDevices _glfw.x11.xi.ListInputDevices
+#define XFreeDeviceList _glfw.x11.xi.FreeDeviceList
 
 typedef Bool (*PFN_XRenderQueryExtension)(Display *, int *, int *);
 typedef Status (*PFN_XRenderQueryVersion)(Display *dpy, int *, int *);
@@ -281,8 +287,32 @@ typedef struct XITabletDevice {
     // has_unmap, which is unset when the matrix cannot be read or undone
     double unmap[9];
     bool has_unmap;
+    // Tilt is on the axes of the tablet, which the wacom driver's rotation and
+    // the server's matrix turn for the position and not for it. This takes it
+    // to those of the screen: x = tilt_map[0] * tx + tilt_map[1] * ty and y =
+    // tilt_map[2] * tx + tilt_map[3] * ty. Only with has_tilt_map, which is
+    // unset when they turn the tablet by other than a multiple of a right angle
+    int tilt_map[4];
+    bool has_tilt_map;
+    // The libinput driver's area ratio is set: it stretches one axis and cuts
+    // off what falls past its end, so x and y no longer span the tablet
+    bool area_cropped;
+    // The size of the tablet in millimeters and whether it is a display (1),
+    // is not one (-1) or the kernel does not say (0), from the kernel by the
+    // device node the driver names. Zero when the node is not believed
+    int node_width_mm, node_height_mm, node_direct;
     char name[128];
 } XITabletDevice;
+
+// The keys of a tablet pad, which the libinput and wacom drivers give a device
+// of its own as the buttons of a pointer
+typedef struct XIPadDevice {
+    int deviceid;
+    unsigned num_buttons;  // of the pad: those of the device less the four the drivers keep for scrolling
+    unsigned vendor_id, product_id;
+    GLFWid window_id;  // the window that has the focus the pad last reported to, which knows of its held keys
+    char name[128];
+} XIPadDevice;
 
 typedef struct XdndSelectionRequest {
     char *mime;
@@ -514,6 +544,8 @@ typedef struct _GLFWlibraryX11 {
         PFN_XIQueryDevice QueryDevice;
         PFN_XIFreeDeviceInfo FreeDeviceInfo;
         PFN_XIGetProperty GetProperty;
+        PFN_XListInputDevices ListInputDevices;
+        PFN_XFreeDeviceList FreeDeviceList;
         XIScrollDevice scroll_devices[16];
         unsigned num_scroll_devices;
         // Server timestamp of the last XI_Motion event that carried scroll
@@ -525,6 +557,15 @@ typedef struct _GLFWlibraryX11 {
         double pinch_scale, swipe_dx, swipe_dy;
         int swipe_fingers;
         Atom LIBINPUT_SCROLL_METHOD_ENABLED, LIBINPUT_TAPPING, COORDINATE_TRANSFORMATION_MATRIX, FLOAT;
+        Atom DEVICE_NODE, DEVICE_PRODUCT_ID, LIBINPUT_AREA_RATIO, WACOM_ROTATION;
+        // The type both drivers give a pad, and the property the wacom driver says it with too
+        Atom PAD_TYPE, WACOM_TOOL_TYPE;
+        // A driver that can have pads has made one of these atoms, a property it gives its devices
+        bool has_pad_driver;
+        XIPadDevice pad_devices[8];
+        unsigned num_pad_devices;
+        // The connection to the server is a local socket, so a device node it names is one on this machine
+        bool connection_is_local;
         XITabletDevice tablet_devices[8];
         unsigned num_tablet_devices;
         // Server timestamp of the last tablet event the application consumed.
@@ -613,4 +654,6 @@ void _glfwGetSystemContentScaleX11(float *xscale, float *yscale, bool bypass_cac
 void _glfwPushSelectionToManagerX11(void);
 void read_xi_scroll_devices(void);
 void read_xi_tablet_mapping(XITabletDevice *td);
+void read_xi_tablet_node(XITabletDevice *td);
+void _glfwX11PadGone(XIPadDevice *pad);
 void free_dnd_data(void);

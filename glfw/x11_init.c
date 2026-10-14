@@ -42,6 +42,7 @@
 #include <fcntl.h>
 #include <math.h>
 #include <unistd.h>
+#include <sys/socket.h>
 
 
 // Return the atom ID only if it is listed in the specified array
@@ -179,10 +180,59 @@ tablet_tool_from_name(const char *name) {
 // the position in an event is the result. The matrix is read here so that it
 // can be undone, which is how the place on the tablet is had. The caller has
 // to have grabbed the error handler, since the device may be gone
+// The 2 by 2 matrix of the rotation the wacom driver applies to the position of
+// a tool, in its Rotate option or the Wacom Rotation property: none, a quarter
+// turn clockwise, one counterclockwise or a half turn
+static void
+wacom_rotation_matrix(int deviceid, int ans[4]) {
+    static const int rotations[4][4] = {{1, 0, 0, 1}, {0, 1, -1, 0}, {0, -1, 1, 0}, {-1, 0, 0, -1}};
+    int which = 0;
+    Atom type = None;
+    int format = 0;
+    unsigned long nitems = 0, bytes_after = 0;
+    unsigned char *data = NULL;
+    if (_glfw.x11.xi.WACOM_ROTATION != None) {
+        XIGetProperty(_glfw.x11.display, deviceid, _glfw.x11.xi.WACOM_ROTATION, 0, 1, False, XA_INTEGER, &type, &format, &nitems, &bytes_after, &data);
+        if (data) {
+            if (type == XA_INTEGER && format == 8 && nitems == 1 && data[0] < 4) which = data[0];
+            XFree(data);
+        }
+    }
+    memcpy(ans, rotations[which], sizeof(rotations[which]));
+}
+
+static int
+sign_of(double v) {
+    return v > 0 ? 1 : (v < 0 ? -1 : 0);
+}
+
+// Takes tilt from the axes of the tablet to those of the screen, through the
+// rotation of the driver and then the matrix m of the server, of which only
+// one that keeps the axes at right angles to each other, as a map to the
+// screen turned by a quarter or a half turn does, says where tilt goes
+static void
+set_xi_tilt_map(XITabletDevice *td, const double *m) {
+    int c[4];
+    if (!m || (m[1] == 0 && m[3] == 0)) c[0] = m ? sign_of(m[0]) : 1, c[1] = 0, c[2] = 0, c[3] = m ? sign_of(m[4]) : 1;
+    else if (m[0] == 0 && m[4] == 0) c[0] = 0, c[1] = sign_of(m[1]), c[2] = sign_of(m[3]), c[3] = 0;
+    else {
+        td->has_tilt_map = false;
+        return;
+    }
+    int r[4];
+    wacom_rotation_matrix(td->deviceid, r);
+    td->tilt_map[0] = c[0] * r[0] + c[1] * r[2];
+    td->tilt_map[1] = c[0] * r[1] + c[1] * r[3];
+    td->tilt_map[2] = c[2] * r[0] + c[3] * r[2];
+    td->tilt_map[3] = c[2] * r[1] + c[3] * r[3];
+    // a matrix that flattens an axis leaves tilt nowhere
+    td->has_tilt_map = td->tilt_map[0] * td->tilt_map[3] - td->tilt_map[1] * td->tilt_map[2] != 0;
+}
+
 void
 read_xi_tablet_mapping(XITabletDevice *td) {
     td->has_unmap = false;
-    if (td->x.number < 0 || td->y.number < 0) return;
+    set_xi_tilt_map(td, NULL);
     Atom type = None;
     int format = 0;
     unsigned long nitems = 0, bytes_after = 0;
@@ -195,6 +245,11 @@ read_xi_tablet_mapping(XITabletDevice *td) {
         float f[9];
         memcpy(f, data, sizeof(f));
         const double m[9] = {f[0], f[1], f[2], f[3], f[4], f[5], f[6], f[7], f[8]};
+        set_xi_tilt_map(td, m);
+        if (td->x.number < 0 || td->y.number < 0) {
+            XFree(data);
+            return;
+        }
         const double det = m[0] * (m[4] * m[8] - m[5] * m[7]) - m[1] * (m[3] * m[8] - m[5] * m[6]) + m[2] * (m[3] * m[7] - m[4] * m[6]);
         if (fabs(det) > 1e-9) {
             const double inverse[9] = {
@@ -207,6 +262,65 @@ read_xi_tablet_mapping(XITabletDevice *td) {
         }
     }
     XFree(data);
+}
+
+// Reads a property of an input device of 32 bit values of a type into ans, returning how many it has
+static unsigned long
+read_xi_integers_of_type(int deviceid, Atom property, Atom wanted, uint32_t *ans, unsigned long max) {
+    Atom type = None;
+    int format = 0;
+    unsigned long nitems = 0, bytes_after = 0, n = 0;
+    unsigned char *data = NULL;
+    if (property == None) return 0;
+    XIGetProperty(_glfw.x11.display, deviceid, property, 0, (long)max, False, wanted, &type, &format, &nitems, &bytes_after, &data);
+    if (!data) return 0;
+    if (type == wanted && format == 32) {
+        n = MIN(nitems, max);
+        memcpy(ans, data, n * sizeof(uint32_t));
+    }
+    XFree(data);
+    return n;
+}
+
+static unsigned long
+read_xi_integers(int deviceid, Atom property, uint32_t *ans, unsigned long max) {
+    return read_xi_integers_of_type(deviceid, property, XA_INTEGER, ans, max);
+}
+
+// The libinput and wacom drivers name the device node of a tablet, and the
+// kernel says of a node how large the tablet is and whether it is a display,
+// which the axes of a tool do not tell under the libinput driver. The node is
+// a name on the machine of the X server, so what is found at it counts only
+// when the connection to the server is local and the kernel has the device
+// under the vendor and product ids the driver gives. The area ratio of the
+// libinput driver is read with it. The caller has to have grabbed the error
+// handler, since the device may be gone
+void
+read_xi_tablet_node(XITabletDevice *td) {
+    uint32_t ratio[2] = {0};
+    td->area_cropped = read_xi_integers(td->deviceid, _glfw.x11.xi.LIBINPUT_AREA_RATIO, ratio, 2) == 2 && ratio[0] && ratio[1];
+    td->node_width_mm = td->node_height_mm = td->node_direct = 0;
+    uint32_t ids[2];
+    if (!_glfw.x11.xi.connection_is_local || _glfw.x11.xi.DEVICE_NODE == None || read_xi_integers(td->deviceid, _glfw.x11.xi.DEVICE_PRODUCT_ID, ids, 2) != 2) return;
+    Atom type = None;
+    int format = 0;
+    unsigned long nitems = 0, bytes_after = 0;
+    unsigned char *data = NULL;
+    char path[256];
+    XIGetProperty(
+        _glfw.x11.display, td->deviceid, _glfw.x11.xi.DEVICE_NODE, 0, sizeof(path) / 4, False, XA_STRING, &type, &format, &nitems, &bytes_after, &data);
+    if (!data) return;
+    const bool ok = type == XA_STRING && format == 8 && !bytes_after && nitems < sizeof(path);
+    if (ok) {
+        memcpy(path, data, nitems);
+        path[nitems] = 0;
+    }
+    XFree(data);
+    InputNodeInfo node;
+    if (!ok || !input_node_info(path, &node) || !node.is_tablet || node.is_pad || node.vendor != ids[0] || node.product != ids[1]) return;
+    td->node_width_mm = node.width_mm;
+    td->node_height_mm = node.height_mm;
+    td->node_direct = node.direct;
 }
 
 // The libinput, wacom and Xwayland drivers name tablet tools by their type
@@ -236,10 +350,51 @@ read_xi_tablet_device(const XIDeviceInfo *device) {
         }
     }
     snprintf(td.name, sizeof(td.name), "%s", device->name);
-    if (has_tablet) read_xi_tablet_mapping(&td);
+    set_xi_tilt_map(&td, NULL);
+    if (has_tablet) {
+        read_xi_tablet_mapping(&td);
+        read_xi_tablet_node(&td);
+    }
     if (td.tool != GLFW_TABLET_TOOL_UNKNOWN && td.pressure.number >= 0 && _glfw.x11.xi.num_tablet_devices < arraysz(_glfw.x11.xi.tablet_devices)) {
         _glfw.x11.xi.tablet_devices[_glfw.x11.xi.num_tablet_devices++] = td;
     }
+}
+
+// A pad: the libinput and wacom drivers give it the device type PAD, which
+// only the first version of XInput has, and the wacom driver says so in a
+// property of its own as well
+static bool
+is_xi_pad(const XIDeviceInfo *device, const XDeviceInfo *xi1, int num_xi1) {
+    if (_glfw.x11.xi.PAD_TYPE == None) return false;
+    for (int i = 0; i < num_xi1; i++) {
+        if ((int)xi1[i].id == device->deviceid && xi1[i].type == _glfw.x11.xi.PAD_TYPE) return true;
+    }
+    uint32_t type = 0;
+    return read_xi_integers_of_type(device->deviceid, _glfw.x11.xi.WACOM_TOOL_TYPE, XA_ATOM, &type, 1) == 1 && type == _glfw.x11.xi.PAD_TYPE;
+}
+
+static void
+read_xi_pad_device(const XIDeviceInfo *device) {
+    if (_glfw.x11.xi.num_pad_devices >= arraysz(_glfw.x11.xi.pad_devices)) return;
+    XIPadDevice p = {.deviceid = device->deviceid};
+    for (int j = 0; j < device->num_classes; j++) {
+        if (device->classes[j]->type != XIButtonClass) continue;
+        // Both drivers give a pad four buttons more than it has keys, 4 to 7, for the scrolling they make of its rings and strips
+        const int n = ((XIButtonClassInfo *)device->classes[j])->num_buttons;
+        p.num_buttons = n > 4 ? (unsigned)(n - 4) : 0;
+    }
+    uint32_t ids[2];
+    if (read_xi_integers(device->deviceid, _glfw.x11.xi.DEVICE_PRODUCT_ID, ids, 2) == 2) p.vendor_id = ids[0], p.product_id = ids[1];
+    snprintf(p.name, sizeof(p.name), "%s", device->name);
+    // A pad that was already here keeps the window it reports to
+    for (unsigned i = 0; i < _glfw.x11.xi.num_pad_devices; i++) {
+        if (_glfw.x11.xi.pad_devices[i].deviceid == p.deviceid) {
+            p.window_id = _glfw.x11.xi.pad_devices[i].window_id;
+            _glfw.x11.xi.pad_devices[i] = p;
+            return;
+        }
+    }
+    _glfw.x11.xi.pad_devices[_glfw.x11.xi.num_pad_devices++] = p;
 }
 
 void
@@ -248,6 +403,10 @@ read_xi_scroll_devices(void) {
     xi.num_scroll_devices = 0;
     xi.num_tablet_devices = 0;
     xi.num_touch_devices = 0;
+    // The pads are kept, so that one that is still here keeps its window and one that is gone can be let go of
+    XIPadDevice pads_before[arraysz(xi.pad_devices)];
+    const unsigned num_pads_before = xi.num_pad_devices;
+    memcpy(pads_before, xi.pad_devices, sizeof(pads_before));
     // Require XI2.1 or later for smooth scrolling
     if (!xi.available || xi.major < 2 || (xi.major == 2 && xi.minor < 1) || !xi.LIBINPUT_SCROLL_METHOD_ENABLED) return;
 #undef xi
@@ -260,10 +419,26 @@ read_xi_scroll_devices(void) {
         _glfwReleaseErrorHandlerX11();
         return;
     }
+    int num_xi1 = 0;
+    XDeviceInfo *xi1 = XListInputDevices ? XListInputDevices(_glfw.x11.display, &num_xi1) : NULL;
+    _glfw.x11.xi.num_pad_devices = 0;
+    for (unsigned i = 0; i < num_pads_before; i++) {
+        bool present = false;
+        for (int k = 0; k < deviceCount && !present; k++) present = devices[k].deviceid == pads_before[i].deviceid && devices[k].enabled;
+        if (present) _glfw.x11.xi.pad_devices[_glfw.x11.xi.num_pad_devices++] = pads_before[i];
+        else _glfwX11PadGone(&pads_before[i]);
+    }
+    const unsigned num_pads_kept = _glfw.x11.xi.num_pad_devices;
     for (int i = 0; i < deviceCount; i++) {
         XIDeviceInfo *device = &devices[i];
         if (device->use == XIMasterPointer) _glfw.x11.xi.master_pointer_id = device->deviceid;
         if (!device->enabled) continue;
+        if ((device->use == XISlavePointer || device->use == XIFloatingSlave) && is_xi_pad(device, xi1, num_xi1)) {
+            bool kept = false;
+            for (unsigned k = 0; k < num_pads_kept && !kept; k++) kept = _glfw.x11.xi.pad_devices[k].deviceid == device->deviceid;
+            if (kept || _glfw.x11.xi.num_pad_devices < arraysz(_glfw.x11.xi.pad_devices)) read_xi_pad_device(device);
+            continue;
+        }
         if (device->use == XIFloatingSlave) {
             read_xi_tablet_device(device);  // Xwayland leaves tablet tools floating
             continue;
@@ -403,6 +578,7 @@ read_xi_scroll_devices(void) {
         }
         read_xi_tablet_device(device);
     }
+    if (xi1) XFreeDeviceList(xi1);
     XIFreeDeviceInfo(devices);
     _glfwReleaseErrorHandlerX11();
 }
@@ -432,6 +608,8 @@ initExtensions(void) {
         glfw_dlsym(_glfw.x11.xi.QueryDevice, _glfw.x11.xi.handle, "XIQueryDevice");
         glfw_dlsym(_glfw.x11.xi.FreeDeviceInfo, _glfw.x11.xi.handle, "XIFreeDeviceInfo");
         glfw_dlsym(_glfw.x11.xi.GetProperty, _glfw.x11.xi.handle, "XIGetProperty");
+        glfw_dlsym(_glfw.x11.xi.ListInputDevices, _glfw.x11.xi.handle, "XListInputDevices");
+        glfw_dlsym(_glfw.x11.xi.FreeDeviceList, _glfw.x11.xi.handle, "XFreeDeviceList");
 
         if (XQueryExtension(_glfw.x11.display, "XInputExtension", &_glfw.x11.xi.majorOpcode, &_glfw.x11.xi.eventBase, &_glfw.x11.xi.errorBase)) {
             // The newest version this code speaks. The server answers with
@@ -631,6 +809,22 @@ initExtensions(void) {
     _glfw.x11.xi.LIBINPUT_TAPPING = XInternAtom(_glfw.x11.display, "libinput Tapping Enabled", False);
     _glfw.x11.xi.COORDINATE_TRANSFORMATION_MATRIX = XInternAtom(_glfw.x11.display, "Coordinate Transformation Matrix", False);
     _glfw.x11.xi.FLOAT = XInternAtom(_glfw.x11.display, "FLOAT", False);
+    _glfw.x11.xi.DEVICE_NODE = XInternAtom(_glfw.x11.display, "Device Node", False);
+    _glfw.x11.xi.DEVICE_PRODUCT_ID = XInternAtom(_glfw.x11.display, "Device Product ID", False);
+    _glfw.x11.xi.LIBINPUT_AREA_RATIO = XInternAtom(_glfw.x11.display, "libinput Tablet Tool Area Ratio", False);
+    // These are looked up and not made, so that what exists says which drivers the server has
+    _glfw.x11.xi.WACOM_TOOL_TYPE = XInternAtom(_glfw.x11.display, "Wacom Tool Type", True);
+    _glfw.x11.xi.WACOM_ROTATION = XInternAtom(_glfw.x11.display, "Wacom Rotation", False);
+    _glfw.x11.xi.has_pad_driver =
+        _glfw.x11.xi.WACOM_TOOL_TYPE != None || XInternAtom(_glfw.x11.display, "libinput Send Events Mode Enabled", True) != None;
+    _glfw.x11.xi.PAD_TYPE = XInternAtom(_glfw.x11.display, "PAD", False);
+    {
+        // A TCP connection, as one forwarded by ssh, is to a server whose device nodes are not this machine's
+        struct sockaddr_storage addr;
+        socklen_t len = sizeof(addr);
+        _glfw.x11.xi.connection_is_local =
+            getsockname(ConnectionNumber(_glfw.x11.display), (struct sockaddr *)&addr, &len) == 0 && addr.ss_family == AF_UNIX;
+    }
     _glfw.x11.xi.label_pressure = XInternAtom(_glfw.x11.display, "Abs Pressure", False);
     _glfw.x11.xi.label_tilt_x = XInternAtom(_glfw.x11.display, "Abs Tilt X", False);
     _glfw.x11.xi.label_tilt_y = XInternAtom(_glfw.x11.display, "Abs Tilt Y", False);

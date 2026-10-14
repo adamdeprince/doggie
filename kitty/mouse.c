@@ -2285,11 +2285,31 @@ decode_pad_label(const char *src, char *dest, size_t dest_sz) {
     return true;
 }
 
+// A decimal integer of no more than max that is the whole of val, with no sign
+static bool
+pointer_uint(const char *val, unsigned long long max, unsigned long long *ans) {
+    if (!*val) return false;
+    unsigned long long x = 0;
+    for (const char *p = val; *p; p++) {
+        if (*p < '0' || *p > '9') return false;
+        const unsigned d = *p - '0';
+        if (x > (max - d) / 10) return false;
+        x = x * 10 + d;
+    }
+    *ans = x;
+    return true;
+}
+
+// A frame from a program, framed as docs/extension-framing.rst says: one with a
+// duplicate key, a value out of range or fields longer than 127 bytes is
+// rejected as a whole, and a key that is not known is ignored
 void
 screen_tablet_pointer(Screen *screen, const char *data, size_t sz) {
     char buf[128], reply[128], *saveptr = NULL;
-    const char *op = "", *text = "";
-    int v = 0, mode = -1, id = -1, num_controls = 0, control_index = -1;
+    const char *op = "", *text = "", *keys[64];
+    unsigned long long v = 0, x;
+    int mode = -1, id = -1, num_controls = 0, control_index = -1;
+    size_t num_keys = 0;
     PointerPadControl control = PAD_BUTTON;
     unsigned long long device = 0;
     bool has_device = false;
@@ -2300,13 +2320,23 @@ screen_tablet_pointer(Screen *screen, const char *data, size_t sz) {
         char *val = strchr(tok, '=');
         if (!val) return;
         *val++ = 0;
+        for (size_t i = 0; i < num_keys; i++) {
+            if (!strcmp(keys[i], tok)) return;
+        }
+        if (num_keys >= arraysz(keys)) return;
+        keys[num_keys++] = tok;
 #define CONTROL(name, which) \
-    else if (!strcmp(tok, name)) { control = which; control_index = *val >= '0' && *val <= '9' ? atoi(val) : -1; num_controls++; }
-        if (!strcmp(tok, "v")) v = atoi(val);
+    else if (!strcmp(tok, name)) { \
+        if (!pointer_uint(val, 255, &x)) return; \
+        control = which; \
+        control_index = (int)x; \
+        num_controls++; \
+    }
+        if (!strcmp(tok, "v")) { if (!pointer_uint(val, UINT32_MAX, &v)) return; }
         else if (!strcmp(tok, "op")) op = val;
-        else if (!strcmp(tok, "mode")) mode = atoi(val);
-        else if (!strcmp(tok, "id")) id = atoi(val);
-        else if (!strcmp(tok, "device")) { device = strtoull(val, NULL, 10); has_device = *val >= '0' && *val <= '9'; }
+        else if (!strcmp(tok, "mode")) { if (!pointer_uint(val, INT32_MAX, &x)) return; mode = (int)x; }
+        else if (!strcmp(tok, "id")) { if (!pointer_uint(val, INT32_MAX, &x)) return; id = (int)x; }
+        else if (!strcmp(tok, "device")) { if (!pointer_uint(val, UINT64_MAX, &device)) return; has_device = true; }
         else if (!strcmp(tok, "text")) text = val;
         CONTROL("button", PAD_BUTTON)
         CONTROL("ring", PAD_RING)
@@ -2333,8 +2363,11 @@ screen_tablet_pointer(Screen *screen, const char *data, size_t sz) {
             return;
         }
         screen_pointer_cancel(screen, 0);
-        // Only the bits this terminal knows are kept, so a program that reads the mode sees what took
-        screen->pointer.mode = mode & POINTER_MODES;
+        // Only the bits this terminal knows are kept, so a program that reads the mode sees what took. The user can
+        // refuse the hardware identifiers, which tell whose pen it is
+        unsigned granted = mode & POINTER_MODES;
+        if (!OPT(tablet_hardware_ids)) granted &= ~POINTER_MODE_IDS;
+        screen->pointer.mode = granted;
         // A program that changes what it wants is told about the tools in proximity and the pads again
         for (size_t i = 0; i < arraysz(tablet_tools); i++) {
             if (tablet_tools[i].described_to == screen->window_id) tablet_tools[i].described_to = 0;

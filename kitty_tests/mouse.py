@@ -596,7 +596,7 @@ class TestMouse(BaseTest):
     def test_tablet_protocol(self):
         from kitty.constants import is_macos
 
-        s = self.create_screen()
+        s = self.create_screen(options={'tablet_hardware_ids': True})
         c = s.callbacks
         caps = 101 if is_macos else 65
 
@@ -730,8 +730,63 @@ class TestMouse(BaseTest):
         self.ae(c.wtcbuf.count(b':phase=4:'), 40)
         self.assertIn(ev('kind=2:phase=4:device=7:t=1001:contact=39:x=256:y=512:buttons=0:mods=0:tool=0:valid=0'), c.wtcbuf)
 
-    def test_tablet_pads(self):
+    def test_tablet_framing_and_consent(self):
+        # Frames from a program follow docs/extension-framing.rst, and the user can refuse the hardware identifiers
         s = self.create_screen()
+        c = s.callbacks
+
+        def send(body):
+            c.clear()
+            parse_bytes(s, f'\x1b]777;tablet-pointer;{body}\x1b\\'.encode())
+
+        def mode():
+            send('v=1:op=mode')
+            return c.wtcbuf
+
+        def is_mode(m):
+            self.ae(mode(), f'\x1b]777;tablet-pointer;v=1:op=mode:mode={m}\x1b\\'.encode())
+
+        # By default the identifiers are refused: the bit reads back as off and none is sent
+        send('v=1:op=mode:mode=9')
+        is_mode(1)
+        c.clear()
+        self.assertTrue(send_pointer_device(s, 7, tool=2, serial=99, hwid=2082, vid=1386, pid=855))
+        self.ae(c.wtcbuf, b'\x1b]777;tablet-pointer;v=1:op=device:device=7:kind=1:tool=2:axes=0\x1b\\')
+        # A frame with a duplicate key, a value out of range or one that is not a plain decimal number changes nothing
+        for bad in (
+            'v=1:op=mode:mode=2:mode=2', 'v=1:op=mode:op=mode:mode=2', 'v=1:op=mode:mode=+2', 'v=1:op=mode:mode=-2', 'v=1:op=mode:mode=2x',
+            'v=1:op=mode:mode=', 'v=1:op=mode:mode=2147483648', 'v=+1:op=mode:mode=2', 'v=1:op=mode:mode=2:junk',
+            'v=1:op=mode:mode=2:zz=1:zz=1', 'v=2:op=mode:mode=2',
+        ):
+            send(bad)
+            self.ae(c.wtcbuf, b'', bad)
+            is_mode(1)
+        # A leading zero is still a decimal number, of version 1
+        send('v=01:op=mode:mode=2')
+        is_mode(2)
+        # A key the terminal does not know is ignored
+        send('v=1:op=mode:mode=1:later=7')
+        is_mode(1)
+        send('v=1:op=query:id=2147483647:later=7')
+        self.assertIn(b':id=2147483647:', c.wtcbuf)
+        send('v=1:op=query:id=2147483648')
+        self.ae(c.wtcbuf, b'')
+        # Fields are at most 127 bytes
+        pad = 'v=1:op=mode:mode=2:x='
+        send(pad + 'a' * (127 - len(pad)))
+        is_mode(2)
+        send(pad + 'a' * (128 - len(pad)))
+        is_mode(2)
+        send('v=1:op=mode:mode=1:x=' + 'a' * 120)
+        is_mode(2)
+        # A label names one control with an index from 0 to 255
+        send('v=1:op=mode:mode=4')
+        send('v=1:op=label:device=3:button=256:text=')
+        send('v=1:op=label:device=3:button=1:button=2:text=')
+        self.ae(c.wtcbuf, b'')
+
+    def test_tablet_pads(self):
+        s = self.create_screen(options={'tablet_hardware_ids': True})
         c = s.callbacks
         BUTTON, RING, STRIP, DIAL, GROUP = 1, 2, 3, 4, 5
 
@@ -1039,7 +1094,7 @@ class TestMouse(BaseTest):
 
     def test_tablet_hardware_facts(self):
         # What hardware reports and the protocol had no place for at first: every one of these is left out when it is not known
-        s = self.create_screen()
+        s = self.create_screen(options={'tablet_hardware_ids': True})
         c = s.callbacks
 
         def send(body):
