@@ -322,8 +322,8 @@ default to zero, except ``tool``, which defaults to ``1``:
                  pad is pressed, see `Fingers`_
 ``conf``         For a finger, ``1`` when the system takes the contact to be
                  meant and ``0`` when it takes it for an accident, such as a
-                 palm; absent when the system does not judge. A contact with
-                 ``0`` is reported only while mode bit ``64`` is on, see
+                 palm; absent when the system has not said which. A contact
+                 with ``0`` is reported only while mode bit ``64`` is on, see
                  `Fingers`_
 ``w``, ``h``     For a finger on a touchpad, the size of the pad in 1/256
                  millimeter when the system knows it, so a program can turn
@@ -408,38 +408,42 @@ within each stage, so it drops back when the stage goes up.
 Not everything that touches a screen or a touchpad is meant to. A palm
 resting on the glass, the side of the hand that holds a pen, or a thumb lying
 on the edge of a touchpad is a contact too, and some systems judge which a
-contact is from its size, its shape and where the pen is. Where the system
-does, every finger report carries ``conf``: ``1`` for a contact it takes to
-be meant and ``0`` for one it takes to be an accident. ``conf`` is absent
-when the system does not judge, which says nothing either way. The judgement
-can change while the contact is down, as when a palm comes down edge first
-and looks like a finger for a moment, or a thumb that was resting begins to
-move.
+contact is from its size, its shape and where the pen is. A finger report
+says what the system has judged with ``conf``: ``1`` for a contact it takes
+to be meant and ``0`` for one it takes to be an accident. ``conf`` is absent
+when the system has not said, which says nothing either way. Some systems do
+not judge at all. Others only mark the contacts they take for accidents and
+say nothing of the rest, and a contact such a system has not marked has no
+``conf``: it was not found to be meant, and a palm the system missed looks
+the same. Only a system that says of a contact that it is meant gives it
+``conf=1``. The judgement can change while the contact is down, as when a
+palm comes down edge first and looks like a finger for a moment, or a thumb
+that was resting begins to move.
 
 A contact that is not meant is a contact all the same, and what to do with
 it is the program's choice: one program ignores it, another lets the palm
 rest and smudge. But a program that knows nothing of ``conf`` would take a
 resting palm for a finger, so the contacts the system judges accidental are
-reported only while mode bit ``64`` is on. Without it a program is shown
-only contacts the system takes to be meant:
+reported only while mode bit ``64`` is on. Without it a program is not
+shown a contact for as long as the system takes it for an accident:
 
-* A contact that begins as an accident is not reported. If the system comes
-  to take it to be meant before it lifts, it is reported from then on, and
-  begins with a ``down``. If it lifts first, nothing is reported of it.
+* A contact that begins as an accident is not reported. If the system stops
+  taking it for one before it lifts, it is reported from then on, and begins
+  with a ``down``. If it lifts first, nothing is reported of it.
 * A contact that is being reported, and that the system comes to take for an
   accident, is cancelled: a report with ``phase=4`` and ``conf=0``, after
   which the program takes back what it made of the contact, as after every
   other cancel. That is so also when the contact lifts as an accident, whose
   last report is then a ``cancel`` and not an ``up``. A cancelled contact is
-  not reported again, unless the system takes it to be meant once more before
-  it lifts, and then it begins with a new ``down``.
+  not reported again, unless the system stops taking it for an accident
+  before it lifts, and then it begins with a new ``down``.
 * A frame report follows a group only when something of the group was
   reported.
 
-With bit ``64`` every contact is reported as it happens, with its ``conf``,
-and nothing is cancelled for being an accident: a program reads ``conf`` in
-every report, and one that had begun to draw for a contact that turns out
-not to be meant takes that back itself. The bit changes nothing where the
+With bit ``64`` every contact is reported as it happens, with the ``conf``
+the system gave it, and nothing is cancelled for being an accident: a program
+reads ``conf`` in every report, and one that had begun to draw for a contact
+that turns out to be an accident takes that back itself. The bit changes nothing where the
 system does not judge. A terminal that can report these contacts says so with
 ``caps`` bit ``256``.
 
@@ -448,7 +452,8 @@ usage tables have it as *Touch Valid* in the report of a contact, where a
 terminal that reads the digitizer finds it. Android judges too, and says so
 late: it cancels the one finger it has come to take for a palm, which is a
 ``cancel`` of that contact with ``conf=0``. AppKit marks the touches on a
-trackpad that it takes to be resting there. Wayland and X11 do not say.
+trackpad that it takes to be resting there, and says nothing of the others.
+Wayland and X11 do not say.
 
 Tool actions
 ~~~~~~~~~~~~~~~
@@ -672,7 +677,7 @@ to the last lifting, all go to the window under the first finger, or for a
 touchpad to the window under the pointer when the first finger landed. A
 contact the system judges accidental does not keep a sequence open, or a
 thumb left lying on a touchpad would hold every later finger in one window:
-a finger that lands, or a contact that comes to be meant, while every
+a finger that lands, or a contact that stops being an accident, while every
 contact that is down is an accident begins a new sequence, with the window
 that is under it, or under the pointer, at that moment. When that is another
 window, the contacts that were down are cancelled in the window they were
@@ -709,7 +714,7 @@ on to the pane the device is reporting to. ``rx``, ``ry``, ``grip`` and
 Two panes can differ in mode bit ``64``, so a multiplexer asks the terminal
 for it when any pane has it, and for a pane that has not it does what a
 terminal does: it keeps back the contacts the system judges accidental,
-cancels one that becomes an accident, begins one that comes to be meant with
+cancels one that becomes an accident, begins one that stops being one with
 a ``down``, and sends a frame only after a group it sent something of.
 ``tablet`` is the terminal's number and is forwarded unchanged; a relay
 that brings the tablets of several terminals together gives them numbers of
@@ -756,11 +761,12 @@ Of what a tablet says of itself silkie sends what the window system gives
 it, which the notes below go through: ``tablet`` on macOS and Wayland, the
 groups of the controls of a pad on Wayland, ``w``, ``h`` and ``direct`` on
 Wayland, where they are had from the kernel, ``rx`` and ``ry``, with ``w``
-and ``h`` under some drivers, on X11, and ``conf`` on macOS. It can write
-every field of this page, and its tests do, but nothing it reads has
-``grip``, ``pcolor``, ``pwidth``, ``pstyle``, or the actions ``6`` to ``8``,
-so it never sends them. It describes a tool or a pad again when what it said
-of it has changed, which at present only a pad on Wayland does.
+and ``h`` under some drivers, on X11, and ``conf`` for a touch at rest on
+macOS. It can write every field of this page, and its tests do, but nothing
+it reads has ``grip``, ``pcolor``, ``pwidth``, ``pstyle``, or the actions
+``6`` to ``8``, so it never sends them. It describes a tool or a pad again
+when what it said of it has changed, which at present only a pad on Wayland
+does.
 
 * On macOS, tablet data arrives with the mouse events of the tablet driver.
   Tilt is scaled from the driver's fraction of maximum tilt assuming 60
@@ -781,19 +787,24 @@ of it has changed, which at present only a pad on Wayland does.
   to be in points at 72 to the inch. Trackpad fingers are reported alongside
   the mouse and scroll events the system makes from them. A trackpad that
   measures force gives ``p`` and ``stage`` once it has been pressed for the
-  first time. AppKit judges which touches are resting on the pad, a thumb or
-  the side of a hand, and silkie asks it for those too: a resting touch is
-  ``conf=0`` and every other one ``conf=1``, a touch that comes to rest or
-  stops resting is reported even when it has not moved, and ``caps`` has bit
-  ``256``. Until silkie asked for them, AppKit left a resting touch out,
+  first time. AppKit marks the touches it takes to be resting on the pad,
+  which its documentation gives as a thumb or another touch at rest, and
+  silkie asks it for those too: a resting touch is ``conf=0``, a touch that
+  comes to rest or stops resting is reported even when it has not moved, and
+  ``caps`` has bit ``256``. Of a touch it has not marked AppKit says nothing,
+  so every other touch has no ``conf``. That is not a formality: on the
+  trackpad of a MacBook Pro a palm laid on the pad came as a touch like any
+  other and not as a resting one, so a touch without the mark is not known
+  to be meant. Until silkie asked for them, AppKit left a resting touch out,
   ended one that came to rest and began it again when it moved off. A
   program without mode bit ``64`` still sees that, with one difference that
   is meant: a finger that comes to rest now ends with a ``cancel`` where it
   ended with an ``up``, since a finger that came to rest did not tap. The
   Wacom tool types, the double tap, the force and the resting touches are
   written from the documentation of AppKit and have not been tried with the
-  hardware; in particular nobody has yet rested a thumb on a trackpad to see
-  ``conf=0``. There are no pad reports: AppKit has no events for the
+  hardware; in particular no touch has yet been seen to be marked as
+  resting, and until one has it is not known that a trackpad of today marks
+  any. There are no pad reports: AppKit has no events for the
   controls of a pad, which an application gets only through the request
   interface of Wacom's own driver.
 * On Wayland, tools come through the ``tablet-v2`` protocol, which reports

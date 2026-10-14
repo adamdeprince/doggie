@@ -601,7 +601,8 @@ typedef enum GLFWTouchPointState {
 // meant, or an accident such as a palm or a thumb resting on a touchpad. The
 // judgement can change while the point is down, and a point whose judgement
 // changed is reported as moved even when it did not move. A system that does
-// not judge leaves it at zero
+// not judge leaves it at zero, and so does one that only marks the accidents
+// for every point it has not marked
 typedef enum GLFWTouchConfidence {
     GLFW_TOUCH_CONFIDENCE_UNKNOWN = 0,
     GLFW_TOUCH_INTENDED = 1,

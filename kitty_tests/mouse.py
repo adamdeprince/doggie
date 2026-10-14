@@ -944,6 +944,22 @@ class TestMouse(BaseTest):
         self.assertTrue(report(3, conf=0))
         self.ae(c.wtcbuf, ev(4, conf=0))
         self.assertTrue(frame())
+        # A system that only marks the accidents says nothing of any other contact, which then has no conf. Such a
+        # contact is shown, and one that stops being an accident begins with a down as one that is found meant does
+        nothing(1, conf=0)
+        self.assertFalse(frame())
+        self.assertTrue(report(2, t=1003))
+        self.ae(c.wtcbuf, ev(1, t=1003))
+        self.assertTrue(report(2))
+        self.ae(c.wtcbuf, ev(2))
+        self.assertTrue(report(2, conf=0))
+        self.ae(c.wtcbuf, ev(4, conf=0))
+        nothing(2, conf=0)
+        self.assertTrue(report(2))
+        self.ae(c.wtcbuf, ev(1))
+        self.assertTrue(report(3))
+        self.ae(c.wtcbuf, ev(3))
+        self.assertTrue(frame())
         # A frame closes a group in which one finger was reported and another was not
         nothing(1, 1, conf=0)
         self.assertTrue(report(1, 2, conf=1))
