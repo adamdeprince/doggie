@@ -2348,12 +2348,13 @@ touch_pointer_event(const GLFWTouchEvent *ev) {
     OSWindow *osw = global_state.callback_os_window;
     Window *w = NULL;
     // A contact the system takes for an accident, as a thumb resting on a touchpad, does not keep a sequence open: a
-    // finger that lands when only such contacts are down begins a sequence of its own, with a window of its own
+    // finger that lands when only such contacts are down begins a sequence of its own, with a window of its own. Only
+    // a system that judges its contacts has such sequences, on any other a sequence is what it was before there was conf
     const GLFWTouchPoint *meant = NULL;
     for (size_t i = 0; i < ev->num_points && !meant; i++) {
         if (ev->points[i].state != GLFW_TOUCH_POINT_RELEASED && ev->points[i].confidence != GLFW_TOUCH_ACCIDENTAL) meant = ev->points + i;
     }
-    const bool begins_again = ev->type == GLFW_TOUCH_UPDATE && meant && !touch_pointer_meant;
+    const bool begins_again = ev->type == GLFW_TOUCH_UPDATE && meant && meant->confidence == GLFW_TOUCH_INTENDED && !touch_pointer_meant;
     bool moved_window = false;
     if (ev->type == GLFW_TOUCH_BEGIN || begins_again) {
         if (ev->indirect) w = pointer_window(POINTER_TOUCH);
