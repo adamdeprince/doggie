@@ -2211,6 +2211,7 @@ tablet_event(const GLFWTabletEvent *ev) {
         .serial = ev->serial, .hwid = ev->hardware_id, .vid = ev->vendor_id, .pid = ev->product_id, .tablet = ev->tablet,
         .w = has_size ? (unsigned)pointer_clamp(round(ev->tablet_width * 256), 1., 1073741823.) : 0,
         .h = has_size ? (unsigned)pointer_clamp(round(ev->tablet_height * 256), 1., 1073741823.) : 0,
+        .direct = ev->tablet_direct,
     };
     // A tool is described again when what was said of it is no longer so. Only
     // a point has all there is to say, the event of a tool that left may not

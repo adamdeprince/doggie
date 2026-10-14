@@ -476,6 +476,9 @@ typedef struct GLFWTabletEvent {
     // top left corner, when axes has GLFW_TABLET_POSITION. The size of that
     // surface in millimetres, zero when the system does not say
     double tablet_x, tablet_y, tablet_width, tablet_height;
+    // Whether that surface is a display: 1 when it is, -1 when it is not and
+    // zero when the system does not say
+    int tablet_direct;
     // The tablet the tool is on, numbered from one among those attached. The
     // number stays with the tablet for as long as it is attached and the pads
     // of the tablet carry it too. Zero when the system does not say

@@ -213,14 +213,16 @@ are reported all the same, and are where the system put the pointer.
 The pointer input of Windows has all of these: every pointer names the
 device it comes from, and the device says whether it is a pen built into a
 display or one on a tablet of its own, the rectangle of its surface in
-hundredths of a millimeter, and where on it the pen is. So has the kernel
-of Linux, whose devices give the range and the resolution of their position
-and say whether they are a display. What a terminal gets depends on what
-stands between it and those. The ``tablet-v2`` protocol of Wayland says
-which tablet a tool and a pad are on and no more. X11 has the position and
-its range, with a resolution where the driver states one, and no tablet
-that tools belong to. AppKit numbers the tablets, and gives a position in
-units of the tablet whose range it does not tell.
+hundredths of a millimeter, and where on it the pen is. So has the kernel of
+Linux, whose devices give the range and the resolution of their position and
+say whether they are a display. What a terminal gets depends on what stands
+between it and those. The ``tablet-v2`` protocol of Wayland says which
+tablet a tool and a pad are on and no more, but it names the device node of
+the tablet, by which a terminal on the same machine can ask the kernel for
+the size and for whether the tablet is a display. X11 has the position and
+its range, with a resolution where the driver states one, and no tablet that
+tools belong to. AppKit numbers the tablets, and gives a position in units
+of the tablet whose range it does not tell.
 
 Settings stored in a pen
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -729,9 +731,10 @@ Implementations
   the touchpad on macOS, with whether the system takes them to be resting,
   and on touchscreens on Wayland, with contact shape, and on X11, without;
   pads on Wayland, with the groups of their controls; tool actions on macOS;
-  the number of the tablet on macOS and Wayland; the place of a tool on its
-  tablet on X11. ``kitty --debug-input`` logs the tablet, pad and touch
-  events it sees.
+  the number of the tablet on macOS and Wayland; the size of a tablet and
+  whether it is a display on Wayland; the place of a tool on its tablet on
+  X11. ``kitty --debug-input`` logs the tablet, pad and touch events it
+  sees.
 * Inkline, Goblin Skiff and GoblinView carry a codec for an earlier draft of
   this protocol and are being brought up to this specification.
 
@@ -748,13 +751,13 @@ stamp tablet and touch events in whole milliseconds.
 
 Of what a tablet says of itself silkie sends what the window system gives
 it, which the notes below go through: ``tablet`` on macOS and Wayland, the
-groups of the controls of a pad on Wayland, and ``rx`` and ``ry``, with
-``w`` and ``h`` under some drivers, on X11, and ``conf`` on macOS. It can
-write every field of this page, and its tests do, but nothing it reads has
-``direct``, ``grip``, ``pcolor``, ``pwidth``, ``pstyle``, or the actions
-``6`` to ``8``, so it never sends them. It describes a tool or a pad again
-when what it said of it has changed, which at present only a pad on Wayland
-does.
+groups of the controls of a pad on Wayland, ``w``, ``h`` and ``direct`` on
+Wayland, where they are had from the kernel, ``rx`` and ``ry``, with ``w``
+and ``h`` under some drivers, on X11, and ``conf`` on macOS. It can write
+every field of this page, and its tests do, but nothing it reads has
+``grip``, ``pcolor``, ``pwidth``, ``pstyle``, or the actions ``6`` to ``8``,
+so it never sends them. It describes a tool or a pad again when what it said
+of it has changed, which at present only a pad on Wayland does.
 
 * On macOS, tablet data arrives with the mouse events of the tablet driver.
   Tilt is scaled from the driver's fraction of maximum tilt assuming 60
@@ -795,27 +798,46 @@ does.
   fingers through ``wl_touch``, with ``shape`` and ``orientation`` on a seat
   of version 6 or later whose compositor sends them, which sway and GNOME
   did not when this was written; ``caps`` claims the shape once a contact
-  has had one. The pointer cursor
-  follows a tool only on compositors with ``cursor-shape-v1``. GNOME applies
-  its own stylus button mapping first (by default the lower button is the
-  middle button), sway passes the buttons through. A tool does not move the
-  pointer as far as silkie is concerned: a compositor can give tablets a
-  cursor of their own, so what is reported at the pointer, such as a scroll,
-  stays where the pointer was. Pads come through
-  ``tablet-v2`` as well: keys, rings, strips and modes from its first
-  version and dials from its second, which the compositor has to offer, and
-  a label is passed to the compositor as the feedback for that control. The
-  ``name`` and ids of a pad are those of the tablet it is attached to.
-  ``caps`` claims tools and pads only on a compositor that has the protocol.
-  ``tablet`` numbers the tablets of the seat in the order the compositor
-  announced them: a tool has the number of the tablet it came into proximity
-  over, a pad that of the tablet it was given the focus with. The group of a
-  key is the group that lists it, and the group of a ring, a strip or a dial
-  the one that announced it. When a compositor lists the keys of a group
-  again while the pad has the focus, the pad is described again. The
-  protocol has neither the size of a tablet, nor where on it a tool is, nor
-  whether it is a display, though the compositor knows all three.
-  Pads have been tried against a stand-in for the compositor that sends what
+  has had one. The pointer cursor follows a tool only on compositors with
+  ``cursor-shape-v1``. GNOME applies its own stylus button mapping first (by
+  default the lower button is the middle button), sway passes the buttons
+  through. A tool does not move the pointer as far as silkie is concerned: a
+  compositor can give tablets a cursor of their own, so what is reported at
+  the pointer, such as a scroll, stays where the pointer was. Pads come
+  through ``tablet-v2`` as well: keys, rings, strips and modes from its
+  first version and dials from its second, which the compositor has to
+  offer, and a label is passed to the compositor as the feedback for that
+  control. The ``name`` and ids of a pad are those of the tablet it is
+  attached to. ``caps`` claims tools and pads only on a compositor that has
+  the protocol. ``tablet`` numbers the tablets of the seat in the order the
+  compositor announced them: a tool has the number of the tablet it came
+  into proximity over, a pad that of the tablet it was given the focus with.
+  The group of a key is the group that lists it, and the group of a ring, a
+  strip or a dial the one that announced it. When a compositor lists the
+  keys of a group again while the pad has the focus, the pad is described
+  again. The protocol has neither the size of a tablet, nor whether it is a
+  display, nor where on it a tool is, though the compositor knows all three.
+  It does name the device node of the tablet, and of a node the system says
+  the first two to anyone who asks, with no access to the device itself.
+  udev keeps the size, which it works out from the range and the resolution
+  of the position the device reports, as ``ID_INPUT_WIDTH_MM`` and
+  ``ID_INPUT_HEIGHT_MM`` in its database, in whole millimeters rounded down.
+  The kernel has the properties of the device in sysfs, in which
+  ``INPUT_PROP_DIRECT`` is a display and ``INPUT_PROP_POINTER`` a tablet
+  that is not one. silkie reads both through libudev, which it loads when a
+  tablet names a node and does without where there is none, and sends them
+  as ``w``, ``h`` and ``direct``. Of the nodes a tablet has, only that of
+  the pen is read, not that of the pad or of the fingers on the tablet. A
+  node is a name on the machine the compositor runs on, so what is found at
+  it counts only when the kernel has that device under the vendor and
+  product ids the compositor gave for the tablet, or under its name when it
+  gave no ids: a terminal on another machine than its compositor says
+  nothing. What the kernel does not say is left out, as the size is for a
+  device that states no resolution. ``rx`` and ``ry`` cannot be had this
+  way. This was tried against a stand-in for libudev that answers as udev
+  and the kernel do for two tablets, and the reading of the real one against
+  the devices of a machine that has no tablet; no tablet was at hand. Pads
+  have been tried against a stand-in for the compositor that sends what
   wlroots sends, not with a tablet.
 * On X11, tools come through XInput 2 devices whose names include the tool
   type, as the libinput and wacom drivers name them; that name is the
@@ -823,30 +845,35 @@ does.
   ``tangent`` carries the device's wheel axis and ``twist`` its rotary Z
   axis. The position of a tool is made from the position its own device
   reports, scaled to the screen as the server does it, because the server
-  puts the position of the pointer before an event into that event, which
-  is where the tool was one report earlier. That position is also where
-  ``rx`` and ``ry`` come from. The server puts it through the matrix by which
-  the user maps the tablet to the screen or to one monitor, so silkie reads
-  that matrix, again whenever it is changed, and undoes it; a matrix that
-  cannot be undone leaves ``rx`` and ``ry`` out. ``w`` and ``h`` are the
-  range of the position divided by the resolution the driver states for it,
-  and are left out when it states none, which is so with the libinput
-  driver; no driver that states one was at hand, so the sizes are untried.
-  X has no tablet that tools belong to, each tool being a device of its own,
-  so there is no ``tablet``. The X server does not report a
-  tool leaving proximity, so phase
-  ``5`` arrives only when the device goes away. Xwayland's tablet devices
-  are recognised too, but under GNOME no motion reached them in testing; use
-  the Wayland backend there. Nothing of a tablet is reported for them:
-  their position is one on the desktop and their resolution is made up. Fingers on a touchscreen come through the touch
-  events of XInput 2.2, and ``caps`` claims them when the server has that
-  version. X reports each finger in an event of its own, so every finger
-  report is followed by a frame report of its own and fingers that moved
-  together are not grouped. There is no contact shape, a touch the system
-  takes over ends with an ordinary ``up`` since the server does not say that
-  it was taken, and the fingers on a touchpad are not reported. The server
-  also moves the pointer to where the first finger lands, which is not passed
-  on as mouse reports. This was tried against Xwayland, which makes these
-  events from the touches of its compositor, not with a touchscreen. Pads
-  are not reported on X11: the wacom driver has a device for the pad, which
-  is not read.
+  puts the position of the pointer before an event into that event, which is
+  where the tool was one report earlier. That position is also where ``rx``
+  and ``ry`` come from. The server puts it through the matrix by which the
+  user maps the tablet to the screen or to one monitor, so silkie reads that
+  matrix, again whenever it is changed, and undoes it; a matrix that cannot
+  be undone leaves ``rx`` and ``ry`` out. ``w`` and ``h`` are the range of
+  the position divided by the resolution the driver states for it, and are
+  left out when it states none, which is so with the libinput driver; no
+  driver that states one was at hand, so the sizes are untried. Those
+  drivers name the device node of a tool in its ``Device Node`` property, by
+  which the size and ``direct`` could be had from the kernel as on Wayland.
+  silkie does not read it: the node is one on the machine of the server, the
+  ids to tell that it is the same device are in another property, and the
+  libinput driver can cut the range of the position down to a part of the
+  tablet, whose size the kernel does not have. X has no tablet that tools
+  belong to, each tool being a device of its own, so there is no ``tablet``.
+  The X server does not report a tool leaving proximity, so phase ``5``
+  arrives only when the device goes away. Xwayland's tablet devices are
+  recognised too, but under GNOME no motion reached them in testing; use the
+  Wayland backend there. Nothing of a tablet is reported for them: their
+  position is one on the desktop and their resolution is made up. Fingers on
+  a touchscreen come through the touch events of XInput 2.2, and ``caps``
+  claims them when the server has that version. X reports each finger in an
+  event of its own, so every finger report is followed by a frame report of
+  its own and fingers that moved together are not grouped. There is no
+  contact shape, a touch the system takes over ends with an ordinary ``up``
+  since the server does not say that it was taken, and the fingers on a
+  touchpad are not reported. The server also moves the pointer to where the
+  first finger lands, which is not passed on as mouse reports. This was
+  tried against Xwayland, which makes these events from the touches of its
+  compositor, not with a touchscreen. Pads are not reported on X11: the
+  wacom driver has a device for the pad, which is not read.

@@ -18,6 +18,7 @@
 #include <time.h>
 #include <stdio.h>
 #include <sys/mman.h>
+#include <sys/stat.h>
 
 #ifdef __NetBSD__
 #define ppoll pollts
@@ -494,3 +495,105 @@ createAnonymousFile(off_t size) {
     }
     return fd;
 }
+
+// Input device nodes {{{
+// The bits of the properties of an input device that say what its surface is, from linux/input-event-codes.h
+#define INPUT_NODE_PROP_POINTER 1ul  // positions on it move a pointer that is somewhere else
+#define INPUT_NODE_PROP_DIRECT 2ul   // it is a display, and a position on it is that place on the display
+
+// libudev is loaded when it is first needed, and nothing is missed when it is not there
+struct udev;
+struct udev_device;
+static struct {
+    bool tried;
+    void *handle;
+    struct udev *(*new)(void);
+    struct udev *(*unref)(struct udev *);
+    struct udev_device *(*device_new_from_devnum)(struct udev *, char, dev_t);
+    struct udev_device *(*device_get_parent)(struct udev_device *);
+    const char *(*device_get_property_value)(struct udev_device *, const char *);
+    const char *(*device_get_sysattr_value)(struct udev_device *, const char *);
+    struct udev_device *(*device_unref)(struct udev_device *);
+} libudev;
+
+static bool
+load_libudev(void) {
+    if (libudev.tried) return libudev.handle != NULL;
+    libudev.tried = true;
+    void *handle = _glfw_dlopen("libudev.so.1");
+    if (!handle) return false;
+    glfw_dlsym(libudev.new, handle, "udev_new");
+    glfw_dlsym(libudev.unref, handle, "udev_unref");
+    glfw_dlsym(libudev.device_new_from_devnum, handle, "udev_device_new_from_devnum");
+    glfw_dlsym(libudev.device_get_parent, handle, "udev_device_get_parent");
+    glfw_dlsym(libudev.device_get_property_value, handle, "udev_device_get_property_value");
+    glfw_dlsym(libudev.device_get_sysattr_value, handle, "udev_device_get_sysattr_value");
+    glfw_dlsym(libudev.device_unref, handle, "udev_device_unref");
+    if (!libudev.new || !libudev.unref || !libudev.device_new_from_devnum || !libudev.device_get_parent || !libudev.device_get_property_value ||
+        !libudev.device_get_sysattr_value || !libudev.device_unref) {
+        _glfw_dlclose(handle);
+        return false;
+    }
+    libudev.handle = handle;
+    return true;
+}
+
+// The udev device of a device node, to be released with its udev by the caller. The node is only looked at, never opened
+static struct udev_device *
+input_node_device(const char *path, struct udev **udev) {
+    struct stat st;
+    *udev = NULL;
+    if (!path || !path[0] || stat(path, &st) != 0 || !S_ISCHR(st.st_mode) || !load_libudev()) return NULL;
+    if (!(*udev = libudev.new())) return NULL;
+    struct udev_device *dev = libudev.device_new_from_devnum(*udev, 'c', st.st_rdev);
+    if (!dev) *udev = libudev.unref(*udev);
+    return dev;
+}
+
+static bool
+input_node_has(struct udev_device *dev, const char *property) {
+    const char *value = libudev.device_get_property_value(dev, property);
+    return value && value[0] == '1' && !value[1];
+}
+
+// Tablets and touch devices say how large they are and whether they are a
+// display, and window systems mostly do not pass that on. What they do pass on
+// is the device node, and with it the same can be had from where the system
+// keeps it for everyone to read, with no access to the device: the size from
+// the udev database, where udev puts what it works out from the range and the
+// resolution of the position of the device, and the rest from the attributes
+// of the kernel's input device in sysfs. Returns false when there is no such
+// node or no libudev, and leaves at zero whatever is not said
+bool
+input_node_info(const char *path, InputNodeInfo *ans) {
+    memset(ans, 0, sizeof(*ans));
+    struct udev *udev;
+    struct udev_device *dev = input_node_device(path, &udev);
+    if (!dev) return false;
+    ans->is_tablet = input_node_has(dev, "ID_INPUT_TABLET");
+    ans->is_pad = input_node_has(dev, "ID_INPUT_TABLET_PAD");
+    const char *width = libudev.device_get_property_value(dev, "ID_INPUT_WIDTH_MM"), *height = libudev.device_get_property_value(dev, "ID_INPUT_HEIGHT_MM");
+    if (width && height) {
+        const long w = strtol(width, NULL, 10), h = strtol(height, NULL, 10);
+        if (w > 0 && h > 0 && w < 100000 && h < 100000) ans->width_mm = (int)w, ans->height_mm = (int)h;
+    }
+    // The node is a child of the input device, which has the rest
+    struct udev_device *input = libudev.device_get_parent(dev);
+    if (input) {
+        const char *name = libudev.device_get_sysattr_value(input, "name"), *vendor = libudev.device_get_sysattr_value(input, "id/vendor");
+        const char *product = libudev.device_get_sysattr_value(input, "id/product"), *properties = libudev.device_get_sysattr_value(input, "properties");
+        if (name) snprintf(ans->name, sizeof(ans->name), "%s", name);
+        if (vendor) ans->vendor = (unsigned)strtoul(vendor, NULL, 16);
+        if (product) ans->product = (unsigned)strtoul(product, NULL, 16);
+        if (properties) {
+            // A bit set in hexadecimal words, the lowest bits in the last word
+            const char *last = strrchr(properties, ' ');
+            const unsigned long bits = strtoul(last ? last + 1 : properties, NULL, 16);
+            ans->direct = (bits & INPUT_NODE_PROP_DIRECT) ? 1 : ((bits & INPUT_NODE_PROP_POINTER) ? -1 : 0);
+        }
+    }
+    libudev.device_unref(dev);
+    libudev.unref(udev);
+    return true;
+}
+// }}}

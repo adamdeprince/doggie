@@ -110,3 +110,13 @@ void wakeupEventLoop(EventLoopData *eld);
 char *utf_8_strndup(const char *source, size_t max_length);
 int createAnonymousFile(off_t size);
 monotonic_t event_time_to_monotonic(uint32_t time);
+
+// What the kernel and udev say of the input device that has a device node
+typedef struct InputNodeInfo {
+    char name[128];            // the name the kernel has for the device
+    unsigned vendor, product;  // and its ids
+    bool is_tablet, is_pad;    // what udev takes it for: a tablet, and of a tablet the pad rather than the pen
+    int width_mm, height_mm;   // the size of the surface it gives positions on, zero when udev does not have it
+    int direct;                // 1 when that surface is a display, -1 when it is not, 0 when the kernel does not say
+} InputNodeInfo;
+bool input_node_info(const char *path, InputNodeInfo *ans);
