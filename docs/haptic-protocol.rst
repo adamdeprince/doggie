@@ -18,17 +18,15 @@ Framing
 
 Frames are ``OSC 777`` with the ``haptic`` selector::
 
-    <OSC> 777 ; haptic ; <fields> <ST>
+    <OSC> 777 ; haptic ; v=1 : op=play : pattern=alignment <ST>
 
-``<OSC>`` is ``<ESC> ]`` and ``<ST>`` is ``<ESC> \``; ``BEL`` is also
-accepted as a terminator. Fields are ASCII ``key=value`` pairs separated by
-colons, in any order. Keys are case sensitive. Every frame has ``v``, the
-protocol version, which must be ``1``, and ``op``, one of ``query``, ``cap``,
-``play``, ``start`` and ``stop``. A frame with a field that is not
-``key=value``, an unknown version, an unknown ``op``, a missing required
-field or a value that is not one of those defined for its key is ignored as
-a whole and never reaches a program as keystrokes; unknown keys are ignored.
-Spaces in the examples below are for clarity only.
+They follow the rules every OSC 777 extension shares, which
+:doc:`extension-framing` gives: the syntax of the fields, which frames are
+rejected and the units. ``v``, the protocol version, is ``1``, and ``op`` is
+one of ``query``, ``cap``, ``play``, ``start`` and ``stop``. A request whose
+``op`` is not one of these, or with a value that is not one of those defined
+for its key, is ignored as a whole as well. The terminal sends only replies,
+which are never merged or dropped.
 
 Feedback is played on a *target*, named by the ``target`` field of the
 requests below: ``trackpad``, which is what is meant when the field is

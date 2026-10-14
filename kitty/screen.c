@@ -44,6 +44,7 @@
 #include "keys.h"
 #include "vt-parser.h"
 #include "resize.h"
+#include "extension-fields.h"
 
 static const ScreenModes empty_modes = {0, .mDECAWM = true, .mDECTCEM = true, .mDECARM = true};
 
@@ -1803,23 +1804,16 @@ screen_haptic(Screen *self, const char *data, size_t sz) {
     static const char *const targets[] = {"trackpad", "pen", "dial"};
     // The taps, numbered as cocoa_haptic_feedback() takes them
     static const char *const taps[] = {"generic", "alignment", "level", "click", "complete"};
-    char buf[128], reply[128], *saveptr = NULL;
-    const char *op = "", *pattern = "", *target = "trackpad";
-    int v = 0, id = -1;
-    if (sz >= sizeof(buf)) return;
-    memcpy(buf, data, sz);
-    buf[sz] = 0;
-    for (char *tok = strtok_r(buf, ":", &saveptr); tok; tok = strtok_r(NULL, ":", &saveptr)) {
-        char *val = strchr(tok, '=');
-        if (!val) return;
-        *val++ = 0;
-        if (!strcmp(tok, "v")) v = atoi(val);
-        else if (!strcmp(tok, "op")) op = val;
-        else if (!strcmp(tok, "id")) id = atoi(val);
-        else if (!strcmp(tok, "pattern")) pattern = val;
-        else if (!strcmp(tok, "target")) target = val;
-    }
-    if (v != 1) return;
+    // A frame from the program, see docs/extension-framing.rst for what is rejected
+    ExtensionFields f;
+    char reply[128];
+    const char *op, *pattern, *target;
+    long long id = -1, intensity = 100;
+    if (!extension_fields_parse(&f, data, sz) || !extension_frame_header(&f, 1, &op)) return;
+    if (!extension_field_int(&f, "id", 0, INT32_MAX, &id) || !extension_field_int(&f, "intensity", 0, 100, &intensity)) return;
+    (void)intensity;  // of continuous feedback, which nothing kitty runs on can play
+    if (!(pattern = extension_field(&f, "pattern"))) pattern = "";
+    if (!(target = extension_field(&f, "target"))) target = "trackpad";
     // What can be played right now: taps on the trackpad 1, on a pen 2 and on
     // a dial 4, continuous feedback on a pen 8. Only the trackpad of a Mac can
     // be driven
@@ -1829,7 +1823,7 @@ screen_haptic(Screen *self, const char *data, size_t sz) {
     const unsigned caps = 0;
 #endif
     if (!strcmp(op, "query") && id >= 0) {
-        snprintf(reply, sizeof(reply), "777;haptic;v=1:op=cap:id=%d:caps=%u", id, caps);
+        snprintf(reply, sizeof(reply), "777;haptic;v=1:op=cap:id=%lld:caps=%u", id, caps);
         write_escape_code_to_child(self, ESC_OSC, reply);
     } else if (!strcmp(op, "play")) {
         const int target_index = haptic_name_index(target, targets, arraysz(targets)), which = haptic_name_index(pattern, taps, arraysz(taps));
