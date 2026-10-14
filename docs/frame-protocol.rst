@@ -18,17 +18,12 @@ Framing
 
 Frames are ``OSC 777`` with the ``frame`` selector::
 
-    <OSC> 777 ; frame ; <fields> <ST>
+    <OSC> 777 ; frame ; v=1 : op=query : id=42 <ST>
 
-``<OSC>`` is ``<ESC> ]`` and ``<ST>`` is ``<ESC> \``; ``BEL`` is also
-accepted as a terminator. Fields are ASCII ``key=value`` pairs separated by
-colons, in any order, with decimal integers that carry no leading ``+``. A
-frame with a missing required field or an unknown version is ignored as a
-whole and never reaches a program as keystrokes. Spaces in the examples below
-are for clarity only.
-
-Every frame has ``v``, the protocol version, which is ``1``, and ``op``, one
-of ``query``, ``cap``, ``mode`` and ``event``.
+They follow the rules every OSC 777 extension shares, which
+:doc:`extension-framing` gives: the syntax of the fields, which frames are
+rejected, the units and the clock. ``v``, the protocol version, is ``1``, and
+``op`` is one of ``query``, ``cap``, ``mode`` and ``event``.
 
 Discovery
 -------------
@@ -62,7 +57,9 @@ and off with ``mode=0``. Turning the mode on resets the sequence counter. The
 mode is local to the window and is reset by ``RIS``. Programs must turn it
 off when they exit, suspend or fail, and turn it back on when resumed.
 Multiplexers keep it with the rest of the terminal state and turn it off when
-detaching. There is no user setting that overrides the program's choice.
+detaching. A terminal may let its user refuse the mode, for every program or
+for some. A refused mode reads back as off and no frame is reported, so a
+program reads the mode back rather than assume it was granted.
 
 A ``mode`` request without a ``mode`` field reads the state instead of
 changing it, and is answered with::
@@ -79,12 +76,20 @@ While the mode is on, the terminal sends one report each time it presents a
 frame to the display that contains output the program wrote since the previous
 report::
 
-    <OSC> 777 ; frame ; v=1 : op=event : seq=17 : t=408211 : period=8333 <ST>
+    <OSC> 777 ; frame ; v=1 : op=event : seq=17 : t=408211 : tu=73 : period=8333 <ST>
 
 ``seq`` counts reports since the mode was turned on. ``t`` is the time the
-frame was handed to the display system, in milliseconds on a monotonic clock
-of the terminal's choosing, useful only for differences between reports.
-``period`` is the refresh period in microseconds as in the ``cap`` reply.
+frame was handed to the display system, in milliseconds on the clock the
+terminal uses for every extension, see :doc:`extension-framing`, so that it
+can be set against the ``t`` of the input a program drew the frame for.
+``tu`` is the microseconds past ``t``, ``0`` to ``999``, present when the
+terminal measures the time that finely. This is not the time the frame was
+shown, which is the next refresh of the display or later; a later version of
+the protocol may add that. ``period`` is the refresh period in microseconds
+as in the ``cap`` reply.
+
+Every report stands for a frame, so none is ever merged with another or
+dropped, by the terminal or by a relay, see :doc:`extension-framing`.
 
 A frame is reported once, however much output it contains, and a program that
 writes nothing receives nothing, so an idle program is never woken. The

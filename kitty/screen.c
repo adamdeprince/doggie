@@ -44,6 +44,7 @@
 #include "keys.h"
 #include "vt-parser.h"
 #include "resize.h"
+#include "extension-fields.h"
 
 static const ScreenModes empty_modes = {0, .mDECAWM = true, .mDECTCEM = true, .mDECARM = true};
 
@@ -1892,27 +1893,18 @@ screen_latency(Screen *self, const char *data, size_t sz) {
     }
 }
 
+// A frame from the program, see docs/extension-framing.rst for what is rejected
 void
 screen_frame_feedback(Screen *self, const char *data, size_t sz) {
-    char buf[128], reply[128], *saveptr = NULL;
-    const char *op = "";
-    int v = 0, mode = -1, id = -1;
-    if (sz >= sizeof(buf)) return;
-    memcpy(buf, data, sz);
-    buf[sz] = 0;
-    for (char *tok = strtok_r(buf, ":", &saveptr); tok; tok = strtok_r(NULL, ":", &saveptr)) {
-        char *val = strchr(tok, '=');
-        if (!val) return;
-        *val++ = 0;
-        if (!strcmp(tok, "v")) v = atoi(val);
-        else if (!strcmp(tok, "op")) op = val;
-        else if (!strcmp(tok, "mode")) mode = atoi(val);
-        else if (!strcmp(tok, "id")) id = atoi(val);
-    }
-    if (v != 1) return;
+    ExtensionFields f;
+    char reply[128];
+    const char *op;
+    long long mode = -1, id = -1;
+    if (!extension_fields_parse(&f, data, sz) || !extension_frame_header(&f, 1, &op)) return;
+    if (!extension_field_int(&f, "mode", 0, INT32_MAX, &mode) || !extension_field_int(&f, "id", 0, INT32_MAX, &id)) return;
     if (!strcmp(op, "query") && id >= 0) {
         OSWindow *os_window = os_window_for_kitty_window(self->window_id);
-        snprintf(reply, sizeof(reply), "777;frame;v=1:op=cap:id=%d:caps=1:mode=%d:period=%u", id, self->frame_feedback.on, os_window ? os_window_refresh_period_us(os_window) : 0);
+        snprintf(reply, sizeof(reply), "777;frame;v=1:op=cap:id=%lld:caps=1:mode=%d:period=%u", id, self->frame_feedback.on, os_window ? os_window_refresh_period_us(os_window) : 0);
         write_escape_code_to_child(self, ESC_OSC, reply);
     } else if (!strcmp(op, "mode")) {
         if (mode < 0) {  // a read
@@ -1926,12 +1918,18 @@ screen_frame_feedback(Screen *self, const char *data, size_t sz) {
     }
 }
 
+// handed_at is when the frame was handed to the display system, as monotonic(),
+// the clock of every extension: t is in milliseconds as for the tablet pointer
+// protocol, and tu the microseconds past it, which the terminal measured itself
 void
-screen_frame_presented(Screen *self, unsigned period_us, monotonic_t now) {
-    char buf[96];
+screen_frame_presented(Screen *self, unsigned period_us, monotonic_t handed_at) {
+    char buf[128];
     if (!self->frame_feedback.on || !self->frame_feedback.pending) return;
     self->frame_feedback.pending = false;
-    snprintf(buf, sizeof(buf), "777;frame;v=1:op=event:seq=%u:t=%llu:period=%u", ++self->frame_feedback.seq, (unsigned long long)monotonic_t_to_ms(now), period_us);
+    const monotonic_t when = MAX(0, handed_at);
+    snprintf(
+        buf, sizeof(buf), "777;frame;v=1:op=event:seq=%u:t=%llu:tu=%u:period=%u", ++self->frame_feedback.seq, (unsigned long long)(when / MONOTONIC_T_1e6),
+        (unsigned)(when / MONOTONIC_T_1e3 % 1000), period_us);
     write_escape_code_to_child(self, ESC_OSC, buf);
 }
 
@@ -7351,6 +7349,18 @@ test_commit_write_buffer(Screen *screen, PyObject *args) {
     return PyLong_FromSize_t(s);
 }
 
+// A frame presented at t milliseconds and tu microseconds of monotonic(), as if
+// the program had written something
+static PyObject *
+test_frame_presented(Screen *screen, PyObject *args) {
+    unsigned period_us, tu;
+    unsigned long long t;
+    if (!PyArg_ParseTuple(args, "IKI", &period_us, &t, &tu)) return NULL;
+    screen->frame_feedback.pending = screen->frame_feedback.on;
+    screen_frame_presented(screen, period_us, (monotonic_t)t * MONOTONIC_T_1e6 + (monotonic_t)tu * MONOTONIC_T_1e3);
+    Py_RETURN_NONE;
+}
+
 static PyObject *
 test_parse_written_data(Screen *screen, PyObject *args) {
     ParseData pd = {.now = monotonic()};
@@ -7459,6 +7469,7 @@ static PyMethodDef methods[] = {
     METHODB(test_create_write_buffer, METH_NOARGS),
     METHODB(test_commit_write_buffer, METH_VARARGS),
     METHODB(test_parse_written_data, METH_VARARGS),
+    METHODB(test_frame_presented, METH_VARARGS),
     METHODB(test_draw_overlay_line, METH_VARARGS),
     MND(line_edge_colors, METH_NOARGS) MND(ime_text_around_cursor, METH_NOARGS) MND(line, METH_O) MND(dump_lines_with_attrs, METH_VARARGS)
         MND(cpu_cells, METH_VARARGS) MND(cursor_at_prompt, METH_NOARGS){"visual_line", (PyCFunction)pyvisual_line, METH_VARARGS, ""},

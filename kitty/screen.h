@@ -398,7 +398,7 @@ void screen_display_protocol(Screen *self, const char *data, size_t sz);
 void screen_display_changed(Screen *self, const DisplayInfo *d);
 void screen_latency(Screen *self, const char *data, size_t sz);
 void screen_frame_feedback(Screen *self, const char *data, size_t sz);
-void screen_frame_presented(Screen *self, unsigned period_us, monotonic_t now);
+void screen_frame_presented(Screen *self, unsigned period_us, monotonic_t handed_at);
 void screen_haptic(Screen *self, const char *data, size_t sz);
 void screen_cursor_position(Screen *, unsigned int, unsigned int);
 void screen_cursor_move(Screen *self, unsigned int count /*=1*/, int move_direction /*=-1*/, bool allow_move_to_previous_line);

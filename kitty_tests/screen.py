@@ -9,6 +9,7 @@ from kitty.marks import marker_from_function, marker_from_regex, marker_from_tex
 from kitty.window import pagerhist
 
 from .base import BaseTest, draw_multicell, parse_bytes
+from .extension_frames import assert_extension_frames
 
 
 class TestScreen(BaseTest):
@@ -1078,10 +1079,22 @@ class TestScreen(BaseTest):
         c.clear()
         parse_bytes(s, b'\x1b]777;frame;v=1:op=query:id=8\x1b\\')
         self.ae(c.wtcbuf, b'\x1b]777;frame;v=1:op=cap:id=8:caps=1:mode=1:period=0\x1b\\')
+        # A presented frame is reported with the time it was handed to the display system, on the clock of every
+        # extension, to the microsecond
+        c.clear()
+        s.test_frame_presented(8333, 408211, 73)
+        self.ae(c.wtcbuf, b'\x1b]777;frame;v=1:op=event:seq=1:t=408211:tu=73:period=8333\x1b\\')
+        c.clear()
+        s.test_frame_presented(8333, 408219, 0)
+        self.ae(c.wtcbuf, b'\x1b]777;frame;v=1:op=event:seq=2:t=408219:tu=0:period=8333\x1b\\')
         c.clear()
         s.reset()
         parse_bytes(s, b'\x1b]777;frame;v=1:op=mode\x1b\\')
         self.ae(c.wtcbuf, b'\x1b]777;frame;v=1:op=mode:mode=0\x1b\\')
+        s.test_frame_presented(8333, 408227, 0)
+        self.ae(c.wtcbuf, b'\x1b]777;frame;v=1:op=mode:mode=0\x1b\\')
+        # A frame from a program follows the rules every extension shares, see docs/extension-framing.rst
+        assert_extension_frames(self, s, 'frame')
 
     def test_haptic(self):
         from kitty.constants import is_macos

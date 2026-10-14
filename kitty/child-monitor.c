@@ -1062,11 +1062,14 @@ render_prepared_os_window(
         global_state.thumbnail_callback.os_window = 0;
     }
     swap_window_buffers(os_window);
+    // The frame was handed to the display system just now, not when this pass began drawing it
+    monotonic_t handed_at = 0;
     for (unsigned int i = 0, period_us = 0; i < tab->num_windows; i++) {
         Window *w = tab->windows + i;
         if (w->visible && WD.screen && WD.screen->frame_feedback.pending) {
             if (!period_us) period_us = os_window_refresh_period_us(os_window);
-            screen_frame_presented(WD.screen, period_us, now);
+            if (!handed_at) handed_at = monotonic();
+            screen_frame_presented(WD.screen, period_us, handed_at);
         }
     }
     os_window->last_active_tab = os_window->active_tab;
