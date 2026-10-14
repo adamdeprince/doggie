@@ -598,7 +598,7 @@ class TestMouse(BaseTest):
 
         s = self.create_screen()
         c = s.callbacks
-        caps = 101 if is_macos else 65
+        caps = 357 if is_macos else 65
 
         def send(body):
             c.clear()
@@ -656,8 +656,12 @@ class TestMouse(BaseTest):
         # A time finer than a millisecond is followed by its microseconds, zero included
         report(1, 0, t=1001, tu=0)
         self.ae(c.wtcbuf, ev('kind=1:phase=0:device=7:t=1001:tu=0:contact=0:x=256:y=512:buttons=0:mods=0:tool=1:valid=0'))
-        report(2, 6, t=1001, tu=999)
+        # A frame closes finger reports, and there is none where there was nothing to close
+        self.assertFalse(report(2, 6, t=1001, tu=999))
+        self.assertTrue(report(2, 1, 5, tool=0, buttons=1, t=1001, tu=999))
+        self.assertTrue(report(2, 6, t=1001, tu=999))
         self.ae(c.wtcbuf, ev('kind=2:phase=6:device=7:t=1001:tu=999'))
+        self.assertFalse(report(2, 6, t=1001, tu=999))
         s.reset()
         self.assertFalse(report(1, 1))
 
@@ -689,7 +693,7 @@ class TestMouse(BaseTest):
         # Bits of the mode this terminal does not know are dropped, so reading it back shows what took
         send('v=1:op=mode:mode=1023')
         send('v=1:op=mode')
-        self.ae(c.wtcbuf, b'\x1b]777;tablet-pointer;v=1:op=mode:mode=31\x1b\\')
+        self.ae(c.wtcbuf, b'\x1b]777;tablet-pointer;v=1:op=mode:mode=95\x1b\\')
         send('v=1:op=mode:mode=0')
 
         # Tool actions are a kind of report with a mode bit of its own
@@ -865,6 +869,158 @@ class TestMouse(BaseTest):
         send(f'v=2:op=label:device=9:button=2:text={b64("Undo")}')
         self.assertIsNone(take_pointer_pad_label())
 
+    def test_tablet_accidental_contacts(self):
+        # A finger the system takes for an accident, a palm or a thumb at rest, is for a program that asked for those
+        s = self.create_screen()
+        c = s.callbacks
+
+        def send(body):
+            c.clear()
+            parse_bytes(s, f'\x1b]777;tablet-pointer;{body}\x1b\\'.encode())
+
+        def report(phase, contact=0, **kw):
+            c.clear()
+            kw.setdefault('t', 1000)
+            if phase != 6:
+                kw.setdefault('tool', 0)
+                kw.setdefault('buttons', 1)
+            return send_pointer_report(s, 2, phase, 7, contact, 256, 512, **kw)
+
+        def ev(phase, contact=0, conf=None, buttons=None, t=1000, extra=''):
+            if phase == 6:
+                return f'\x1b]777;tablet-pointer;v=1:op=event:kind=2:phase=6:device=7:t={t}\x1b\\'.encode()
+            buttons = int(phase in (1, 2)) if buttons is None else buttons
+            conf = '' if conf is None else f':conf={conf}'
+            return (f'\x1b]777;tablet-pointer;v=1:op=event:kind=2:phase={phase}:device=7:t={t}:contact={contact}'
+                    f':x=256:y=512:buttons={buttons}:mods=0:tool=0:valid=0{extra}{conf}\x1b\\').encode()
+
+        def nothing(phase, contact=0, **kw):
+            self.assertFalse(report(phase, contact, **kw))
+            self.ae(c.wtcbuf, b'')
+
+        def frame():
+            ans = report(6)
+            self.ae(c.wtcbuf, ev(6) if ans else b'')
+            return ans
+
+        # Without the mode bit a program is shown only the contacts that are meant
+        send('v=1:op=mode:mode=2')
+        # One that lands as an accident is not there, and neither is the frame of a group nothing was reported of
+        nothing(1, conf=0)
+        nothing(2, conf=0)
+        self.assertFalse(frame())
+        # Once the system takes it to be meant it begins, with a down
+        self.assertTrue(report(2, conf=1, t=1001))
+        self.ae(c.wtcbuf, ev(1, conf=1, t=1001))
+        self.assertTrue(frame())
+        self.assertFalse(frame())
+        self.assertTrue(report(2, conf=1))
+        self.ae(c.wtcbuf, ev(2, conf=1))
+        # One that is being reported and turns into an accident is cancelled, as by any other cancel
+        self.assertTrue(report(2, conf=0, valid=1, p=77, t=1002))
+        self.ae(c.wtcbuf, ev(4, conf=0, t=1002, extra=':p=0').replace(b'valid=0', b'valid=1'))
+        self.assertTrue(frame())
+        nothing(2, conf=0)
+        self.assertFalse(frame())
+        # and begins anew if it is taken to be meant again before it lifts
+        self.assertTrue(report(2, conf=1))
+        self.ae(c.wtcbuf, ev(1, conf=1))
+        self.assertTrue(report(3, conf=1))
+        self.ae(c.wtcbuf, ev(3, conf=1))
+        self.assertTrue(frame())
+        # One that lifts while it is hidden reports nothing, whatever it is taken for as it lifts
+        nothing(1, conf=0)
+        nothing(3, conf=0)
+        nothing(1, conf=0)
+        nothing(3, conf=1)
+        nothing(1, conf=0)
+        nothing(4, conf=0)
+        self.assertFalse(frame())
+        # nor is it there to be lifted a second time
+        nothing(3, conf=1)
+        # One that lifts as an accident did not tap: it is cancelled
+        self.assertTrue(report(1, conf=1))
+        self.ae(c.wtcbuf, ev(1, conf=1))
+        self.assertTrue(report(3, conf=0))
+        self.ae(c.wtcbuf, ev(4, conf=0))
+        self.assertTrue(frame())
+        # A frame closes a group in which one finger was reported and another was not
+        nothing(1, 1, conf=0)
+        self.assertTrue(report(1, 2, conf=1))
+        self.assertTrue(frame())
+        nothing(2, 1, conf=0)
+        self.assertFalse(frame())
+        self.assertTrue(report(2, 2, conf=1))
+        nothing(2, 1, conf=0)
+        self.assertTrue(frame())
+        # A fresh down replaces a contact, hidden or not
+        self.assertTrue(report(1, 1, conf=1))
+        self.ae(c.wtcbuf, ev(1, 1, conf=1))
+        self.assertTrue(report(2, 1, conf=1))
+        self.ae(c.wtcbuf, ev(2, 1, conf=1))
+        self.assertTrue(report(1, 2, conf=0))  # the stroke the program has is gone, and it is told so
+        self.ae(c.wtcbuf, ev(4, 2, conf=0))
+        self.assertTrue(report(2, 2, conf=1))
+        self.ae(c.wtcbuf, ev(1, 2, conf=1))
+        # A resize cancels the contacts the program knows of and forgets the hidden ones
+        nothing(1, 3, conf=0)
+        self.assertTrue(frame())
+        c.clear()
+        s.resize(s.lines, s.columns + 2)
+        self.ae(c.wtcbuf, ev(4, 1, conf=1) + ev(4, 2, conf=1))
+        # What is left of a cancelled contact stays dropped whatever it is taken for, and a hidden one does not come back
+        for contact in (1, 2, 3):
+            nothing(2, contact, conf=1)
+            nothing(2, contact, conf=0)
+            nothing(2, contact, conf=1)
+            nothing(3, contact, conf=1)
+        self.assertFalse(frame())
+        # A change of mode and a reset say nothing of a hidden contact, and forget it
+        nothing(1, conf=0)
+        send('v=1:op=mode:mode=2')
+        self.ae(c.wtcbuf, b'')
+        nothing(2, conf=1)
+        nothing(3, conf=1)
+        nothing(1, conf=0)
+        s.reset()
+        self.ae(c.wtcbuf, b'')
+        send('v=1:op=mode:mode=2')
+        nothing(2, conf=1)
+        # A system that does not judge reports every finger, as before
+        self.assertTrue(report(1))
+        self.ae(c.wtcbuf, ev(1))
+        self.assertTrue(report(3))
+        self.ae(c.wtcbuf, ev(3))
+        self.assertTrue(frame())
+        # Only a finger is ever hidden
+        send('v=1:op=mode:mode=3')
+        c.clear()
+        self.assertTrue(send_pointer_report(s, 1, 1, 7, 0, 256, 512, t=1000, buttons=1, conf=0))
+        self.assertIn(b':phase=1:', c.wtcbuf)
+
+        # With the mode bit every contact is reported as it happens, and none is cancelled for being an accident
+        send('v=1:op=mode:mode=66')
+        send('v=1:op=mode')
+        self.ae(c.wtcbuf, b'\x1b]777;tablet-pointer;v=1:op=mode:mode=66\x1b\\')
+        self.assertTrue(report(1, conf=0))
+        self.ae(c.wtcbuf, ev(1, conf=0))
+        self.assertTrue(frame())
+        self.assertTrue(report(2, conf=0))
+        self.ae(c.wtcbuf, ev(2, conf=0))
+        self.assertTrue(report(2, conf=1))
+        self.ae(c.wtcbuf, ev(2, conf=1))
+        self.assertTrue(report(2, conf=0))
+        self.ae(c.wtcbuf, ev(2, conf=0))
+        self.assertTrue(report(3, conf=0))
+        self.ae(c.wtcbuf, ev(3, conf=0))
+        self.assertTrue(frame())
+        # Taking the bit away cancels what is down, as every change of mode does, and the rest of it is dropped
+        self.assertTrue(report(1, conf=0))
+        send('v=1:op=mode:mode=2')
+        self.ae(c.wtcbuf, ev(4, conf=0))
+        nothing(2, conf=0)
+        nothing(2, conf=1)
+
     def test_tablet_hardware_facts(self):
         # What hardware reports and the protocol had no place for at first: every one of these is left out when it is not known
         s = self.create_screen()
@@ -894,8 +1050,9 @@ class TestMouse(BaseTest):
             kw.setdefault('t', 1000)
             return send_pointer_action(s, *a, **kw)
 
-        send('v=1:op=mode:mode=23')
-        # Whether a finger is meant: said only when the system judges, and it can change while the finger is down
+        send('v=1:op=mode:mode=87')
+        # Whether a finger is meant: said only when the system judges, and it can change while the finger is down. A program
+        # that asked for the contacts that are not meant is told of them as of any other
         self.assertTrue(report(2, 1, 3, tool=0, buttons=1))
         self.ae(c.wtcbuf, ev('kind=2:phase=1:device=7:t=1000:contact=3:x=256:y=512:buttons=1:mods=0:tool=0:valid=0'))
         self.assertTrue(report(2, 2, 3, tool=0, buttons=1, conf=1))

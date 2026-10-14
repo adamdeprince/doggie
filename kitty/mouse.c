@@ -2121,35 +2121,63 @@ pointer_contact(Screen *screen, const PointerReport *r, bool create) {
     return screen->pointer.contacts + screen->pointer.num_contacts++;
 }
 
+// Reports a tool or a finger to a program that asked for its kind, and returns
+// whether anything was sent. A finger the system takes for an accident, a palm
+// or a thumb at rest, is for a program that asked for those as well. To any
+// other it is not there: one that lands as an accident is kept in the table of
+// contacts as hidden, and begins with a down if the system comes to take it to
+// be meant, and one that becomes an accident while it is being reported is
+// cancelled and hidden. A frame closes the finger reports before it, and is
+// not sent when there were none
 bool
 screen_pointer_report(Screen *screen, PointerReport *r) {
     if (!(screen->pointer.mode & r->kind)) return false;
     if (r->phase == POINTER_FRAME) {
+        if (r->kind == POINTER_TOUCH && !screen->pointer.unframed) return false;
+        screen->pointer.unframed = false;
         write_pointer_report(screen, r);
         return true;
     }
-    PointerReport *c = pointer_contact(screen, r, r->phase == POINTER_DOWN);
+    const bool hide = r->kind == POINTER_TOUCH && r->has_conf && !r->conf && !(screen->pointer.mode & POINTER_MODE_ACCIDENTAL);
+    PointerReport *c = pointer_contact(screen, r, false);
+    const bool was_shown = c && !c->hidden, was_hidden = c && c->hidden;
     switch (r->phase) {
         case POINTER_DOWN:
+            if (!c) c = pointer_contact(screen, r, true);
+            /* fallthrough */
         case POINTER_MOVE:
             if (!c) return false;  // a move whose stroke was cancelled by a reset or resize
             *c = *r;
+            c->hidden = hide;
+            if (hide) {
+                if (!was_shown) return false;
+                // The program has it as a finger, and takes back what it made of it
+                r->phase = POINTER_CANCEL;
+                r->buttons = 0;
+                r->p = 0;
+            } else if (was_hidden) r->phase = c->phase = POINTER_DOWN;
             break;
         case POINTER_UP:
         case POINTER_CANCEL:
             if (!c) return false;
+            *c = screen->pointer.contacts[--screen->pointer.num_contacts];
+            if (was_hidden) return false;
+            if (hide) r->phase = POINTER_CANCEL;  // a finger that lifts as an accident did not tap
             r->buttons = 0;
             r->p = 0;
-            *c = screen->pointer.contacts[--screen->pointer.num_contacts];
             break;
         default: break;
     }
     // the terminal draws the stroke itself for a program that gave it a brush
     if (r->kind == POINTER_PEN && (screen->ink.on || screen->ink.num_strokes)) screen_ink_report(screen, r);
+    if (r->kind == POINTER_TOUCH) screen->pointer.unframed = true;
     write_pointer_report(screen, r);
     return true;
 }
 
+// Ends the contacts of a kind, or of every kind when it is zero. The program is
+// told of those it knows of, and the hidden ones are forgotten with them, so
+// that what is left of a contact after this is dropped whatever it was
 void
 screen_pointer_cancel(Screen *screen, int kind) {
     unsigned kept = 0;
@@ -2159,6 +2187,7 @@ screen_pointer_cancel(Screen *screen, int kind) {
             screen->pointer.contacts[kept++] = r;
             continue;
         }
+        if (r.hidden) continue;
         r.phase = POINTER_CANCEL;
         r.buttons = 0;
         r.p = 0;
@@ -2166,17 +2195,19 @@ screen_pointer_cancel(Screen *screen, int kind) {
         write_pointer_report(screen, &r);
     }
     screen->pointer.num_contacts = kept;
+    if (!kind) screen->pointer.unframed = false;
     if (!kind || kind == POINTER_PAD) screen_pointer_pad_release(screen, 0);
 }
 
 // What this terminal can report: tools 1, fingers on a touchscreen 2, fingers
 // on a touchpad 4, the shape of a finger contact 8, pads 16, tool actions 32,
-// hardware identifiers 64. The window system says which of the first six it
-// has, and the bits of GLFWPointerInputClass are these bits
+// hardware identifiers 64, the fingers the system takes for accidents 256. The
+// window system says which it has of all but the identifiers, and the bits of
+// GLFWPointerInputClass are these bits
 static unsigned
 pointer_caps(void) {
 #ifdef __APPLE__
-    unsigned caps = 1 | 4 | 32;
+    unsigned caps = 1 | 4 | 32 | 256;
 #else
     unsigned caps = global_state.is_wayland ? 1 | 2 : 1;
 #endif
@@ -2314,6 +2345,7 @@ screen_tablet_pointer(Screen *screen, const char *data, size_t sz) {
 }
 
 static id_type touch_pointer_window;  // the window that captured the fingers in progress
+static bool touch_pointer_meant;      // one of those fingers is down that the system does not take for an accident
 
 static TabletTool *
 tablet_tool(uint64_t device) {
@@ -2421,6 +2453,7 @@ tablet_event(const GLFWTabletEvent *ev) {
         .serial = ev->serial, .hwid = ev->hardware_id, .vid = ev->vendor_id, .pid = ev->product_id, .tablet = ev->tablet,
         .w = has_size ? (unsigned)pointer_clamp(round(ev->tablet_width * 256), 1., 1073741823.) : 0,
         .h = has_size ? (unsigned)pointer_clamp(round(ev->tablet_height * 256), 1., 1073741823.) : 0,
+        .direct = ev->tablet_direct,
     };
     // A tool is described again when what was said of it is no longer so. Only
     // a point has all there is to say, the event of a tool that left may not
@@ -2556,25 +2589,41 @@ bool
 touch_pointer_event(const GLFWTouchEvent *ev) {
     OSWindow *osw = global_state.callback_os_window;
     Window *w = NULL;
-    if (ev->type == GLFW_TOUCH_BEGIN) {
+    // A contact the system takes for an accident, as a thumb resting on a touchpad, does not keep a sequence open: a
+    // finger that lands when only such contacts are down begins a sequence of its own, with a window of its own. Only
+    // a system that judges its contacts has such sequences, on any other a sequence is what it was before there was conf
+    const GLFWTouchPoint *meant = NULL;
+    for (size_t i = 0; i < ev->num_points && !meant; i++) {
+        if (ev->points[i].state != GLFW_TOUCH_POINT_RELEASED && ev->points[i].confidence != GLFW_TOUCH_ACCIDENTAL) meant = ev->points + i;
+    }
+    const bool begins_again = ev->type == GLFW_TOUCH_UPDATE && meant && meant->confidence == GLFW_TOUCH_INTENDED && !touch_pointer_meant;
+    bool moved_window = false;
+    if (ev->type == GLFW_TOUCH_BEGIN || begins_again) {
         if (ev->indirect) w = pointer_window(POINTER_TOUCH);
         else if (ev->num_points) {
             // Locate the window under the finger without moving the mouse
+            const GLFWTouchPoint *first = meant ? meant : ev->points;
             const double mouse_x = osw->mouse_x, mouse_y = osw->mouse_y;
-            osw->mouse_x = ev->points[0].x * osw->viewport_x_ratio;
-            osw->mouse_y = ev->points[0].y * osw->viewport_y_ratio;
+            osw->mouse_x = first->x * osw->viewport_x_ratio;
+            osw->mouse_y = first->y * osw->viewport_y_ratio;
             w = pointer_window(POINTER_TOUCH);
             osw->mouse_x = mouse_x;
             osw->mouse_y = mouse_y;
         }
+        if (begins_again && touch_pointer_window != (w ? w->id : 0)) {
+            // The contacts that are down go with the new sequence, and are gone for the window that had them
+            Window *before = touch_pointer_window ? window_for_window_id(touch_pointer_window) : NULL;
+            if (before) screen_pointer_cancel(before->render_data.screen, POINTER_TOUCH);
+            moved_window = true;
+        }
         touch_pointer_window = w ? w->id : 0;
     } else if (touch_pointer_window) w = window_for_window_id(touch_pointer_window);
-    if (ev->type == GLFW_TOUCH_END || ev->type == GLFW_TOUCH_CANCEL) touch_pointer_window = 0;
+    touch_pointer_meant = meant != NULL;
+    if (ev->type == GLFW_TOUCH_END || ev->type == GLFW_TOUCH_CANCEL) touch_pointer_window = 0, touch_pointer_meant = false;
     if (!w) return false;
     Screen *screen = w->render_data.screen;
     const WindowGeometry *g = &w->render_data.geometry;
     const int mods = pointer_mods(ev->keyboard_modifiers);
-    bool reported = false;
     for (size_t i = 0; i < ev->num_points; i++) {
         const GLFWTouchPoint *p = ev->points + i;
         PointerReport r = {
@@ -2586,8 +2635,13 @@ touch_pointer_event(const GLFWTouchEvent *ev) {
             case GLFW_TOUCH_POINT_PRESSED: r.phase = POINTER_DOWN; break;
             case GLFW_TOUCH_POINT_MOVED: r.phase = POINTER_MOVE; break;
             case GLFW_TOUCH_POINT_RELEASED: r.phase = ev->type == GLFW_TOUCH_CANCEL ? POINTER_CANCEL : POINTER_UP; break;
-            default: continue;
+            default:
+                if (!moved_window) continue;
+                break;
         }
+        // A window that takes over contacts that are down has not been told of them, so there they begin
+        if (moved_window && p->state != GLFW_TOUCH_POINT_RELEASED) r.phase = POINTER_DOWN;
+        if (p->confidence != GLFW_TOUCH_CONFIDENCE_UNKNOWN) r.conf = p->confidence == GLFW_TOUCH_INTENDED, r.has_conf = true;
         if (ev->indirect) {
             r.x = pointer_clamp((int)round(p->x * 65535), 0, 65535);
             r.y = pointer_clamp((int)round(p->y * 65535), 0, 65535);
@@ -2608,14 +2662,13 @@ touch_pointer_event(const GLFWTouchEvent *ev) {
                 r.angle = (int)round(p->angle * 100);
             }
         }
-        reported |= screen_pointer_report(screen, &r);
+        screen_pointer_report(screen, &r);
     }
     if (ev->type == GLFW_TOUCH_CANCEL) screen_pointer_cancel(screen, POINTER_TOUCH);
-    if (reported) {
-        PointerReport frame = {.kind = POINTER_TOUCH, .phase = POINTER_FRAME};
-        pointer_time(&frame, ev->timestamp, ev->timestamp_is_fine);
-        screen_pointer_report(screen, &frame);
-    }
+    // The screen sends the frame only when it sent one of the reports
+    PointerReport frame = {.kind = POINTER_TOUCH, .phase = POINTER_FRAME};
+    pointer_time(&frame, ev->timestamp, ev->timestamp_is_fine);
+    screen_pointer_report(screen, &frame);
     return true;
 }
 #undef pointer_coord

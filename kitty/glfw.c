@@ -1014,7 +1014,9 @@ touch_callback(GLFWwindow *w, const GLFWTouchEvent *ev) {
         points[0] = 0;
         for (size_t i = 0; i < ev->num_points && pos < sizeof(points); i++) {
             const GLFWTouchPoint *p = ev->points + i;
-            const int n = snprintf(points + pos, sizeof(points) - pos, " [%d %s %.1f,%.1f]", p->id, touch_point_state_name(p->state), p->x, p->y);
+            const int n = snprintf(
+                points + pos, sizeof(points) - pos, " [%d %s %.1f,%.1f%s]", p->id, touch_point_state_name(p->state), p->x, p->y,
+                p->confidence == GLFW_TOUCH_ACCIDENTAL ? " accidental" : "");
             if (n < 0) break;
             pos += (size_t)n;
         }

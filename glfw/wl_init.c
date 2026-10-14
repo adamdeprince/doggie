@@ -562,6 +562,11 @@ typedef struct TabletInfo {
     uint32_t vid, pid;
     uint64_t number;  // from one, in the order the tablets were attached
     char name[128];
+    // The size of its surface in millimeters and whether that is a display, as
+    // for GLFWTabletEvent, which the kernel says of the device node in node
+    int width_mm, height_mm, direct;
+    InputNodeInfo node;
+    bool has_node;
 } TabletInfo;
 
 static void
@@ -578,11 +583,34 @@ tabletHandleId(void *data, struct zwp_tablet_v2 *tablet UNUSED, uint32_t vid, ui
     info->pid = pid;
 }
 
+// The protocol has neither the size of a tablet nor whether it is a display,
+// but it names the device node of the tablet, and the kernel and udev say both
+// of that. A tablet can have several nodes: the one of the pen is the one whose
+// surface a tool is tracked on, and one of its pad or of the fingers on it is
+// not looked at
 static void
-tabletHandlePath(void *data UNUSED, struct zwp_tablet_v2 *tablet UNUSED, const char *path UNUSED) {}
+tabletHandlePath(void *data, struct zwp_tablet_v2 *tablet UNUSED, const char *path) {
+    TabletInfo *info = data;
+    InputNodeInfo node;
+    if (!info || !input_node_info(path, &node) || !node.is_tablet || node.is_pad) return;
+    info->node = node;
+    info->has_node = true;
+}
 
+// A device node is a name on the machine the compositor runs on, which need
+// not be this one, so what was found at it counts only when the kernel here
+// has the device under the ids the compositor gave, or failing those its name
 static void
-tabletHandleDone(void *data UNUSED, struct zwp_tablet_v2 *tablet UNUSED) {}
+tabletHandleDone(void *data, struct zwp_tablet_v2 *tablet UNUSED) {
+    TabletInfo *info = data;
+    if (!info || !info->has_node) return;
+    const InputNodeInfo *node = &info->node;
+    const bool same = info->vid || info->pid ? info->vid == node->vendor && info->pid == node->product : info->name[0] && !strcmp(info->name, node->name);
+    if (!same) return;
+    info->width_mm = node->width_mm;
+    info->height_mm = node->height_mm;
+    info->direct = node->direct;
+}
 
 static void
 tabletHandleRemoved(void *data, struct zwp_tablet_v2 *tablet) {
@@ -668,6 +696,9 @@ toolHandleProximityIn(void *data, struct zwp_tablet_tool_v2 *t, uint32_t serial,
     tt->ev.vendor_id = info ? info->vid : 0;
     tt->ev.product_id = info ? info->pid : 0;
     tt->ev.tablet = info ? info->number : 0;
+    tt->ev.tablet_width = info ? info->width_mm : 0;
+    tt->ev.tablet_height = info ? info->height_mm : 0;
+    tt->ev.tablet_direct = info ? info->direct : 0;
     snprintf(tt->tablet_name, sizeof(tt->tablet_name), "%s", info ? info->name : "");
     tt->ev.name = tt->tablet_name[0] ? tt->tablet_name : NULL;
     if (_glfw.wl.wp_cursor_shape_manager_v1 && !tt->cursor_shape_device) {

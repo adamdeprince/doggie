@@ -1075,6 +1075,9 @@ static void _glfwUpdateNotchCover(_GLFWwindow *);
         in_key_handler = 0;
         self.identifier = @"kitty-content-view";
         [self setAllowedTouchTypes:NSTouchTypeMaskIndirect];
+        // A thumb or the side of a hand resting on the trackpad is a touch too. Without this the system
+        // leaves such a touch out, and ends one that comes to rest and begins it again when it moves off
+        [self setWantsRestingTouches:YES];
 
         [self updateTrackingAreas];
         char tab_mime[64], window_mime[64];
@@ -1690,6 +1693,9 @@ gesturePhase(NSEvent *event) {
 // the device. The system identifies a finger by an object, which is mapped to a
 // small integer for as long as the finger is down.
 static id touch_identities[16];
+// Whether the system took each of those fingers to be resting on the pad when
+// it was last reported
+static bool touch_resting[arraysz(touch_identities)];
 
 // The force on the trackpad as of its last pressure event. Only a trackpad
 // that measures force sends them
@@ -1741,8 +1747,19 @@ handleTouches(_GLFWwindow *window, NSView *view, NSEvent *event, GLFWTouchEventT
         if (state != GLFW_TOUCH_POINT_PRESSED) down_before++;
         if (state != GLFW_TOUCH_POINT_RELEASED) down_after++;
         device = touch.deviceSize;
+        // The system judges whether a touch is a finger at work or a thumb or palm at rest, and can change its
+        // mind while the touch is down. A touch it changes its mind about is reported even when it did not move
+        const bool resting = touch.isResting;
+        if (state == GLFW_TOUCH_POINT_STATIONARY && resting != touch_resting[id]) state = GLFW_TOUCH_POINT_MOVED;
+        touch_resting[id] = resting;
         // The normalized position has its origin at the bottom left
-        points[n++] = (GLFWTouchPoint){.id = id, .state = state, .x = touch.normalizedPosition.x, .y = 1 - touch.normalizedPosition.y};
+        points[n++] = (GLFWTouchPoint){
+            .id = id,
+            .state = state,
+            .confidence = resting ? GLFW_TOUCH_ACCIDENTAL : GLFW_TOUCH_INTENDED,
+            .x = touch.normalizedPosition.x,
+            .y = 1 - touch.normalizedPosition.y,
+        };
         if (n >= arraysz(points)) break;
     }
     if (!n) return;
@@ -3517,7 +3534,7 @@ _glfwPlatformGetDoubleClickInterval(_GLFWwindow *window UNUSED) {
 
 unsigned
 _glfwPlatformGetPointerInputClasses(void) {
-    return GLFW_POINTER_INPUT_TOOLS | GLFW_POINTER_INPUT_TOUCHPAD | GLFW_POINTER_INPUT_TOOL_ACTIONS;
+    return GLFW_POINTER_INPUT_TOOLS | GLFW_POINTER_INPUT_TOUCHPAD | GLFW_POINTER_INPUT_TOOL_ACTIONS | GLFW_POINTER_INPUT_TOUCH_CONFIDENCE;
 }
 
 void

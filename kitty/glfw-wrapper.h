@@ -337,11 +337,23 @@ typedef enum GLFWTouchPointState {
     GLFW_TOUCH_POINT_RELEASED = 4,
 } GLFWTouchPointState;
 
+// What the system takes a point for, where it judges that: a finger that is
+// meant, or an accident such as a palm or a thumb resting on a touchpad. The
+// judgement can change while the point is down, and a point whose judgement
+// changed is reported as moved even when it did not move. A system that does
+// not judge leaves it at zero
+typedef enum GLFWTouchConfidence {
+    GLFW_TOUCH_CONFIDENCE_UNKNOWN = 0,
+    GLFW_TOUCH_INTENDED = 1,
+    GLFW_TOUCH_ACCIDENTAL = 2,
+} GLFWTouchConfidence;
+
 typedef struct GLFWTouchPoint {
     // Unique among the points that are down at the same time; the system can
     // reuse it after the point is released
     int32_t id;
     GLFWTouchPointState state;
+    GLFWTouchConfidence confidence;
     // In window content coordinates, the same as the cursor position, for a
     // direct touch; for an indirect touch the position on the device, 0 to 1 on
     // each axis with the origin at the top left
@@ -500,6 +512,9 @@ typedef struct GLFWTabletEvent {
     // top left corner, when axes has GLFW_TABLET_POSITION. The size of that
     // surface in millimetres, zero when the system does not say
     double tablet_x, tablet_y, tablet_width, tablet_height;
+    // Whether that surface is a display: 1 when it is, -1 when it is not and
+    // zero when the system does not say
+    int tablet_direct;
     // The tablet the tool is on, numbered from one among those attached. The
     // number stays with the tablet for as long as it is attached and the pads
     // of the tablet carry it too. Zero when the system does not say
@@ -528,6 +543,9 @@ typedef enum GLFWPointerInputClass {
     GLFW_POINTER_INPUT_TOUCH_SHAPE = 8,
     GLFW_POINTER_INPUT_PADS = 16,
     GLFW_POINTER_INPUT_TOOL_ACTIONS = 32,
+    // Whether a finger is meant or an accident, see GLFWTouchConfidence. The
+    // values in between are taken in the bit set kitty reports these as
+    GLFW_POINTER_INPUT_TOUCH_CONFIDENCE = 256,
 } GLFWPointerInputClass;
 
 // A tablet pad is the keys, rings, strips and dials on the body of a tablet or
