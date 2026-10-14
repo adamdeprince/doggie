@@ -19,17 +19,14 @@ Framing
 
 Frames are ``OSC 777`` with the ``display`` selector::
 
-    <OSC> 777 ; display ; <fields> <ST>
+    <OSC> 777 ; display ; v=1 : op=query : id=42 <ST>
 
-``<OSC>`` is ``<ESC> ]`` and ``<ST>`` is ``<ESC> \``; ``BEL`` is also
-accepted as a terminator. Fields are ASCII ``key=value`` pairs separated by
-colons, in any order, with decimal numbers that carry no leading ``+``. A
-frame with a missing required field or an unknown version is ignored as a
-whole and never reaches a program as keystrokes. Spaces in the examples below
-are for clarity only.
-
-Every frame has ``v``, the protocol version, which is ``1``, and ``op``, one
-of ``query``, ``cap``, ``mode`` and ``event``.
+They follow the rules every OSC 777 extension shares, which
+:doc:`extension-framing` gives: the syntax of the fields, which frames are
+rejected, the units and the clock. The values in the terminal's reports are
+words, or decimal numbers that may have a fraction, such as
+``headroom=1.5``, with no leading ``+``. ``v``, the protocol version, is
+``1``, and ``op`` is one of ``query``, ``cap``, ``mode`` and ``event``.
 
 Query
 -------------
@@ -126,8 +123,10 @@ window with::
 and off with ``mode=0``. The mode is local to the window and is reset by
 ``RIS``. Programs must turn it off when they exit, suspend or fail, and turn
 it back on when resumed. Multiplexers keep it with the rest of the terminal
-state and turn it off when detaching. There is no user setting that overrides
-the program's choice.
+state and turn it off when detaching. A terminal may let its user refuse the
+mode, for every program or for some. A refused mode reads back as off and
+nothing is reported, so a program reads the mode back rather than assume it
+was granted.
 
 A ``mode`` request without a ``mode`` field reads the state instead of
 changing it, and is answered with::

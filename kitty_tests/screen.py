@@ -9,6 +9,7 @@ from kitty.marks import marker_from_function, marker_from_regex, marker_from_tex
 from kitty.window import pagerhist
 
 from .base import BaseTest, draw_multicell, parse_bytes
+from .extension_frames import assert_extension_frames
 
 
 class TestScreen(BaseTest):
@@ -917,6 +918,8 @@ class TestScreen(BaseTest):
         c = s.callbacks
         parse_bytes(s, b'\x1b]777;display;v=1:op=query:id=0\x1b\\')
         self.ae(c.wtcbuf, b'\x1b]777;display;v=1:op=cap:id=0:mode=0:kind=eink:color=gray:bits=4:gamut=unknown:headroom=1:scale=0:period=0:ppi=226\x1b\\')
+        # A frame from a program follows the rules every extension shares, see docs/extension-framing.rst
+        assert_extension_frames(self, s, 'display')
 
     def test_cursor_hidden(self):
         s = self.create_screen()

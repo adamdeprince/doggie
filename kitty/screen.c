@@ -44,6 +44,7 @@
 #include "keys.h"
 #include "vt-parser.h"
 #include "resize.h"
+#include "extension-fields.h"
 
 static const ScreenModes empty_modes = {0, .mDECAWM = true, .mDECTCEM = true, .mDECARM = true};
 
@@ -1799,28 +1800,19 @@ send_display_report(Screen *self, const char *op, int id, const DisplayInfo *d) 
     write_escape_code_to_child(self, ESC_OSC, buf);
 }
 
+// A frame from the program, see docs/extension-framing.rst for what is rejected
 void
 screen_display_protocol(Screen *self, const char *data, size_t sz) {
-    char buf[128], reply[64], *saveptr = NULL;
-    const char *op = "";
-    int v = 0, mode = -1, id = -1;
-    if (sz >= sizeof(buf)) return;
-    memcpy(buf, data, sz);
-    buf[sz] = 0;
-    for (char *tok = strtok_r(buf, ":", &saveptr); tok; tok = strtok_r(NULL, ":", &saveptr)) {
-        char *val = strchr(tok, '=');
-        if (!val) return;
-        *val++ = 0;
-        if (!strcmp(tok, "v")) v = atoi(val);
-        else if (!strcmp(tok, "op")) op = val;
-        else if (!strcmp(tok, "mode")) mode = atoi(val);
-        else if (!strcmp(tok, "id")) id = atoi(val);
-    }
-    if (v != 1) return;
+    ExtensionFields f;
+    char reply[64];
+    const char *op;
+    long long mode = -1, id = -1;
+    if (!extension_fields_parse(&f, data, sz) || !extension_frame_header(&f, 1, &op)) return;
+    if (!extension_field_int(&f, "mode", 0, INT32_MAX, &mode) || !extension_field_int(&f, "id", 0, INT32_MAX, &id)) return;
     if (!strcmp(op, "query") && id >= 0) {
         DisplayInfo d;
         os_window_display_info(os_window_for_kitty_window(self->window_id), &d);
-        send_display_report(self, "cap", id, &d);
+        send_display_report(self, "cap", (int)id, &d);
     } else if (!strcmp(op, "mode")) {
         if (mode < 0) {  // a read
             snprintf(reply, sizeof(reply), "777;display;v=1:op=mode:mode=%d", self->display_events);
