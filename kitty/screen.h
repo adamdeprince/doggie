@@ -31,7 +31,8 @@ typedef enum PointerMode {
     POINTER_MODE_PADS = 4,
     POINTER_MODE_IDS = 8,
     POINTER_MODE_ACTIONS = 16,
-    POINTER_MODES = POINTER_PEN | POINTER_TOUCH | POINTER_MODE_PADS | POINTER_MODE_IDS | POINTER_MODE_ACTIONS
+    POINTER_MODE_ACCIDENTAL = 64,  // the fingers the system takes for accidents, which are otherwise kept from the program
+    POINTER_MODES = POINTER_PEN | POINTER_TOUCH | POINTER_MODE_PADS | POINTER_MODE_IDS | POINTER_MODE_ACTIONS | POINTER_MODE_ACCIDENTAL
 } PointerMode;
 
 // A tablet pointer protocol event, see docs/tablet-protocol.rst
@@ -42,6 +43,7 @@ typedef struct PointerReport {
     int stage;   // of the force on a touchpad, only meaningful with has_stage
     bool has_stage;
     bool conf, has_conf;  // whether the system takes a finger to be meant, only meaningful with has_conf
+    bool hidden;          // in the table of contacts: a finger the program is not told of, being taken for an accident
     unsigned buttons, valid;
     uint64_t device;
     unsigned long long t;
@@ -313,6 +315,7 @@ typedef struct {
         unsigned num_contacts;
         size_t capacity;
         PointerReport *contacts;  // grows as fingers land, see pointer_contact()
+        bool unframed;            // a finger report was sent that no frame report has closed yet
         // The buttons of pads that are held, as the reports of their presses
         unsigned num_pad_buttons;
         size_t pad_capacity;
