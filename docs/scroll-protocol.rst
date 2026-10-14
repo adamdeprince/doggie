@@ -16,18 +16,12 @@ Framing
 
 Frames are ``OSC 777`` with the ``scroll`` selector::
 
-    <OSC> 777 ; scroll ; <fields> <ST>
+    <OSC> 777 ; scroll ; v=1 : op=query : id=7 <ST>
 
-``<OSC>`` is ``<ESC> ]`` and ``<ST>`` is ``<ESC> \``; ``BEL`` is also
-accepted as a terminator. Fields are ASCII ``key=value`` pairs separated by
-colons, in any order, with decimal integers that carry no leading ``+``.
-Keys are case sensitive. A frame with a duplicate key, a value out of range,
-or a missing required field is rejected as a whole, and a rejected or
-incomplete frame must never reach a program as keystrokes. Spaces in the
-examples below are for clarity only.
-
-Every frame has ``v``, the protocol version, which is ``1``, and ``op``, one
-of ``query``, ``cap``, ``mode`` and ``event``.
+They follow the rules every OSC 777 extension shares, which
+:doc:`extension-framing` gives: the syntax of the fields, which frames are
+rejected, the units and the clock. ``v``, the protocol version, is ``1``, and
+``op`` is one of ``query``, ``cap``, ``mode`` and ``event``.
 
 Discovery
 -------------
@@ -60,8 +54,10 @@ and motion keep using whatever mouse reporting the program asked for. The
 terminal does not scroll its own scrollback either; the program owns the
 scroll. The mode is local to the window and reset by ``RIS``. Programs must
 turn it off when they exit, suspend or fail, and turn it back on when
-resumed. Multiplexers keep it with the rest of the terminal state. There is
-no user setting that overrides the program's choice.
+resumed. Multiplexers keep it with the rest of the terminal state. A
+terminal may let its user refuse the mode, for every program or for some. A
+refused mode reads back as off and scrolling is not reported, so a program
+reads the mode back rather than assume it was granted.
 
 A ``mode`` request without a ``mode`` field reads the state instead of
 changing it, and is answered with::
