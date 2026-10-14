@@ -1632,16 +1632,25 @@ scroll_delta(double offset, GLFWOffsetType type, unsigned cell_size) {
     return (int)round(-100. * pixels);
 }
 
+// x and y are in physical pixels from the top left of the cell area. A report
+// has the time of the event as t, in milliseconds on monotonic(), the clock of
+// every extension, and the microseconds past it when the system stamps its
+// events that finely: the same computation as for the tablet pointer protocol
 static bool
 screen_scroll_report(Screen *screen, const GLFWScrollEvent *ev, double x, double y) {
     if (!screen->scroll_reports) return false;
-    char buf[160];
+    char buf[192];
     const int m = ev->keyboard_modifiers;
     const int mods = (m & GLFW_MOD_SHIFT ? 1 : 0) | (m & GLFW_MOD_ALT ? 2 : 0) | (m & GLFW_MOD_CONTROL ? 4 : 0) | (m & GLFW_MOD_SUPER ? 8 : 0);
+    const monotonic_t when = MAX(0, ev->timestamp);
+    int n = snprintf(buf, sizeof(buf), "777;scroll;v=1:op=event:t=%llu", (unsigned long long)(when / MONOTONIC_T_1e6));
+    if (ev->timestamp_is_fine) n += snprintf(buf + n, sizeof(buf) - n, ":tu=%u", (unsigned)(when / MONOTONIC_T_1e3 % 1000));
+#define coord(v) (int)round(MIN(MAX((v) * 256, -1073741823.), 1073741823.))
     snprintf(
-        buf, sizeof(buf), "777;scroll;v=1:op=event:dx=%d:dy=%d:x=%d:y=%d:mods=%d:src=%d:phase=%d",
-        scroll_delta(ev->x_offset, ev->offset_type, screen->cell_size.width), scroll_delta(ev->y_offset, ev->offset_type, screen->cell_size.height),
-        (int)round(x), (int)round(y), mods, ev->offset_type == GLFW_SCROLL_OFFEST_HIGHRES ? 1 : 0, scroll_phase_code(ev));
+        buf + n, sizeof(buf) - n, ":dx=%d:dy=%d:x=%d:y=%d:mods=%d:src=%d:phase=%d", scroll_delta(ev->x_offset, ev->offset_type, screen->cell_size.width),
+        scroll_delta(ev->y_offset, ev->offset_type, screen->cell_size.height), coord(x), coord(y), mods, ev->offset_type == GLFW_SCROLL_OFFEST_HIGHRES ? 1 : 0,
+        scroll_phase_code(ev));
+#undef coord
     write_escape_code_to_child(screen, ESC_OSC, buf);
     return true;
 }
@@ -1650,12 +1659,17 @@ static PyObject *
 send_scroll_report(PyObject *self UNUSED, PyObject *args, PyObject *kw) {
     Screen *screen;
     GLFWScrollEvent ev = {0};
-    int offset_type = 0, momentum = 0, phase = 0;
+    int offset_type = 0, momentum = 0, phase = 0, tu = -1;
+    unsigned long long t = 0;
     double x = 0, y = 0;
-    static const char *kwlist[] = {"screen", "x_offset", "y_offset", "offset_type", "momentum", "phase", "mods", "x", "y", NULL};
+    // t is in milliseconds and tu in microseconds past it, absent when negative
+    static const char *kwlist[] = {"screen", "x_offset", "y_offset", "offset_type", "momentum", "phase", "mods", "x", "y", "t", "tu", NULL};
     if (!PyArg_ParseTupleAndKeywords(
-            args, kw, "O!dd|iiiidd", (char **)kwlist, &Screen_Type, &screen, &ev.x_offset, &ev.y_offset, &offset_type, &momentum, &phase, &ev.keyboard_modifiers, &x, &y))
+            args, kw, "O!dd|iiiiddKi", (char **)kwlist, &Screen_Type, &screen, &ev.x_offset, &ev.y_offset, &offset_type, &momentum, &phase,
+            &ev.keyboard_modifiers, &x, &y, &t, &tu))
         return NULL;
+    ev.timestamp = (monotonic_t)t * MONOTONIC_T_1e6 + (monotonic_t)MAX(tu, 0) * MONOTONIC_T_1e3;
+    ev.timestamp_is_fine = tu >= 0;
     ev.offset_type = offset_type;
     ev.momentum_type = momentum;
     ev.scroll_phase = phase;

@@ -281,6 +281,7 @@ glfwFeedMomentumScroller(GLFWwindow *handle, double dx, double dy, int keyboard_
         .x_offset = dx * (xscale > 0 ? xscale : 1),
         .y_offset = dy * (yscale > 0 ? yscale : 1),
         .keyboard_modifiers = keyboard_modifiers,
+        .timestamp = timestamp,
     };
     handle_scroll_event(w, &ev, stopped, true, timestamp > 0 ? timestamp : monotonic(), false);
 }
