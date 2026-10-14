@@ -43,14 +43,16 @@ scroll its scrollback. To watch only some of the sources, name them::
 
     kitten show-pointer --only tools,pads
 
-A system that judges whether a contact is meant, as macOS does for a thumb
-resting on the trackpad, has its judgement shown with each finger as
-``conf=meant`` or ``conf=accidental``. A terminal keeps the accidental
-contacts from a program that does not ask for them, and the kitten asks, so it
-shows them all.
+A system that judges whether a contact is meant, or is an accident such as a
+palm, has its judgement shown with each finger as ``conf=meant`` or
+``conf=accidental``. A finger the system has said nothing of has neither,
+which is every finger on a system that does not judge. A terminal keeps the
+accidental contacts from a program that does not ask for them, and the kitten
+asks a terminal that says it has them, so it shows them all.
 Leave ``accidental`` out of :option:`--only <kitty +kitten show_pointer --only>`
-to see what a program that does not ask is shown instead: a finger that comes
-to rest is cancelled, and begins again when it moves off.
+to see what a program that does not ask is shown instead: a contact that
+comes to be taken for an accident is cancelled, and begins again when it no
+longer is.
 
 On exit, and while it is stopped with :kbd:`Ctrl+Z`, the kitten turns off
 everything it turned on. In a terminal that speaks none of the protocols it
