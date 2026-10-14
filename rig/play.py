@@ -55,6 +55,14 @@ PAD_TWO: dict[str, Any] = {
 }
 # The tablets get numbers in the order they are plugged in, which is the order they have above
 TABLET_NUMBERS = {'intuos5': 1, 'cintiq': 2}
+# What the kernel and udev say of the two tablets: the size of the surface in millimeters and whether it is a display.
+# A terminal reads that by the device node of the tablet. fakeudev.c answers for these two nodes, and for a terminal
+# that is given it the tablets have them in place of nodes that do not exist
+UDEV_TABLETS: dict[str, dict[str, Any]] = {
+    'intuos5': {'node': '/dev/null', 'w': 224, 'h': 140, 'direct': 0},
+    'cintiq': {'node': '/dev/zero', 'w': 345, 'h': 194, 'direct': 1},
+}
+udev = False  # the terminal has fakeudev.c for its libudev
 TOOL_NUMBERS = {'pen': 1, 'eraser': 2, 'brush': 3, 'pencil': 4, 'airbrush': 5, 'mouse': 6, 'lens': 7}
 VALID_BITS = {'pressure': 1, 'tilt': 2, 'rotation': 4, 'slider': 8, 'distance': 32, 'wheel': 64}
 
@@ -130,6 +138,9 @@ def setup(rig: Rig) -> None:
     # that cannot cope with a pad still gets through the others
     for device, d in DEVICES.items():
         if not device.startswith('pad:'):
+            kind, _, name = device.partition(':')
+            if udev and kind == 'tablet':
+                d = {**d, 'paths': [UDEV_TABLETS[name]['node']]}
             rig.command(op='add', device=device, **d)
     info = rig.wait_for_window()
     if 'wl_keyboard' in info['interfaces']:
@@ -142,6 +153,15 @@ def setup(rig: Rig) -> None:
 # Tools {{{
 def tool_number(tool: str) -> int:
     return TOOL_NUMBERS[DEVICES[f'tool:{tool}']['type']]
+
+
+def tablet_facts(tablet: str) -> dict[str, int]:
+    "What the description of a tool says of the tablet it is on: its number, and its surface when the terminal can learn of it"
+    ans = {'tablet': TABLET_NUMBERS[tablet]}
+    if udev:
+        facts = UDEV_TABLETS[tablet]
+        ans.update(w=facts['w'] * 256, h=facts['h'] * 256, direct=facts['direct'])
+    return ans
 
 
 def tool_valid(tool: str) -> int:
@@ -184,7 +204,7 @@ def tool_stroke(rig: Rig, tool: str = 'pen', tablet: str = 'intuos5') -> None:
         rig.expect('tablet-pointer', f'{tool}: {note}', phase=phase, buttons=buttons, **fields)
         time.sleep(0.008)
 
-    rig.expect('tablet-pointer:device', f'{tool}: is described', kind=1, tool=tool_number(tool), axes=tool_valid(tool), tablet=TABLET_NUMBERS[tablet])
+    rig.expect('tablet-pointer:device', f'{tool}: is described', kind=1, tool=tool_number(tool), axes=tool_valid(tool), **tablet_facts(tablet))
     sample('enters proximity', 0, 0, ['proximity_in', '$serial', f'tablet:{tablet}', '$surface'], distance=40000)
     for i in range(3):
         x, y = x + 10, y + 5
@@ -209,6 +229,7 @@ def tool_buttons(rig: Rig, tool: str = 'propen', tablet: str = 'cintiq') -> None
         rig.expect('tablet-pointer', f'{tool}: {note}', kind=1, phase=phase, x=px(x), y=px(y), buttons=buttons)
         time.sleep(0.02)
 
+    rig.expect('tablet-pointer:device', f'{tool}: is described', kind=1, tool=tool_number(tool), axes=tool_valid(tool), **tablet_facts(tablet))
     step('enters proximity', 0, 0, ['proximity_in', '$serial', f'tablet:{tablet}', '$surface'], *tool_axes(tool, x, y, distance=20000)[0])
     step('lower button while hovering', 0, 2, ['button', '$serial', BTN_STYLUS, 1])
     step('lower button released', 0, 0, ['button', '$serial', BTN_STYLUS, 0])
@@ -682,8 +703,11 @@ def main() -> None:
     p.add_argument('--control', required=True, help='The control socket of wlproxy.py')
     p.add_argument('--expect', help='Where to write what the program in the terminal should receive')
     p.add_argument('--wait', help='A file that appears when the program in the terminal is ready')
+    p.add_argument('--udev', action='store_true', help='The terminal has fakeudev.c for its libudev, so it learns the size of the tablets')
     p.add_argument('sequences', nargs='*', help=f'What to play, all by default: {", ".join(SEQUENCES)}')
     args = p.parse_args()
+    global udev
+    udev = args.udev
     with open(args.expect or os.devnull, 'w', buffering=1) as f:
         rig = Rig(args.control, f)
         setup(rig)

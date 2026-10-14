@@ -55,7 +55,19 @@ if [ -z "$locked" ]; then
 fi
 
 rm -rf "$run"
-mkdir -m 700 "$run" "$run/cache" "$run/config" || exit 1
+mkdir -m 700 "$run" "$run/cache" "$run/config" "$run/udev" || exit 1
+
+# A terminal asks libudev how large a tablet is and whether it is a display. The tablets here are not in the
+# kernel, so the terminal, and nothing else, is given a libudev that knows them. Without it, or with RIG_NO_UDEV,
+# the tablets name nodes that do not exist and the terminal must say nothing of their size
+udev=
+if [ -z "${RIG_NO_UDEV:-}" ]; then
+    if ${CC:-cc} -shared -fPIC -Wall -Wextra -O1 -Wl,-soname,libudev.so.1 -o "$run/udev/libudev.so.1" "$here/fakeudev.c" 2>"$run/udev.err"; then
+        udev=1
+    else
+        echo "could not build fakeudev.c, see $run/udev.err: playing without the sizes of the tablets" >&2
+    fi
+fi
 
 # The compositor: no devices, no seat, no GPU. Everything it needs is in $run
 cat >"$run/sway.conf" <<EOF
@@ -82,6 +94,7 @@ mesa=/usr/share/glvnd/egl_vendor.d/50_mesa.json
 env -u DISPLAY XDG_RUNTIME_DIR="$run" WAYLAND_DISPLAY=wayland-rig LIBGL_ALWAYS_SOFTWARE=1 \
     KITTY_CACHE_DIRECTORY="$run/cache" KITTY_CONFIG_DIRECTORY="$run/config" MESA_SHADER_CACHE_DISABLE=true \
     ${RIG_WAYLAND_DEBUG:+WAYLAND_DEBUG=1} $([ -e $mesa ] && echo __EGL_VENDOR_LIBRARY_FILENAMES=$mesa) \
+    ${udev:+LD_LIBRARY_PATH="$run/udev${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"} \
     "$tree/kitty/launcher/kitty" --config NONE -o linux_display_server=wayland -o placement_strategy=top-left \
     -o window_padding_width=0 -o confirm_os_window_close=0 --debug-input \
     python3 "$here/client.py" --log "$run/client.log" --ready "$run/ready" --stop "$run/stop" --duration 600 ${RIG_CLIENT_ARGS:-} \
@@ -89,7 +102,7 @@ env -u DISPLAY XDG_RUNTIME_DIR="$run" WAYLAND_DISPLAY=wayland-rig LIBGL_ALWAYS_S
 kitty=$!
 pids+=($kitty)
 
-python3 "$here/play.py" --control "$run/control" --expect "$run/expect.jsonl" --wait "$run/ready" "$@"
+python3 "$here/play.py" --control "$run/control" --expect "$run/expect.jsonl" --wait "$run/ready" ${udev:+--udev} "$@"
 played=$?
 touch "$run/stop"
 for _ in $(seq 100); do

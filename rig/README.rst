@@ -157,6 +157,26 @@ Environment variables for ``run.sh``:
 ``RIG_SIZE``
     The size of the output and so of the window, ``1280x800`` by default.
 
+``RIG_NO_UDEV``
+    Set it to play without the stand-in for libudev described below. The
+    tablets then name device nodes that do not exist, and a terminal must say
+    nothing of their size or of whether they are displays.
+
+The size of a tablet
+-----------------------
+
+``tablet-v2`` has neither the size of a tablet nor whether it is a display,
+but it names the device node of the tablet, and a terminal can ask libudev
+what the kernel and udev say of that node. The tablets here have no node, so
+``run.sh`` builds ``fakeudev.c`` as a ``libudev.so.1`` in the directory of the
+run and puts that directory into ``LD_LIBRARY_PATH`` for the terminal alone.
+It answers for two character devices that every machine has, ``/dev/null``
+for the Intuos5 and ``/dev/zero`` for the Cintiq, as udev and the kernel
+would for the real tablets: 224 by 140 millimeters and not a display, 345 by
+194 and a display. The tablets name those nodes, and ``play.py`` expects
+``w``, ``h`` and ``direct`` in the description of every tool. It needs a C
+compiler; without one the run goes as with ``RIG_NO_UDEV``.
+
 The logs
 -----------
 
