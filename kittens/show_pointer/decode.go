@@ -524,6 +524,7 @@ func (self *decoder) gesture(r *reader) []string {
 	case "event":
 		r.skip("op")
 		kind, _ := r.frame.Int("kind")
+		phase, _ := r.frame.Int("phase")
 		name := named(r, "kind", gesture_kinds)
 		if name == "" {
 			return append(parts, "event")
@@ -570,6 +571,8 @@ func (self *decoder) gesture(r *reader) []string {
 				parts = append(parts, "direction="+direction)
 			}
 		}
+		// Each gesture is a stream of its own, which its begin starts
+		parts = append(parts, self.time(r, fmt.Sprintf("gesture/%d", kind), phase == 1)...)
 	case "cap":
 		r.skip("op")
 		parts = append(parts, "capabilities")
@@ -594,6 +597,8 @@ func (self *decoder) scroll(r *reader) []string {
 	switch op {
 	case "event":
 		r.skip("op")
+		src, _ := r.frame.Get("src")
+		phase, _ := r.frame.Int("phase")
 		parts = add(parts, named(r, "src", scroll_sources))
 		if v, found := r.frame.Get("phase"); found && v == "0" {
 			r.skip("phase")
@@ -603,11 +608,12 @@ func (self *decoder) scroll(r *reader) []string {
 		if dx, dy, ok := r.take_pair("dx", "dy"); ok {
 			parts = append(parts, fmt.Sprintf("dx=%+.2fpx", float64(dx)/100), fmt.Sprintf("dy=%+.2fpx", float64(dy)/100))
 		}
-		// Unlike the other two protocols the position here is in whole pixels
 		if x, y, ok := r.take_pair("x", "y"); ok {
-			parts = add(parts, fmt.Sprintf("x=%dpx", x), fmt.Sprintf("y=%dpx", y), self.cell(x*256, y*256))
+			parts = add(parts, "x="+pixels(x)+"px", "y="+pixels(y)+"px", self.cell(x, y))
 		}
 		parts = add(parts, mods(r))
+		// The scrolling of each source is a stream, which a gesture that begins starts again
+		parts = append(parts, self.time(r, "scroll/"+src, phase == 1)...)
 	case "cap":
 		r.skip("op")
 		parts = append(parts, "capabilities")
