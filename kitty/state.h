@@ -748,7 +748,7 @@ void set_gpu_viewport(unsigned w, unsigned h);
 void free_texture(uint32_t *);
 void free_framebuffer(uint32_t *);
 void send_image_to_gpu(uint32_t *, const void *, int32_t, int32_t, bool, bool, bool, RepeatStrategy);
-void copy_rectangle_texture_to_texture(uint32_t, uint32_t *, int32_t, int32_t);
+void copy_surface_texture_to_texture(bool, uint32_t, uint32_t *, int32_t, int32_t);
 void send_sprite_to_gpu(FONTS_DATA_HANDLE fg, sprite_index, pixel *, sprite_index);
 void blank_canvas(float, color_type, bool);
 void blank_os_window(OSWindow *);

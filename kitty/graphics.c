@@ -15,6 +15,9 @@
 #ifdef __APPLE__
 #include "iosurface.h"
 #endif
+#ifdef __linux__
+#include "dmabuf.h"
+#endif
 
 #include <sys/types.h>
 #include <sys/stat.h>
@@ -171,10 +174,14 @@ texture_id_for_img(Image *img) {
 static void
 free_image_resources(GraphicsManager *self, Image *img) {
     clear_texture_ref(&img->texture);
-#ifdef __APPLE__
+#if defined(__APPLE__) || defined(__linux__)
     if (img->surface) {
         if (img->surface_texture) free_texture(&img->surface_texture);
+#ifdef __APPLE__
         iosurface_release(img->surface);
+#else
+        dmabuf_release(img->surface);
+#endif
         img->surface = NULL;
     }
 #endif
@@ -951,17 +958,35 @@ upload_to_gpu(GraphicsManager *self, Image *img, const bool is_opaque, const boo
     if (img->texture) { send_image_to_gpu(&img->texture->id, data, img->width, img->height, is_opaque, is_4byte_aligned, true, REPEAT_CLAMP); }
 }
 
+#if defined(__APPLE__) || defined(__linux__)
+// Makes the context of the window current, false when there is no window to have one, as in the tests
+static bool
+surface_context(GraphicsManager *self, bool *failed) {
+    *failed = false;
+    if (self->context_made_current_for_this_command) return true;
+    if (!self->window_id) return false;
+    if (!make_window_context_current(self->window_id)) {
+        *failed = true;
+        return false;
+    }
+    self->context_made_current_for_this_command = true;
+    return true;
+}
+#endif
+
 // Copy the current contents of the surface into the image texture, on the GPU
 static bool
 refresh_surface_image(GraphicsManager *self, Image *img) {
+#if defined(__APPLE__) || defined(__linux__)
+    bool failed;
+    if (!surface_context(self, &failed)) return !failed;
 #ifdef __APPLE__
-    if (!self->context_made_current_for_this_command) {
-        if (!self->window_id) return true;
-        if (!make_window_context_current(self->window_id)) return false;
-        self->context_made_current_for_this_command = true;
-    }
     if (!iosurface_bind_rectangle_texture(img->surface, &img->surface_texture, img->surface_is_bgra)) return false;
-    if (img->texture) copy_rectangle_texture_to_texture(img->surface_texture, &img->texture->id, img->width, img->height);
+    if (img->texture) copy_surface_texture_to_texture(true, img->surface_texture, &img->texture->id, img->width, img->height);
+#else
+    if (!dmabuf_bind_texture(img->surface, &img->surface_texture)) return false;
+    if (img->texture) copy_surface_texture_to_texture(false, img->surface_texture, &img->texture->id, img->width, img->height);
+#endif
     return true;
 #else
     (void)self;
@@ -970,15 +995,51 @@ refresh_surface_image(GraphicsManager *self, Image *img) {
 #endif
 }
 
+#ifdef __linux__
+// A dma-buf the program names by its process and descriptors, see dmabuf_take_fds() for which processes it may name. A
+// query takes the descriptors to check that it could, gives them back and leaves surface at NULL
+static bool
+load_dmabuf(GraphicsManager *self, const GraphicsCommand *g, const char *spec, bool is_query, void **surface, uint32_t *width, uint32_t *height, char *err,
+            size_t errsz) {
+    *surface = NULL;
+    if (!global_state.is_wayland) {
+        snprintf(err, errsz, "dma-buf surfaces need EGL, which the terminal uses on Wayland and not on X11");
+        return false;
+    }
+    DmabufSpec ds;
+    if (!dmabuf_parse_spec(spec, strlen(spec), &ds, err, errsz)) return false;
+    // unlike an IOSurface, a dma-buf does not know its size
+    if (!g->data_width || !g->data_height) {
+        snprintf(err, errsz, "A dma-buf surface needs its width and height in the s and v keys");
+        return false;
+    }
+    *width = g->data_width;
+    *height = g->data_height;
+    int fds[arraysz(ds.planes)];
+    if (!dmabuf_take_fds(&ds, child_pid_for_window(self->window_id), fds, err, errsz)) return false;
+    bool ok = true;
+    if (!is_query) {
+        bool failed;
+        if (!surface_context(self, &failed)) {
+            snprintf(err, errsz, "The terminal has no GPU context to import the dma-buf into");
+            ok = false;
+        } else ok = (*surface = dmabuf_import(&ds, fds, *width, *height, err, errsz)) != NULL;
+    }
+    dmabuf_close_fds(fds, ds.num_planes);
+    return ok;
+}
+#endif
+
 static Image *
 load_surface_image(GraphicsManager *self, const GraphicsCommand *g, Image *img, const uint8_t *payload, bool is_query) {
-#ifdef __APPLE__
+#if defined(__APPLE__) || defined(__linux__)
     if (g->more || g->compressed) ABRT("EINVAL", "Chunking and compression are not supported for GPU surfaces");
-    char spec[64], err[128];
+    char spec[256], err[256];
     if (g->payload_sz >= sizeof(spec)) ABRT("EINVAL", "GPU surface specification too long");
     snprintf(spec, sizeof(spec), "%.*s", (int)g->payload_sz, payload);
+    uint32_t width = 0, height = 0;
+#ifdef __APPLE__
     if (strncmp(spec, "iosurface:", 10) != 0) ABRT("EINVAL", "Unknown GPU surface type: %s", spec);
-    uint32_t width, height;
     bool is_bgra;
     void *surface = iosurface_lookup((uint32_t)strtoul(spec + 10, NULL, 10), &width, &height, &is_bgra, err, sizeof(err));
     if (!surface) ABRT("EINVAL", "%s", err);
@@ -986,8 +1047,13 @@ load_surface_image(GraphicsManager *self, const GraphicsCommand *g, Image *img, 
         iosurface_release(surface);
         ABRT("EINVAL", "Image too large, width or height greater than %u", MAX_IMAGE_DIMENSION);
     }
-    img->surface = surface;
     img->surface_is_bgra = is_bgra;
+#else
+    if (strncmp(spec, "dmabuf:", 7) != 0) ABRT("EINVAL", "Unknown GPU surface type: %s", spec);
+    void *surface;
+    if (!load_dmabuf(self, g, spec, is_query, &surface, &width, &height, err, sizeof(err))) ABRT("EINVAL", "%s", err);
+#endif
+    img->surface = surface;
     img->width = width;
     img->height = height;
     img->root_frame = (const Frame){.id = ++img->frame_id_counter, .is_4byte_aligned = true, .width = width, .height = height};
@@ -3060,8 +3126,60 @@ pycreate_canvas(PyObject *self UNUSED, PyObject *args) {
     return ans;
 }
 
+#ifdef __linux__
+// For the tests: what a dma-buf surface names, as (pid, fourcc, modifier, ((fd, offset, stride), ...))
+static PyObject *
+py_dmabuf_parse_spec(PyObject *self UNUSED, PyObject *args) {
+    const char *spec;
+    Py_ssize_t sz;
+    if (!PyArg_ParseTuple(args, "y#", &spec, &sz)) return NULL;
+    DmabufSpec ds;
+    char err[256];
+    if (!dmabuf_parse_spec(spec, (size_t)sz, &ds, err, sizeof(err))) {
+        PyErr_SetString(PyExc_ValueError, err);
+        return NULL;
+    }
+    RAII_PyObject(planes, PyTuple_New(ds.num_planes));
+    if (!planes) return NULL;
+    for (unsigned i = 0; i < ds.num_planes; i++) {
+        PyObject *t = Py_BuildValue("iII", ds.planes[i].fd, ds.planes[i].offset, ds.planes[i].stride);
+        if (!t) return NULL;
+        PyTuple_SET_ITEM(planes, i, t);
+    }
+    const char fourcc[4] = {(char)(ds.fourcc & 0xff), (char)((ds.fourcc >> 8) & 0xff), (char)((ds.fourcc >> 16) & 0xff), (char)(ds.fourcc >> 24)};
+    return Py_BuildValue("is#KO", (int)ds.pid, fourcc, (Py_ssize_t)4, (unsigned long long)ds.modifier, planes);
+}
+
+// For the tests: the descriptors the terminal would take for a dma-buf surface from a window whose program is session_of
+static PyObject *
+py_dmabuf_take_fds(PyObject *self UNUSED, PyObject *args) {
+    const char *spec;
+    Py_ssize_t sz;
+    int session_of;
+    if (!PyArg_ParseTuple(args, "y#i", &spec, &sz, &session_of)) return NULL;
+    DmabufSpec ds;
+    char err[256];
+    int fds[arraysz(ds.planes)];
+    if (!dmabuf_parse_spec(spec, (size_t)sz, &ds, err, sizeof(err)) || !dmabuf_take_fds(&ds, session_of, fds, err, sizeof(err))) {
+        PyErr_SetString(PyExc_ValueError, err);
+        return NULL;
+    }
+    PyObject *ans = PyTuple_New(ds.num_planes);
+    if (!ans) {
+        dmabuf_close_fds(fds, ds.num_planes);
+        return NULL;
+    }
+    for (unsigned i = 0; i < ds.num_planes; i++) PyTuple_SET_ITEM(ans, i, PyLong_FromLong(fds[i]));
+    return ans;
+}
+#endif
+
 static PyMethodDef module_methods[] = {
-    M(shm_write, METH_VARARGS), M(shm_unlink, METH_VARARGS), M(create_canvas, METH_VARARGS), {NULL, NULL, 0, NULL} /* Sentinel */
+    M(shm_write, METH_VARARGS), M(shm_unlink, METH_VARARGS), M(create_canvas, METH_VARARGS),
+#ifdef __linux__
+    {"dmabuf_parse_spec", py_dmabuf_parse_spec, METH_VARARGS, ""}, {"dmabuf_take_fds", py_dmabuf_take_fds, METH_VARARGS, ""},
+#endif
+    {NULL, NULL, 0, NULL} /* Sentinel */
 };
 
 
