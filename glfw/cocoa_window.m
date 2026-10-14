@@ -3534,9 +3534,12 @@ _glfwPlatformGetDoubleClickInterval(_GLFWwindow *window UNUSED) {
     return s_double_to_monotonic_t([NSEvent doubleClickInterval]);
 }
 
+// GLFW_POINTER_INPUT_TOUCH_CONFIDENCE is not among these. A touch the system marks as resting is passed on as an
+// accident, see handleTouches(), but on the trackpad this was tried on it marked neither a palm nor a thumb held
+// still at the edge, and what the system was not seen to do is not claimed
 unsigned
 _glfwPlatformGetPointerInputClasses(void) {
-    return GLFW_POINTER_INPUT_TOOLS | GLFW_POINTER_INPUT_TOUCHPAD | GLFW_POINTER_INPUT_TOOL_ACTIONS | GLFW_POINTER_INPUT_TOUCH_CONFIDENCE;
+    return GLFW_POINTER_INPUT_TOOLS | GLFW_POINTER_INPUT_TOUCHPAD | GLFW_POINTER_INPUT_TOOL_ACTIONS;
 }
 
 void

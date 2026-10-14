@@ -598,7 +598,7 @@ class TestMouse(BaseTest):
 
         s = self.create_screen()
         c = s.callbacks
-        caps = 357 if is_macos else 65
+        caps = 101 if is_macos else 65
 
         def send(body):
             c.clear()

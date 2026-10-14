@@ -2203,11 +2203,12 @@ screen_pointer_cancel(Screen *screen, int kind) {
 // on a touchpad 4, the shape of a finger contact 8, pads 16, tool actions 32,
 // hardware identifiers 64, the fingers the system takes for accidents 256. The
 // window system says which it has of all but the identifiers, and the bits of
-// GLFWPointerInputClass are these bits
+// GLFWPointerInputClass are these bits. None of the window systems has the last
+// one: AppKit has a mark for a touch at rest that no trackpad was seen to set
 static unsigned
 pointer_caps(void) {
 #ifdef __APPLE__
-    unsigned caps = 1 | 4 | 32 | 256;
+    unsigned caps = 1 | 4 | 32;
 #else
     unsigned caps = global_state.is_wayland ? 1 | 2 : 1;
 #endif
