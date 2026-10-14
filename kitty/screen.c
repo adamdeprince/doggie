@@ -1791,11 +1791,15 @@ send_visibility_report(Screen *self) {
     write_escape_code_to_child(self, ESC_CSI, self->visibility_state != 2 ? "?999;1n" : "?999;2n");
 }
 
+// A reply to a query when id is not negative, otherwise an event, which has
+// the time the terminal learnt of it as t, in milliseconds on monotonic(), the
+// clock of every extension, as for the tablet pointer protocol
 static void
 send_display_report(Screen *self, const char *op, int id, const DisplayInfo *d) {
     char buf[256];
     int n = snprintf(buf, sizeof(buf), "777;display;v=1:op=%s", op);
     if (id >= 0) n += snprintf(buf + n, sizeof(buf) - n, ":id=%d:mode=%d", id, self->display_events);
+    else n += snprintf(buf + n, sizeof(buf) - n, ":t=%llu", (unsigned long long)(MAX(0, monotonic()) / MONOTONIC_T_1e6));
     snprintf(buf + n, sizeof(buf) - n, ":kind=%s:color=%s:bits=%d:gamut=%s:headroom=%g:scale=%g:period=%u:ppi=%g", d->kind, d->color, d->bits, d->gamut, d->headroom, d->scale, d->period_us, d->ppi);
     write_escape_code_to_child(self, ESC_OSC, buf);
 }

@@ -145,13 +145,16 @@ one event whenever any field changes: the window was moved to a display with
 a different scale or refresh rate, the display's brightness setting changed
 the headroom, its color profile was switched::
 
-    <OSC> 777 ; display ; v=1 : op=event : kind=lcd : color=rgb : bits=8 : gamut=srgb : headroom=1 : scale=1 : period=16666 : ppi=96 <ST>
+    <OSC> 777 ; display ; v=1 : op=event : t=408211 : kind=lcd : color=rgb : bits=8 : gamut=srgb : headroom=1 : scale=1 : period=16666 : ppi=96 <ST>
 
-The fields are those of the ``cap`` reply, without ``id`` and ``mode``.
+The fields are those of the ``cap`` reply, without ``id`` and ``mode``, and
+``t``, the time the terminal learnt of the change, in milliseconds on the
+clock the terminal uses for every extension, see :doc:`extension-framing`.
 Changes are relative to the last event sent, so turning the mode off and on
 again reports the current values once and then only changes. A change can be
 reported a short while after it happens, and a program that has turned the
-mode off may still receive an event that was already on its way.
+mode off may still receive an event that was already on its way. An event is
+never merged with another or dropped, by the terminal or by a relay.
 
 Relays and multiplexers
 ---------------------------
