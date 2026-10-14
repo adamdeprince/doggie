@@ -19,17 +19,13 @@ Framing
 
 Frames are ``OSC 777`` with the ``latency`` selector::
 
-    <OSC> 777 ; latency ; <fields> <ST>
+    <OSC> 777 ; latency ; v=1 : op=query : id=42 <ST>
 
-``<OSC>`` is ``<ESC> ]`` and ``<ST>`` is ``<ESC> \``; ``BEL`` is also
-accepted as a terminator. Fields are ASCII ``key=value`` pairs separated by
-colons, in any order, with decimal integers that carry no leading ``+``. A
-frame with a missing required field or an unknown version is ignored as a
-whole and never reaches a program as keystrokes. Spaces in the examples below
-are for clarity only.
-
-Every frame has ``v``, the protocol version, which is ``1``, and ``op``, one
-of ``query``, ``cap`` and ``mode``.
+They follow the rules every OSC 777 extension shares, which
+:doc:`extension-framing` gives: the syntax of the fields, which frames are
+rejected and the units. ``v``, the protocol version, is ``1``, and ``op`` is
+one of ``query``, ``cap`` and ``mode``. The terminal sends only replies, which
+are never merged or dropped.
 
 Discovery
 -------------
@@ -74,7 +70,9 @@ drag, not for the lifetime of a program. Programs must turn it off when they
 exit, suspend or fail, and turn it back on when resumed. Multiplexers and
 relays keep it with the rest of the terminal state and turn it off when
 detaching; one that cannot honour it simply keeps the state and passes the
-query on. There is no user setting that overrides the program's choice.
+query on. A terminal may let its user refuse the mode, for every program or
+for some. A refused mode reads back as off and changes nothing, so a program
+reads the mode back rather than assume it was granted.
 
 A ``mode`` request without a ``mode`` field reads the state instead of
 changing it, and is answered with::

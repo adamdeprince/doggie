@@ -1061,6 +1061,8 @@ class TestScreen(BaseTest):
         s.reset()
         parse_bytes(s, b'\x1b]777;latency;v=1:op=mode\x1b\\')
         self.ae(c.wtcbuf, b'\x1b]777;latency;v=1:op=mode:mode=0\x1b\\')
+        # A frame from a program follows the rules every extension shares, see docs/extension-framing.rst
+        assert_extension_frames(self, s, 'latency')
 
     def test_frame_feedback(self):
         s = self.create_screen()
