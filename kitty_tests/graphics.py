@@ -1906,6 +1906,50 @@ class TestGraphics(BaseTest):
         self.ae(pixel(img, 2, 2), (255, 0, 0, 255))
         self.ae(pixel(img, 7, 7), (0, 255, 0, 255))
 
+    def test_vector_growing_geometry(self):
+        s = self.create_screen()
+        g = s.grman
+
+        def command(records, action='t', image=1):
+            res = parse_full_response(send_command(s, f'a={action},f=200,s=10,v=10,i={image}', records))
+            self.ae(res.code, 'OK', res.msg)
+
+        # Numeric tokens can be longer than the old 63-character parsing buffer.
+        one = '1.' + '0' * 2048
+        command(f'k id=1 pts={one},1,1 fill=#ff0000')
+        command('k id=1 pts=1,1,1 fill=#ff0000', image=2)
+        self.ae(g.render_vector_image(1, 10, 10), g.render_vector_image(2, 10, 10))
+        # A stroke accumulates many small appends across multiple capacity changes.
+        points = ['1,1,1']
+        for j in range(2048):
+            point = f'{1 + j % 8},{1 + (j // 8) % 8},1'
+            points.append(point)
+            command(f'a id=1 pts={point}', action='e')
+        command('k id=1 pts=' + ','.join(points) + ' fill=#ff0000', image=2)
+        self.ae(g.render_vector_image(1, 10, 10), g.render_vector_image(2, 10, 10))
+
+    def test_vector_deep_groups(self):
+        s = self.create_screen()
+        g = s.grman
+
+        def command(records, action='t'):
+            res = parse_full_response(send_command(s, f'a={action},f=200,s=10,v=10,i=1', records))
+            self.ae(res.code, 'OK', res.msg)
+
+        # Heap-backed traversal and ancestor transforms must reach beyond the old depth 64.
+        groups = ''.join(f'g id={i} p={i - 1} t=1,0,0,1,0,0\n' for i in range(1, 2049))
+        command(groups + 'p id=3000 g=2048 d=M1,1L9,1L9,9L1,9Z fill=#ff0000')
+        pixels = g.render_vector_image(1, 10, 10)
+        self.ae(pixels[(5 * 10 + 5) * 4 : (5 * 10 + 5) * 4 + 4], b'\xff\x00\x00\xff')
+        command('g id=100 p=99 o=50', action='e')
+        pixels = g.render_vector_image(1, 10, 10)
+        self.ae(pixels[(5 * 10 + 5) * 4 + 3], 128)
+        command('x g=1', action='e')
+        self.ae(g.image_for_client_id(1)['vector_elements'], 0)
+        # Parent cycles remain harmless rather than becoming an infinite traversal.
+        command('g id=1 p=2\ng id=2 p=1\np id=3 g=1 d=M1,1L9,9 stroke=#ff0000')
+        self.ae(g.render_vector_image(1, 10, 10), bytes(10 * 10 * 4))
+
     def test_vector_dash_limit(self):
         # A dash pattern far finer than its path is long would cut it into more dashes than memory or time allow
         import signal
