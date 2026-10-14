@@ -1533,7 +1533,7 @@ handle_xi_tablet_event(_GLFWwindow *window, XITabletDevice *d, XIDeviceEvent *de
         .name = d->name[0] ? d->name : NULL,
     };
 #undef norm
-    if (d->has_unmap) {
+    if (d->has_unmap && !d->area_cropped) {
         // The server takes a position to the range 0 to 1 by the number of
         // values an axis has, puts it through its matrix and takes it back
         const double span_x = d->x.max - d->x.min, span_y = d->y.max - d->y.min;
@@ -1545,10 +1545,15 @@ handle_xi_tablet_event(_GLFWwindow *window, XITabletDevice *d, XIDeviceEvent *de
             ev.tablet_y = MIN(MAX((m[3] * u + m[4] * v + m[5]) / w * (span_y + 1) / span_y, 0), 1);
         }
     }
+    // The size from the resolution the driver states, otherwise from the kernel, which rounds it to millimeters
     if (d->x.resolution > 0 && d->y.resolution > 0) {
         ev.tablet_width = (d->x.max - d->x.min) * 1000. / d->x.resolution;
         ev.tablet_height = (d->y.max - d->y.min) * 1000. / d->y.resolution;
+    } else if (d->node_width_mm > 0 && d->node_height_mm > 0) {
+        ev.tablet_width = d->node_width_mm;
+        ev.tablet_height = d->node_height_mm;
     }
+    ev.tablet_direct = d->node_direct;
     d->window_id = window->id;
     if (!_glfwInputTablet(window, &ev)) return false;
     _glfw.x11.xi.last_tablet_time = de->time;
@@ -2078,13 +2083,18 @@ processEvent(XEvent *event) {
                 else if (event->xcookie.evtype == XI_TouchBegin || event->xcookie.evtype == XI_TouchUpdate || event->xcookie.evtype == XI_TouchEnd) {
                     handle_xi_touch_event((XIDeviceEvent *)event->xcookie.data);
                 }
-                // The mapping of a tablet to the screen was changed
+                // The mapping of a tablet to the screen, its area or what names its device node was changed
                 else if (event->xcookie.evtype == XI_PropertyEvent) {
                     const XIPropertyEvent *pe = (XIPropertyEvent *)event->xcookie.data;
-                    XITabletDevice *td = pe->property == _glfw.x11.xi.COORDINATE_TRANSFORMATION_MATRIX ? tablet_device_for_id(pe->deviceid) : NULL;
-                    if (td) {
+                    XITabletDevice *td = pe->property != None ? tablet_device_for_id(pe->deviceid) : NULL;
+                    if (td && pe->property == _glfw.x11.xi.COORDINATE_TRANSFORMATION_MATRIX) {
                         _glfwGrabErrorHandlerX11();
                         read_xi_tablet_mapping(td);
+                        _glfwReleaseErrorHandlerX11();
+                    } else if (td && (pe->property == _glfw.x11.xi.DEVICE_NODE || pe->property == _glfw.x11.xi.DEVICE_PRODUCT_ID ||
+                                      pe->property == _glfw.x11.xi.LIBINPUT_AREA_RATIO)) {
+                        _glfwGrabErrorHandlerX11();
+                        read_xi_tablet_node(td);
                         _glfwReleaseErrorHandlerX11();
                     }
                 }

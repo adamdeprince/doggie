@@ -42,6 +42,7 @@
 #include <fcntl.h>
 #include <math.h>
 #include <unistd.h>
+#include <sys/socket.h>
 
 
 // Return the atom ID only if it is listed in the specified array
@@ -209,6 +210,60 @@ read_xi_tablet_mapping(XITabletDevice *td) {
     XFree(data);
 }
 
+// Reads a property of an input device of 32 bit integers into ans, returning how many it has
+static unsigned long
+read_xi_integers(int deviceid, Atom property, uint32_t *ans, unsigned long max) {
+    Atom type = None;
+    int format = 0;
+    unsigned long nitems = 0, bytes_after = 0, n = 0;
+    unsigned char *data = NULL;
+    if (property == None) return 0;
+    XIGetProperty(_glfw.x11.display, deviceid, property, 0, (long)max, False, XA_INTEGER, &type, &format, &nitems, &bytes_after, &data);
+    if (!data) return 0;
+    if (type == XA_INTEGER && format == 32) {
+        n = MIN(nitems, max);
+        memcpy(ans, data, n * sizeof(uint32_t));
+    }
+    XFree(data);
+    return n;
+}
+
+// The libinput and wacom drivers name the device node of a tablet, and the
+// kernel says of a node how large the tablet is and whether it is a display,
+// which the axes of a tool do not tell under the libinput driver. The node is
+// a name on the machine of the X server, so what is found at it counts only
+// when the connection to the server is local and the kernel has the device
+// under the vendor and product ids the driver gives. The area ratio of the
+// libinput driver is read with it. The caller has to have grabbed the error
+// handler, since the device may be gone
+void
+read_xi_tablet_node(XITabletDevice *td) {
+    uint32_t ratio[2] = {0};
+    td->area_cropped = read_xi_integers(td->deviceid, _glfw.x11.xi.LIBINPUT_AREA_RATIO, ratio, 2) == 2 && ratio[0] && ratio[1];
+    td->node_width_mm = td->node_height_mm = td->node_direct = 0;
+    uint32_t ids[2];
+    if (!_glfw.x11.xi.connection_is_local || _glfw.x11.xi.DEVICE_NODE == None || read_xi_integers(td->deviceid, _glfw.x11.xi.DEVICE_PRODUCT_ID, ids, 2) != 2) return;
+    Atom type = None;
+    int format = 0;
+    unsigned long nitems = 0, bytes_after = 0;
+    unsigned char *data = NULL;
+    char path[256];
+    XIGetProperty(
+        _glfw.x11.display, td->deviceid, _glfw.x11.xi.DEVICE_NODE, 0, sizeof(path) / 4, False, XA_STRING, &type, &format, &nitems, &bytes_after, &data);
+    if (!data) return;
+    const bool ok = type == XA_STRING && format == 8 && !bytes_after && nitems < sizeof(path);
+    if (ok) {
+        memcpy(path, data, nitems);
+        path[nitems] = 0;
+    }
+    XFree(data);
+    InputNodeInfo node;
+    if (!ok || !input_node_info(path, &node) || !node.is_tablet || node.is_pad || node.vendor != ids[0] || node.product != ids[1]) return;
+    td->node_width_mm = node.width_mm;
+    td->node_height_mm = node.height_mm;
+    td->node_direct = node.direct;
+}
+
 // The libinput, wacom and Xwayland drivers name tablet tools by their type
 // and give them a pressure axis
 static void
@@ -236,7 +291,10 @@ read_xi_tablet_device(const XIDeviceInfo *device) {
         }
     }
     snprintf(td.name, sizeof(td.name), "%s", device->name);
-    if (has_tablet) read_xi_tablet_mapping(&td);
+    if (has_tablet) {
+        read_xi_tablet_mapping(&td);
+        read_xi_tablet_node(&td);
+    }
     if (td.tool != GLFW_TABLET_TOOL_UNKNOWN && td.pressure.number >= 0 && _glfw.x11.xi.num_tablet_devices < arraysz(_glfw.x11.xi.tablet_devices)) {
         _glfw.x11.xi.tablet_devices[_glfw.x11.xi.num_tablet_devices++] = td;
     }
@@ -631,6 +689,16 @@ initExtensions(void) {
     _glfw.x11.xi.LIBINPUT_TAPPING = XInternAtom(_glfw.x11.display, "libinput Tapping Enabled", False);
     _glfw.x11.xi.COORDINATE_TRANSFORMATION_MATRIX = XInternAtom(_glfw.x11.display, "Coordinate Transformation Matrix", False);
     _glfw.x11.xi.FLOAT = XInternAtom(_glfw.x11.display, "FLOAT", False);
+    _glfw.x11.xi.DEVICE_NODE = XInternAtom(_glfw.x11.display, "Device Node", False);
+    _glfw.x11.xi.DEVICE_PRODUCT_ID = XInternAtom(_glfw.x11.display, "Device Product ID", False);
+    _glfw.x11.xi.LIBINPUT_AREA_RATIO = XInternAtom(_glfw.x11.display, "libinput Tablet Tool Area Ratio", False);
+    {
+        // A TCP connection, as one forwarded by ssh, is to a server whose device nodes are not this machine's
+        struct sockaddr_storage addr;
+        socklen_t len = sizeof(addr);
+        _glfw.x11.xi.connection_is_local =
+            getsockname(ConnectionNumber(_glfw.x11.display), (struct sockaddr *)&addr, &len) == 0 && addr.ss_family == AF_UNIX;
+    }
     _glfw.x11.xi.label_pressure = XInternAtom(_glfw.x11.display, "Abs Pressure", False);
     _glfw.x11.xi.label_tilt_x = XInternAtom(_glfw.x11.display, "Abs Tilt X", False);
     _glfw.x11.xi.label_tilt_y = XInternAtom(_glfw.x11.display, "Abs Tilt Y", False);

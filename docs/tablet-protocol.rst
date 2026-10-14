@@ -748,9 +748,9 @@ Implementations
   and on X11, without;
   pads on Wayland, with the groups of their controls; tool actions on macOS;
   the number of the tablet on macOS and Wayland; the size of a tablet and
-  whether it is a display on Wayland; the place of a tool on its tablet on
-  X11. ``kitty --debug-input`` logs the tablet, pad and touch events it
-  sees.
+  whether it is a display on Wayland and X11; the place of a tool on its
+  tablet on X11. ``kitty --debug-input`` logs the tablet, pad and touch
+  events it sees.
 * Inkline, Goblin Skiff and GoblinView carry a codec for an earlier draft of
   this protocol and are being brought up to this specification.
 
@@ -768,8 +768,8 @@ stamp tablet and touch events in whole milliseconds.
 Of what a tablet says of itself silkie sends what the window system gives
 it, which the notes below go through: ``tablet`` on macOS and Wayland, the
 groups of the controls of a pad on Wayland, ``w``, ``h`` and ``direct`` on
-Wayland, where they are had from the kernel, ``rx`` and ``ry``, with ``w``
-and ``h`` under some drivers, on X11. It can write every field of this page,
+Wayland and X11, where they are had from the kernel or the driver, and ``rx``
+and ``ry`` on X11. It can write every field of this page,
 and its tests do, but nothing it reads has ``grip``, ``pcolor``, ``pwidth``,
 ``pstyle``, or the actions ``6`` to ``8``, so it never sends them, and
 ``conf`` it has from a mark of AppKit that no touch was seen to carry, so it
@@ -875,16 +875,21 @@ Wayland does.
   and ``ry`` come from. The server puts it through the matrix by which the
   user maps the tablet to the screen or to one monitor, so silkie reads that
   matrix, again whenever it is changed, and undoes it; a matrix that cannot
-  be undone leaves ``rx`` and ``ry`` out. ``w`` and ``h`` are the range of
-  the position divided by the resolution the driver states for it, and are
-  left out when it states none, which is so with the libinput driver; no
-  driver that states one was at hand, so the sizes are untried. Those
-  drivers name the device node of a tool in its ``Device Node`` property, by
-  which the size and ``direct`` could be had from the kernel as on Wayland.
-  silkie does not read it: the node is one on the machine of the server, the
-  ids to tell that it is the same device are in another property, and the
-  libinput driver can cut the range of the position down to a part of the
-  tablet, whose size the kernel does not have. X has no tablet that tools
+  be undone leaves ``rx`` and ``ry`` out, and so does the area ratio of
+  the libinput driver, which stretches one axis of the position and cuts off
+  what falls past its end, by a factor silkie cannot learn exactly. ``w``
+  and ``h`` are the range of the position divided by the resolution the
+  driver states for it; no driver that states one was at hand, so those
+  sizes are untried. The libinput driver states none, and both drivers name
+  the device node of a tool in its ``Device Node`` property and its vendor
+  and product ids in ``Device Product ID``. Where the driver states no
+  resolution, silkie reads the size and ``direct`` of the node from the
+  kernel as on Wayland, the size in whole millimeters rounded down, and
+  believes them only when its connection to the X server is a local socket,
+  the node being one on the machine of the server, and when the kernel has
+  the device under those ids. This was tried against devices of the
+  server's test driver given those properties and a stand-in for libudev,
+  not with a tablet. X has no tablet that tools
   belong to, each tool being a device of its own, so there is no ``tablet``.
   The X server does not report a tool leaving proximity, so phase ``5``
   arrives only when the device goes away. Xwayland's tablet devices are

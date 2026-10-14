@@ -281,6 +281,13 @@ typedef struct XITabletDevice {
     // has_unmap, which is unset when the matrix cannot be read or undone
     double unmap[9];
     bool has_unmap;
+    // The libinput driver's area ratio is set: it stretches one axis and cuts
+    // off what falls past its end, so x and y no longer span the tablet
+    bool area_cropped;
+    // The size of the tablet in millimeters and whether it is a display (1),
+    // is not one (-1) or the kernel does not say (0), from the kernel by the
+    // device node the driver names. Zero when the node is not believed
+    int node_width_mm, node_height_mm, node_direct;
     char name[128];
 } XITabletDevice;
 
@@ -522,6 +529,9 @@ typedef struct _GLFWlibraryX11 {
         Time last_smooth_scroll_time;
         int master_pointer_id;
         Atom LIBINPUT_SCROLL_METHOD_ENABLED, LIBINPUT_TAPPING, COORDINATE_TRANSFORMATION_MATRIX, FLOAT;
+        Atom DEVICE_NODE, DEVICE_PRODUCT_ID, LIBINPUT_AREA_RATIO;
+        // The connection to the server is a local socket, so a device node it names is one on this machine
+        bool connection_is_local;
         XITabletDevice tablet_devices[8];
         unsigned num_tablet_devices;
         // Server timestamp of the last tablet event the application consumed.
@@ -610,4 +620,5 @@ void _glfwGetSystemContentScaleX11(float *xscale, float *yscale, bool bypass_cac
 void _glfwPushSelectionToManagerX11(void);
 void read_xi_scroll_devices(void);
 void read_xi_tablet_mapping(XITabletDevice *td);
+void read_xi_tablet_node(XITabletDevice *td);
 void free_dnd_data(void);
