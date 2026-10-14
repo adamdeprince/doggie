@@ -7,6 +7,7 @@
 
 #include "screen.h"
 #include "control-codes.h"
+#include "extension-fields.h"
 
 // Every OSC 777 selector this terminal speaks, with the version of its
 // protocol, see docs/capabilities-protocol.rst. A selector handled in
@@ -56,30 +57,22 @@ screen_reset_extension_modes(Screen *self) {
     screen_ink_off(self);
 }
 
+// A frame from the program, see docs/extension-framing.rst for what is rejected
 void
 screen_caps_query(Screen *self, const char *data, size_t sz) {
-    char buf[128], reply[512], *saveptr = NULL;
-    const char *op = "";
-    int v = 0, id = -1;
-    if (sz >= sizeof(buf)) return;
-    memcpy(buf, data, sz);
-    buf[sz] = 0;
-    for (char *tok = strtok_r(buf, ":", &saveptr); tok; tok = strtok_r(NULL, ":", &saveptr)) {
-        char *val = strchr(tok, '=');
-        if (!val) return;
-        *val++ = 0;
-        if (!strcmp(tok, "v")) v = atoi(val);
-        else if (!strcmp(tok, "op")) op = val;
-        else if (!strcmp(tok, "id")) id = atoi(val);
-    }
-    if (v != 1) return;
+    ExtensionFields f;
+    char reply[512];
+    const char *op;
+    long long id = -1;
+    if (!extension_fields_parse(&f, data, sz) || !extension_frame_header(&f, 1, &op)) return;
+    if (!extension_field_int(&f, "id", 0, INT32_MAX, &id)) return;
     if (!strcmp(op, "reset")) {
         screen_reset_extension_modes(self);
         return;
     }
     if (strcmp(op, "query") || id < 0) return;
     // caps: the listing 1, the reset request 2
-    int n = snprintf(reply, sizeof(reply), "777;caps;v=1:op=cap:id=%d:caps=3:ext=", id);
+    int n = snprintf(reply, sizeof(reply), "777;caps;v=1:op=cap:id=%lld:caps=3:ext=", id);
     for (size_t i = 0; i < arraysz(extensions) && n < (int)sizeof(reply); i++)
         n += snprintf(reply + n, sizeof(reply) - n, "%s%s.%u", i ? "," : "", extensions[i].selector, extensions[i].version);
     n = append_list(reply, sizeof(reply), n, "media", media, arraysz(media));

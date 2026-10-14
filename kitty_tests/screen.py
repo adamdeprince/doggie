@@ -964,6 +964,8 @@ class TestScreen(BaseTest):
         parse_bytes(s, b'\x1b]777;caps;garbage\x1b\\')
         self.ae(c.wtcbuf, b'')
         self.ae(str(s.line(0)), '')
+        # A frame from a program follows the rules every extension shares, see docs/extension-framing.rst
+        assert_extension_frames(self, s, 'caps')
 
     def test_caps_reset(self):
         # The request and a shell prompt both turn every extension mode off
