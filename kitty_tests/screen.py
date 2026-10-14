@@ -2,9 +2,10 @@
 # License: GPL v3 Copyright: 2016, Kovid Goyal <kovid at kovidgoyal.net>
 
 import os
+import re
 import tempfile
 
-from kitty.fast_data_types import DECAWM, DECCOLM, DECOM, IRM, VT_PARSER_BUFFER_SIZE, Color, ColorProfile, Cursor
+from kitty.fast_data_types import DECAWM, DECCOLM, DECOM, IRM, VT_PARSER_BUFFER_SIZE, Color, ColorProfile, Cursor, monotonic
 from kitty.marks import marker_from_function, marker_from_regex, marker_from_text
 from kitty.window import pagerhist
 
@@ -1017,8 +1018,13 @@ class TestScreen(BaseTest):
         parse_bytes(s, b'\x1b]777;display;v=1:op=query:id=7\x1b\\')
         self.ae(c.wtcbuf, b'\x1b]777;display;v=1:op=cap:id=7:mode=0:kind=unknown:color=rgb:bits=0:gamut=unknown:headroom=1:scale=0:period=0:ppi=0\x1b\\')
         c.clear()
+        before = int(monotonic() * 1000)
         parse_bytes(s, b'\x1b]777;display;v=1:op=mode:mode=1\x1b\\')
-        self.ae(c.wtcbuf, b'\x1b]777;display;v=1:op=event:kind=unknown:color=rgb:bits=0:gamut=unknown:headroom=1:scale=0:period=0:ppi=0\x1b\\')
+        # An event has the time the terminal learnt of it, on the clock of every extension
+        t = int(re.search(rb':t=([0-9]+):', c.wtcbuf).group(1))
+        self.assertGreaterEqual(t, before - 1)
+        self.assertLessEqual(t, int(monotonic() * 1000) + 1)
+        self.ae(c.wtcbuf, f'\x1b]777;display;v=1:op=event:t={t}:kind=unknown:color=rgb:bits=0:gamut=unknown:headroom=1:scale=0:period=0:ppi=0\x1b\\'.encode())
         c.clear()
         parse_bytes(s, b'\x1b]777;display;v=1:op=mode\x1b\\')
         self.ae(c.wtcbuf, b'\x1b]777;display;v=1:op=mode:mode=1\x1b\\')
@@ -1039,6 +1045,8 @@ class TestScreen(BaseTest):
         c = s.callbacks
         parse_bytes(s, b'\x1b]777;display;v=1:op=query:id=0\x1b\\')
         self.ae(c.wtcbuf, b'\x1b]777;display;v=1:op=cap:id=0:mode=0:kind=eink:color=gray:bits=4:gamut=unknown:headroom=1:scale=0:period=0:ppi=226\x1b\\')
+        # A frame from a program follows the rules every extension shares, see docs/extension-framing.rst
+        assert_extension_frames(self, s, 'display')
 
     def test_low_latency(self):
         s = self.create_screen()

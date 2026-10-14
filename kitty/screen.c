@@ -1807,37 +1807,32 @@ send_visibility_report(Screen *self) {
     write_escape_code_to_child(self, ESC_CSI, self->visibility_state != 2 ? "?999;1n" : "?999;2n");
 }
 
+// A reply to a query when id is not negative, otherwise an event, which has
+// the time the terminal learnt of it as t, in milliseconds on monotonic(), the
+// clock of every extension, as for the tablet pointer protocol
 static void
 send_display_report(Screen *self, const char *op, int id, const DisplayInfo *d) {
     char buf[256];
     int n = snprintf(buf, sizeof(buf), "777;display;v=1:op=%s", op);
     if (id >= 0) n += snprintf(buf + n, sizeof(buf) - n, ":id=%d:mode=%d", id, self->display_events);
+    else n += snprintf(buf + n, sizeof(buf) - n, ":t=%llu", (unsigned long long)(MAX(0, monotonic()) / MONOTONIC_T_1e6));
     snprintf(buf + n, sizeof(buf) - n, ":kind=%s:color=%s:bits=%d:gamut=%s:headroom=%g:scale=%g:period=%u:ppi=%g", d->kind, d->color, d->bits, d->gamut, d->headroom, d->scale, d->period_us, d->ppi);
     write_escape_code_to_child(self, ESC_OSC, buf);
 }
 
+// A frame from the program, see docs/extension-framing.rst for what is rejected
 void
 screen_display_protocol(Screen *self, const char *data, size_t sz) {
-    char buf[128], reply[64], *saveptr = NULL;
-    const char *op = "";
-    int v = 0, mode = -1, id = -1;
-    if (sz >= sizeof(buf)) return;
-    memcpy(buf, data, sz);
-    buf[sz] = 0;
-    for (char *tok = strtok_r(buf, ":", &saveptr); tok; tok = strtok_r(NULL, ":", &saveptr)) {
-        char *val = strchr(tok, '=');
-        if (!val) return;
-        *val++ = 0;
-        if (!strcmp(tok, "v")) v = atoi(val);
-        else if (!strcmp(tok, "op")) op = val;
-        else if (!strcmp(tok, "mode")) mode = atoi(val);
-        else if (!strcmp(tok, "id")) id = atoi(val);
-    }
-    if (v != 1) return;
+    ExtensionFields f;
+    char reply[64];
+    const char *op;
+    long long mode = -1, id = -1;
+    if (!extension_fields_parse(&f, data, sz) || !extension_frame_header(&f, 1, &op)) return;
+    if (!extension_field_int(&f, "mode", 0, INT32_MAX, &mode) || !extension_field_int(&f, "id", 0, INT32_MAX, &id)) return;
     if (!strcmp(op, "query") && id >= 0) {
         DisplayInfo d;
         os_window_display_info(os_window_for_kitty_window(self->window_id), &d);
-        send_display_report(self, "cap", id, &d);
+        send_display_report(self, "cap", (int)id, &d);
     } else if (!strcmp(op, "mode")) {
         if (mode < 0) {  // a read
             snprintf(reply, sizeof(reply), "777;display;v=1:op=mode:mode=%d", self->display_events);
