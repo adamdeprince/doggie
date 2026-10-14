@@ -76,12 +76,20 @@ While the mode is on, the terminal sends one report each time it presents a
 frame to the display that contains output the program wrote since the previous
 report::
 
-    <OSC> 777 ; frame ; v=1 : op=event : seq=17 : t=408211 : period=8333 <ST>
+    <OSC> 777 ; frame ; v=1 : op=event : seq=17 : t=408211 : tu=73 : period=8333 <ST>
 
 ``seq`` counts reports since the mode was turned on. ``t`` is the time the
-frame was handed to the display system, in milliseconds on a monotonic clock
-of the terminal's choosing, useful only for differences between reports.
-``period`` is the refresh period in microseconds as in the ``cap`` reply.
+frame was handed to the display system, in milliseconds on the clock the
+terminal uses for every extension, see :doc:`extension-framing`, so that it
+can be set against the ``t`` of the input a program drew the frame for.
+``tu`` is the microseconds past ``t``, ``0`` to ``999``, present when the
+terminal measures the time that finely. This is not the time the frame was
+shown, which is the next refresh of the display or later; a later version of
+the protocol may add that. ``period`` is the refresh period in microseconds
+as in the ``cap`` reply.
+
+Every report stands for a frame, so none is ever merged with another or
+dropped, by the terminal or by a relay, see :doc:`extension-framing`.
 
 A frame is reported once, however much output it contains, and a program that
 writes nothing receives nothing, so an idle program is never woken. The

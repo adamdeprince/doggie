@@ -1816,12 +1816,18 @@ screen_frame_feedback(Screen *self, const char *data, size_t sz) {
     }
 }
 
+// handed_at is when the frame was handed to the display system, as monotonic(),
+// the clock of every extension: t is in milliseconds as for the tablet pointer
+// protocol, and tu the microseconds past it, which the terminal measured itself
 void
-screen_frame_presented(Screen *self, unsigned period_us, monotonic_t now) {
-    char buf[96];
+screen_frame_presented(Screen *self, unsigned period_us, monotonic_t handed_at) {
+    char buf[128];
     if (!self->frame_feedback.on || !self->frame_feedback.pending) return;
     self->frame_feedback.pending = false;
-    snprintf(buf, sizeof(buf), "777;frame;v=1:op=event:seq=%u:t=%llu:period=%u", ++self->frame_feedback.seq, (unsigned long long)monotonic_t_to_ms(now), period_us);
+    const monotonic_t when = MAX(0, handed_at);
+    snprintf(
+        buf, sizeof(buf), "777;frame;v=1:op=event:seq=%u:t=%llu:tu=%u:period=%u", ++self->frame_feedback.seq, (unsigned long long)(when / MONOTONIC_T_1e6),
+        (unsigned)(when / MONOTONIC_T_1e3 % 1000), period_us);
     write_escape_code_to_child(self, ESC_OSC, buf);
 }
 
@@ -7112,6 +7118,18 @@ test_commit_write_buffer(Screen *screen, PyObject *args) {
     return PyLong_FromSize_t(s);
 }
 
+// A frame presented at t milliseconds and tu microseconds of monotonic(), as if
+// the program had written something
+static PyObject *
+test_frame_presented(Screen *screen, PyObject *args) {
+    unsigned period_us, tu;
+    unsigned long long t;
+    if (!PyArg_ParseTuple(args, "IKI", &period_us, &t, &tu)) return NULL;
+    screen->frame_feedback.pending = screen->frame_feedback.on;
+    screen_frame_presented(screen, period_us, (monotonic_t)t * MONOTONIC_T_1e6 + (monotonic_t)tu * MONOTONIC_T_1e3);
+    Py_RETURN_NONE;
+}
+
 static PyObject *
 test_parse_written_data(Screen *screen, PyObject *args) {
     ParseData pd = {.now = monotonic()};
@@ -7220,6 +7238,7 @@ static PyMethodDef methods[] = {
     METHODB(test_create_write_buffer, METH_NOARGS),
     METHODB(test_commit_write_buffer, METH_VARARGS),
     METHODB(test_parse_written_data, METH_VARARGS),
+    METHODB(test_frame_presented, METH_VARARGS),
     METHODB(test_draw_overlay_line, METH_VARARGS),
     MND(line_edge_colors, METH_NOARGS) MND(ime_text_around_cursor, METH_NOARGS) MND(line, METH_O) MND(dump_lines_with_attrs, METH_VARARGS)
         MND(cpu_cells, METH_VARARGS) MND(cursor_at_prompt, METH_NOARGS){"visual_line", (PyCFunction)pyvisual_line, METH_VARARGS, ""},

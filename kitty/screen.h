@@ -246,7 +246,7 @@ void screen_save_mode(Screen *, unsigned int);
 bool write_escape_code_to_child(Screen *self, unsigned char which, const char *data);
 void screen_visibility_changed(Screen *self, bool potentially_visible);
 void screen_frame_feedback(Screen *self, const char *data, size_t sz);
-void screen_frame_presented(Screen *self, unsigned period_us, monotonic_t now);
+void screen_frame_presented(Screen *self, unsigned period_us, monotonic_t handed_at);
 void screen_cursor_position(Screen *, unsigned int, unsigned int);
 void screen_cursor_move(Screen *self, unsigned int count /*=1*/, int move_direction /*=-1*/, bool allow_move_to_previous_line);
 void screen_erase_in_line(Screen *, unsigned int, bool);
