@@ -27,7 +27,9 @@ what a program inside the terminal received differs from what it should have
 received, and exits with zero when nothing differs.
 
 Nothing is written outside that directory: the terminal runs with no
-configuration file and keeps its caches there.
+configuration file and keeps its caches there. It is told to send the
+hardware identifiers of tools and pads, which a terminal refuses by default
+and which the sequences expect.
 
 Only one run goes at a time, since the reports are timed and two runs would
 share the machine. The lock is the directory ``/tmp/silkie-rig.lock``: a run

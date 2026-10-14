@@ -145,7 +145,7 @@ env -u WAYLAND_DISPLAY DISPLAY=:$display LIBGL_ALWAYS_SOFTWARE=1 __GLX_VENDOR_LI
     KITTY_CACHE_DIRECTORY="$run/cache" KITTY_CONFIG_DIRECTORY="$run/config" MESA_SHADER_CACHE_DISABLE=true \
     $([ -e /usr/share/glvnd/egl_vendor.d/50_mesa.json ] && echo __EGL_VENDOR_LIBRARY_FILENAMES=/usr/share/glvnd/egl_vendor.d/50_mesa.json) \
     "$tree/kitty/launcher/kitty" --config NONE -o linux_display_server=x11 -o placement_strategy=top-left \
-    -o window_padding_width=0 -o confirm_os_window_close=0 -o remember_window_size=no \
+    -o window_padding_width=0 -o confirm_os_window_close=0 -o tablet_hardware_ids=yes -o remember_window_size=no \
     -o initial_window_width=${size%x*} -o initial_window_height=${size#*x} --debug-input \
     python3 "$here/client.py" --log "$run/client.log" --ready "$run/ready" --stop "$run/stop" --duration 600 ${RIG_CLIENT_ARGS:-} \
     >"$run/kitty.log" 2>&1 &
