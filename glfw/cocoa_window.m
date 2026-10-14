@@ -1602,7 +1602,12 @@ is_modifier_pressed(NSUInteger flags, NSUInteger target_mask, NSUInteger other_m
 
 - (void)scrollWheel:(NSEvent *)event {
     GLFWScrollEvent ev = {
-        .keyboard_modifiers = translateFlags([event modifierFlags]), .unscaled.x = [event scrollingDeltaX], .unscaled.y = [event scrollingDeltaY]};
+        .keyboard_modifiers = translateFlags([event modifierFlags]),
+        .unscaled.x = [event scrollingDeltaX],
+        .unscaled.y = [event scrollingDeltaY],
+        .timestamp = eventTimestamp(event),
+        .timestamp_is_fine = true,
+    };
     ev.x_offset = ev.unscaled.x;
     ev.y_offset = ev.unscaled.y;
     if ([event hasPreciseScrollingDeltas]) {

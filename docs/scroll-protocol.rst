@@ -16,18 +16,12 @@ Framing
 
 Frames are ``OSC 777`` with the ``scroll`` selector::
 
-    <OSC> 777 ; scroll ; <fields> <ST>
+    <OSC> 777 ; scroll ; v=1 : op=query : id=7 <ST>
 
-``<OSC>`` is ``<ESC> ]`` and ``<ST>`` is ``<ESC> \``; ``BEL`` is also
-accepted as a terminator. Fields are ASCII ``key=value`` pairs separated by
-colons, in any order, with decimal integers that carry no leading ``+``.
-Keys are case sensitive. A frame with a duplicate key, a value out of range,
-or a missing required field is rejected as a whole, and a rejected or
-incomplete frame must never reach a program as keystrokes. Spaces in the
-examples below are for clarity only.
-
-Every frame has ``v``, the protocol version, which is ``1``, and ``op``, one
-of ``query``, ``cap``, ``mode`` and ``event``.
+They follow the rules every OSC 777 extension shares, which
+:doc:`extension-framing` gives: the syntax of the fields, which frames are
+rejected, the units and the clock. ``v``, the protocol version, is ``1``, and
+``op`` is one of ``query``, ``cap``, ``mode`` and ``event``.
 
 Discovery
 -------------
@@ -60,8 +54,10 @@ and motion keep using whatever mouse reporting the program asked for. The
 terminal does not scroll its own scrollback either; the program owns the
 scroll. The mode is local to the window and reset by ``RIS``. Programs must
 turn it off when they exit, suspend or fail, and turn it back on when
-resumed. Multiplexers keep it with the rest of the terminal state. There is
-no user setting that overrides the program's choice.
+resumed. Multiplexers keep it with the rest of the terminal state. A
+terminal may let its user refuse the mode, for every program or for some. A
+refused mode reads back as off and scrolling is not reported, so a program
+reads the mode back rather than assume it was granted.
 
 A ``mode`` request without a ``mode`` field reads the state instead of
 changing it, and is answered with::
@@ -76,18 +72,24 @@ Reports
 
 One frame per scroll event::
 
-    <OSC> 777 ; scroll ; v=1 : op=event : dx=0 : dy=250 : x=33 : y=12 : mods=1 : src=1 : phase=2 <ST>
+    <OSC> 777 ; scroll ; v=1 : op=event : t=408211 : tu=73 : dx=0 : dy=250 : x=8448 : y=3072 : mods=1 : src=1 : phase=2 <ST>
 
-All fields are required:
+All fields but ``tu`` are required:
 
 ============ ====================================================================
+``t``        When the system says the scroll happened, in milliseconds on the
+             clock the terminal uses for every extension, see
+             :doc:`extension-framing`. A report the terminal makes itself, of
+             its own coasting for one, has the time it made it
+``tu``       Microseconds past ``t``, ``0`` to ``999``, present only when the
+             system stamps events more finely than a millisecond
 ``dx, dy``   The distance the view should move, in hundredths of a physical
              pixel, positive to the right and down, signed. A trackpad gives
              the distance the system measured; a notched wheel gives its
              lines converted with the terminal's cell size and scroll
              multiplier, so a program applies one unit either way
-``x, y``     The pointer position in physical pixels, zero based, relative to
-             the top left of the cell area
+``x, y``     The pointer position in 1/256 of a physical pixel, signed, zero
+             based, relative to the top left of the cell area
 ``mods``     Shift ``1``, Alt ``2``, Control ``4``, Super ``8``
 ``src``      ``0`` a notched wheel, ``1`` a precise device such as a trackpad
 ``phase``    ``0`` none, ``1`` a finger gesture began, ``2`` it continues,
@@ -101,6 +103,12 @@ A report may carry a distance of zero, in particular with phases ``1``,
 at phase ``4``, since the terminal is already reporting the system's. A
 wheel reports phase ``0`` only.
 
+A terminal or a relay that cannot keep up with the program may merge
+consecutive reports of one device in one phase into one, and nothing else:
+the merged report has the sum of their distances and the other fields of the
+last report merged, its ``t`` and ``tu`` among them. A change of phase is
+never merged or dropped, see :doc:`extension-framing`.
+
 A multiplexer translates ``x,y`` by the pane's origin (borders included),
 forwards every other field unchanged and delivers each report to the pane
 under the pointer.
@@ -113,6 +121,8 @@ silkie reports what the window system gives it:
 * On macOS, pixel distances and all the phases above, from the trackpad
   events of AppKit. Distances are in physical pixels, as ``x,y`` are, so on
   a Retina display they are twice what the system gives in its own units.
+  AppKit stamps its events to the microsecond, so ``tu`` is sent on macOS
+  only: Wayland and X11 stamp them in whole milliseconds.
 * On Wayland, pixel distances from ``wl_pointer`` axis events. The finger
   phases ``1`` to ``3`` come from the axis source and the axis stop, which
   the compositor sends when the fingers lift, on a seat of version 5 or

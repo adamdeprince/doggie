@@ -305,6 +305,12 @@ typedef struct GLFWScrollEvent {
     GLFWMomentumType scroll_phase; // phase of the finger gesture producing the scroll, where the system tells: macOS and Wayland
     GLFWOffsetType offset_type;
     int keyboard_modifiers;
+    // When the system generated the event, on the same clock as monotonic(), and
+    // whether the system stamps its events more finely than a millisecond. Zero
+    // for an event made up here, the momentum scroller's for one, which is then
+    // stamped with the time it is passed on
+    monotonic_t timestamp;
+    bool timestamp_is_fine;
 } GLFWScrollEvent;
 
 // Touch events are reported for direct touch devices, i.e. touchscreens, where

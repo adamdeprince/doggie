@@ -311,7 +311,15 @@ _glfwInputKeyboard(_GLFWwindow *window, GLFWkeyevent *ev) {
 //
 void
 _glfwInputScroll(_GLFWwindow *window, const GLFWScrollEvent *ev) {
-    if (window->callbacks.scroll) window->callbacks.scroll((GLFWwindow *)window, ev);
+    if (!window->callbacks.scroll) return;
+    if (ev->timestamp) {
+        window->callbacks.scroll((GLFWwindow *)window, ev);
+        return;
+    }
+    // An event the system did not make happens when it is passed on
+    GLFWScrollEvent stamped = *ev;
+    stamped.timestamp = monotonic();
+    window->callbacks.scroll((GLFWwindow *)window, &stamped);
 }
 
 // Notifies shared code of a touch event

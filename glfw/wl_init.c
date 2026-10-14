@@ -236,6 +236,8 @@ pointer_handle_axis(void *data UNUSED, struct wl_pointer *pointer UNUSED, uint32
             if (!info.x_start_time) info.x_start_time = ms_to_monotonic_t(time);
             break;
     }
+    info.event_time = time;
+    info.has_event_time = true;
     pointer_handle_axis_common(AXIS_EVENT_CONTINUOUS, axis, value);
 }
 
@@ -244,6 +246,7 @@ pointer_handle_frame(void *data UNUSED, struct wl_pointer *pointer UNUSED) {
     _GLFWwindow *window = _glfw.wl.pointerFocus;
     if (!window) return;
     GLFWScrollEvent ev = {.keyboard_modifiers = _glfw.wl.xkb.states.modifiers};
+    if (info.has_event_time) ev.timestamp = event_time_to_monotonic(info.event_time);
     bool found = false;
 
     if (info.discrete.y_axis_type != AXIS_EVENT_UNKNOWN) {
@@ -295,9 +298,11 @@ pointer_handle_axis_source(void *data UNUSED, struct wl_pointer *pointer UNUSED,
 }
 
 static void
-pointer_handle_axis_stop(void *data UNUSED, struct wl_pointer *wl_pointer UNUSED, uint32_t time UNUSED, uint32_t axis) {
+pointer_handle_axis_stop(void *data UNUSED, struct wl_pointer *wl_pointer UNUSED, uint32_t time, uint32_t axis) {
     _GLFWwindow *window = _glfw.wl.pointerFocus;
     if (!window) return;
+    info.event_time = time;
+    info.has_event_time = true;
     switch (axis) {
         case WL_POINTER_AXIS_VERTICAL_SCROLL:
             info.y_stop_received = true;

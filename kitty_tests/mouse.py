@@ -449,26 +449,62 @@ class TestMouse(BaseTest):
         send('v=1:op=query:id=8')
         self.ae(c.wtcbuf, b'\x1b]777;scroll;v=1:op=cap:id=8:caps=1:mode=1\x1b\\')
         # a trackpad: precise pixels, a finger gesture in progress, shift held
-        self.assertTrue(report(0, -2.5, offset_type=2, phase=3, mods=1, x=33.4, y=12))
-        self.ae(c.wtcbuf, b'\x1b]777;scroll;v=1:op=event:dx=0:dy=250:x=33:y=12:mods=1:src=1:phase=2\x1b\\')
+        self.assertTrue(report(0, -2.5, offset_type=2, phase=3, mods=1, x=33.4, y=12, t=408211, tu=73))
+        self.ae(c.wtcbuf, b'\x1b]777;scroll;v=1:op=event:t=408211:tu=73:dx=0:dy=250:x=8550:y=3072:mods=1:src=1:phase=2\x1b\\')
         # the fingers land, lift without a distance, and are cancelled
         report(1.25, 0, offset_type=2, phase=1)
-        self.ae(c.wtcbuf, b'\x1b]777;scroll;v=1:op=event:dx=-125:dy=0:x=0:y=0:mods=0:src=1:phase=1\x1b\\')
+        self.ae(c.wtcbuf, b'\x1b]777;scroll;v=1:op=event:t=0:dx=-125:dy=0:x=0:y=0:mods=0:src=1:phase=1\x1b\\')
         self.assertTrue(report(0, 0, offset_type=2, phase=4))
-        self.ae(c.wtcbuf, b'\x1b]777;scroll;v=1:op=event:dx=0:dy=0:x=0:y=0:mods=0:src=1:phase=3\x1b\\')
+        self.ae(c.wtcbuf, b'\x1b]777;scroll;v=1:op=event:t=0:dx=0:dy=0:x=0:y=0:mods=0:src=1:phase=3\x1b\\')
         report(0, 0, offset_type=2, phase=5)
-        self.ae(c.wtcbuf, b'\x1b]777;scroll;v=1:op=event:dx=0:dy=0:x=0:y=0:mods=0:src=1:phase=7\x1b\\')
+        self.ae(c.wtcbuf, b'\x1b]777;scroll;v=1:op=event:t=0:dx=0:dy=0:x=0:y=0:mods=0:src=1:phase=7\x1b\\')
         # coasting takes precedence over the finger phase of the same event
         report(0, 4, offset_type=2, momentum=1, phase=4)
-        self.ae(c.wtcbuf, b'\x1b]777;scroll;v=1:op=event:dx=0:dy=-400:x=0:y=0:mods=0:src=1:phase=4\x1b\\')
+        self.ae(c.wtcbuf, b'\x1b]777;scroll;v=1:op=event:t=0:dx=0:dy=-400:x=0:y=0:mods=0:src=1:phase=4\x1b\\')
         # a wheel: one notch left converted to pixels, momentum ended
-        report(120, 0, offset_type=1, momentum=4)
-        self.ae(c.wtcbuf, b'\x1b]777;scroll;v=1:op=event:dx=-5000:dy=0:x=0:y=0:mods=0:src=0:phase=6\x1b\\')
+        report(120, 0, offset_type=1, momentum=4, t=408300, x=-0.5, y=1000.25)
+        self.ae(c.wtcbuf, b'\x1b]777;scroll;v=1:op=event:t=408300:dx=-5000:dy=0:x=-128:y=256064:mods=0:src=0:phase=6\x1b\\')
         send('v=1:op=mode:mode=0')
         self.assertFalse(report(0, 1))
         send('v=1:op=mode:mode=1')
         s.reset()
         self.assertFalse(report(0, 1))
+
+    def test_scroll_frames(self):
+        # A frame from a program follows the rules every extension shares, see docs/extension-framing.rst
+        s = self.create_screen()
+        c = s.callbacks
+
+        def mode():
+            c.clear()
+            parse_bytes(s, b'\x1b]777;scroll;v=1:op=mode\x1b\\')
+            return c.wtcbuf
+
+        def send(body):
+            parse_bytes(s, f'\x1b]777;scroll;{body}\x1b\\'.encode())
+            return mode()
+
+        on = b'\x1b]777;scroll;v=1:op=mode:mode=1\x1b\\'
+        off = b'\x1b]777;scroll;v=1:op=mode:mode=0\x1b\\'
+        # A key the terminal does not know is ignored, so that fields can be added
+        self.ae(send('v=1:op=mode:mode=1:later=x-y'), on)
+        # A frame is rejected as a whole for a duplicate key, a value that is not a decimal integer in range, a field
+        # that is not key=value, a missing v or op, or a version the terminal does not speak
+        for body in (
+            'v=1:op=mode:mode=0:mode=0', 'v=1:op=mode:mode=0:later=1:later=2', 'v=1:v=1:op=mode:mode=0', 'v=1:op=mode:mode=+0',
+            'v=1:op=mode:mode=0x', 'v=1:op=mode:mode=', 'v=1:op=mode:mode=-1', 'v=1:op=mode:mode=99999999999', 'v=1:op=mode:mode=0:',
+            'v=1::op=mode:mode=0', 'v=1:op=mode:mode=0:junk', 'v=1:op=mode:=0', 'op=mode:mode=0', 'v=1:mode=0', 'v=2:op=mode:mode=0',
+        ):
+            self.ae(send(body), on, body)
+        # Fields are at most 127 bytes
+        body = 'v=1:op=mode:mode=0:p='
+        self.ae(send(body + 'x' * (128 - len(body))), on)
+        self.ae(send(body + 'x' * (127 - len(body))), off)
+        # and a query with an id out of range is not answered
+        c.clear()
+        parse_bytes(s, b'\x1b]777;scroll;v=1:op=query:id=-1\x1b\\')
+        parse_bytes(s, b'\x1b]777;scroll;v=1:op=query:id=2147483648\x1b\\')
+        self.ae(c.wtcbuf, b'')
 
     def test_v120_scroll_direction_reversal(self):
         # A high resolution wheel delivers one physical detent as several

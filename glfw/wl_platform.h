@@ -242,6 +242,8 @@ typedef struct _GLFWwindowWayland {
         bool x_stop_received, y_stop_received;
         uint32_t source_type;
         monotonic_t x_start_time, x_stop_time, y_stop_time, y_start_time;
+        uint32_t event_time;  // of the last axis or stop event of the frame, when has_event_time
+        bool has_event_time;
     } pointer_curr_axis_info;
     GLFWOffsetType prev_frame_offset_type;
     bool finger_scroll_active;  // fingers that scroll this window are on the touchpad, between their first axis event and the stop
