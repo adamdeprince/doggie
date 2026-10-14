@@ -746,7 +746,8 @@ Implementations
 * silkie, this fork of kitty: tools on macOS, Wayland and X11; fingers on
   the touchpad on macOS and on touchscreens on Wayland, with contact shape,
   and on X11, without;
-  pads on Wayland, with the groups of their controls; tool actions on macOS;
+  pads on Wayland, with the groups of their controls, and the keys of pads
+  on X11; tool actions on macOS;
   the number of the tablet on macOS and Wayland; the size of a tablet and
   whether it is a display on Wayland and X11; the place of a tool on its
   tablet on X11. ``kitty --debug-input`` logs the tablet, pad and touch
@@ -905,5 +906,24 @@ Wayland does.
   touchpad are not reported. The server also moves the pointer to where the
   first finger lands, which is not passed on as mouse reports. This was
   tried against Xwayland, which makes these events from the touches of its
-  compositor, not with a touchscreen. Pads are not reported on X11: the
-  wacom driver has a device for the pad, which is not read.
+  compositor, not with a touchscreen. Pads come from the libinput and
+  wacom drivers, which give a pad a device of its own of the type ``PAD``,
+  and ``caps`` claims them when the server has one of those drivers. Of a
+  pad, X has only its keys, as the buttons of that device: keys 0 to 2 are
+  buttons 1 to 3, the rest are from button 8 on, and buttons 4 to 7 are the
+  scrolling the drivers make of the rings and strips by default, which is
+  not reported. ``buttons`` in the description is the number of buttons of
+  the device less those four, which is the number of keys under the
+  libinput driver; the wacom driver can give a device more buttons than its
+  pad has keys. Rings and strips are not reported, and the description has
+  none: the libinput driver gives every pad the same axes for two rings and
+  two strips whatever it has, so how many it has cannot be told, and the
+  wacom driver passes on raw values whose direction and units it does not
+  state. There are no groups and no modes, which the libinput driver
+  publishes only in properties of its own that silkie does not read, and a
+  label has nowhere to go. A pad reports to the window with the keyboard
+  focus, but the server delivers its keys only to a window under the
+  pointer, so a pad key pressed with the pointer over another application
+  is not reported. This was tried against a device of the server's test
+  driver marked as a pad with the ``Wacom Tool Type`` property of the wacom
+  driver, not with a pad.

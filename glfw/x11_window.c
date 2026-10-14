@@ -474,6 +474,15 @@ updateSmoothScrolling(_GLFWwindow *window) {
 
     XISelectEvents(_glfw.x11.display, window->x11.handle, &em, 1);
 
+    // The keys of a pad are the buttons of its device
+    for (unsigned i = 0; i < _glfw.x11.xi.num_pad_devices; i++) {
+        unsigned char pmask[XIMaskLen(XI_ButtonRelease)] = {0};
+        XIEventMask pem = {.deviceid = _glfw.x11.xi.pad_devices[i].deviceid, .mask_len = sizeof(pmask), .mask = pmask};
+        XISetMask(pmask, XI_ButtonPress);
+        XISetMask(pmask, XI_ButtonRelease);
+        XISelectEvents(_glfw.x11.display, window->x11.handle, &pem, 1);
+    }
+
     // Tablet tools are followed through their own devices, buttons included
     for (unsigned i = 0; i < _glfw.x11.xi.num_tablet_devices; i++) {
         unsigned char tmask[XIMaskLen(XI_PropertyEvent)] = {0};
@@ -1560,6 +1569,71 @@ handle_xi_tablet_event(_GLFWwindow *window, XITabletDevice *d, XIDeviceEvent *de
     return true;
 }
 
+// Pads {{{
+// The libinput and wacom drivers report the keys of a pad as buttons of a
+// device of its own: keys 0 to 2 as buttons 1 to 3 and the rest from button 8,
+// since 4 to 7 are the scrolling they make by default of its rings and strips.
+// The rings and strips themselves are not reported, see docs/tablet-protocol.rst
+
+static XIPadDevice *
+pad_device_for_id(int deviceid) {
+    for (unsigned i = 0; i < _glfw.x11.xi.num_pad_devices; i++) {
+        if (_glfw.x11.xi.pad_devices[i].deviceid == deviceid) return _glfw.x11.xi.pad_devices + i;
+    }
+    return NULL;
+}
+
+static void
+send_xi_pad_event(XIPadDevice *pad, GLFWTabletPadEventType type, unsigned index, bool pressed, int mods, monotonic_t timestamp) {
+    _GLFWwindow *window = _glfwWindowForId(pad->window_id);
+    if (!window) return;
+    GLFWTabletPadEvent ev = {
+        .type = type,
+        .keyboard_modifiers = mods,
+        .timestamp = timestamp,
+        .device = (uint64_t)pad->deviceid,
+        .num_buttons = pad->num_buttons,
+        .name = pad->name[0] ? pad->name : NULL,
+        .vendor_id = pad->vendor_id,
+        .product_id = pad->product_id,
+        .index = index,
+        .pressed = pressed,
+    };
+    _glfwInputTabletPad(window, &ev);
+}
+
+// The pad no longer reports to the window it did, which lets go of its held keys
+static void
+xi_pad_leave(XIPadDevice *pad) {
+    if (!pad->window_id) return;
+    send_xi_pad_event(pad, GLFW_TABLET_PAD_LEAVE, 0, false, 0, monotonic());
+    pad->window_id = 0;
+}
+
+void
+_glfwX11PadGone(XIPadDevice *pad) {
+    xi_pad_leave(pad);
+}
+
+static void
+handle_xi_pad_event(XIPadDevice *pad, const XIDeviceEvent *de) {
+    const int button = de->detail;
+    if (button < 1 || (button >= 4 && button <= 7)) return;
+    const unsigned index = button <= 3 ? (unsigned)(button - 1) : (unsigned)(button - 5);
+    // A pad has the focus of the window that has the keyboard focus, wherever the pointer is
+    _GLFWwindow *window = _glfwFocusedWindow();
+    if (!window) return;
+    const int mods = translateState(de->mods.effective);
+    const monotonic_t timestamp = event_time_to_monotonic((uint32_t)de->time);
+    if (pad->window_id != window->id) {
+        xi_pad_leave(pad);
+        pad->window_id = window->id;
+        send_xi_pad_event(pad, GLFW_TABLET_PAD_ENTER, 0, false, mods, timestamp);
+    }
+    send_xi_pad_event(pad, GLFW_TABLET_PAD_BUTTON, index, de->evtype == XI_ButtonPress, mods, timestamp);
+}
+// }}}
+
 // Fingers on a touchscreen {{{
 // XInput 2.2 reports each finger in events of its own, with no grouping of the
 // fingers that moved together, so every event becomes a touch event that
@@ -2069,7 +2143,9 @@ processEvent(XEvent *event) {
                     XIDeviceEvent *de = (XIDeviceEvent *)event->xcookie.data;
                     // The server moves the pointer to where a finger lands on a touchscreen. The finger is reported as a touch
                     const bool from_touch = (de->flags & XIPointerEmulated) && isTouchscreen(de->sourceid);
-                    if (de->deviceid != _glfw.x11.xi.master_pointer_id && !from_touch) {
+                    XIPadDevice *pad = event->xcookie.evtype != XI_Motion ? pad_device_for_id(de->deviceid) : NULL;
+                    if (pad) handle_xi_pad_event(pad, de);
+                    else if (de->deviceid != _glfw.x11.xi.master_pointer_id && !from_touch) {
                         // Find the window for this event
                         _GLFWwindow *window = NULL;
                         XITabletDevice *td = tablet_device_for_id(de->deviceid);
@@ -2466,6 +2542,10 @@ processEvent(XEvent *event) {
             }
 
             if (window->cursorMode == GLFW_CURSOR_DISABLED) enableCursor(window);
+            // A pad has the focus of the window that has the keyboard focus
+            for (unsigned i = 0; i < _glfw.x11.xi.num_pad_devices; i++) {
+                if (_glfw.x11.xi.pad_devices[i].window_id == window->id) xi_pad_leave(_glfw.x11.xi.pad_devices + i);
+            }
 
             if (window->monitor && window->autoIconify) _glfwPlatformIconifyWindow(window);
 
@@ -2863,7 +2943,8 @@ _glfwPlatformGetPointerInputClasses(void) {
     // Both come through XInput 2, tools as devices of their own and fingers with the touch events of its version 2.2
     if (!_glfw.x11.xi.available) return 0;
     const bool has_touch = _glfw.x11.xi.major > 2 || (_glfw.x11.xi.major == 2 && _glfw.x11.xi.minor >= 2);
-    return GLFW_POINTER_INPUT_TOOLS | (has_touch ? GLFW_POINTER_INPUT_TOUCHSCREEN : 0);
+    // Pads where the server has a driver that makes them, the libinput or the wacom driver
+    return GLFW_POINTER_INPUT_TOOLS | (has_touch ? GLFW_POINTER_INPUT_TOUCHSCREEN : 0) | (_glfw.x11.xi.has_pad_driver ? GLFW_POINTER_INPUT_PADS : 0);
 }
 
 void
