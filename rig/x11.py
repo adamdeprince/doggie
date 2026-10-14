@@ -21,6 +21,7 @@ import subprocess
 import sys
 import time
 from collections.abc import Callable
+from typing import Any
 
 from play import Rig as Expectations
 from play import px
@@ -104,6 +105,7 @@ class Rig(Expectations):
         self.width, self.height = width, height
         self.centred = 0
         self.display = ''
+        self.udev = self.node = False
         self.devices = {name: Device(os.path.join(sockets, name)) for name in ('stylus', 'eraser', 'touchscreen', 'touchpad', 'mouse')}
 
     def at(self, x: float, y: float) -> dict[str, float]:
@@ -133,11 +135,26 @@ def on_tablet(rig: Rig, x: float, y: float, left: float = 0, width: float = 1) -
     return {'rx': min(65535, round((x / rig.width - left) / width * (AXIS_MAX + 1))), 'ry': min(65535, round(y * (AXIS_MAX + 1) / rig.height))}
 
 
+# The size of the tablet the stylus and the eraser are on, as fakeudev.c gives it for the node xrun.sh names
+UDEV_TABLET = {'w': 224 * 256, 'h': 140 * 256, 'direct': 0}
+
+
+def tablet_facts(rig: Rig) -> dict[str, Any]:
+    """What the description of a tool says of its tablet. The size and whether it is a display come from the kernel,
+    by the device node the driver names, and only with the stand-in libudev does that node lead to a tablet"""
+    if not rig.node:
+        return {}
+    if rig.udev:
+        return dict(UDEV_TABLET)
+    return {k: 'absent' for k in UDEV_TABLET}
+
+
 def stroke(rig: Rig, tool: str = 'stylus') -> None:
     "A pen comes into proximity, hovers, draws a diagonal with rising pressure, lifts and leaves"
     d = rig.devices[tool]
     number = {'stylus': 1, 'eraser': 2}[tool]
     x, y = 100.0, 100.0
+    rig.expect('tablet-pointer:device', f'{tool}: is described', kind=1, tool=number, **tablet_facts(rig))
 
     def sample(note: str, phase: int, buttons: int, force: int) -> None:
         d.motion(**rig.at(x, y), pressure=force)
@@ -324,11 +341,14 @@ def main() -> None:
     p.add_argument('--wait', help='A file that appears when the program in the terminal is ready')
     p.add_argument('--size', default='1280x800', help='The size of the screen and of the window that fills it')
     p.add_argument('--display', default='', help='The X display, for the sequences that change a setting of the server')
+    p.add_argument('--node', action='store_true', help='The tablet devices name a device node, as the drivers of real tablets do')
+    p.add_argument('--udev', action='store_true', help='The terminal has fakeudev.c for its libudev, so that node is a tablet')
     p.add_argument('sequences', nargs='*', help=f'What to play, all by default: {", ".join(SEQUENCES)}')
     args = p.parse_args()
     width, height = map(int, args.size.split('x'))
     rig = Rig(args.sockets, args.expect, width, height)
     rig.display = args.display
+    rig.udev, rig.node = args.udev, args.node
     end = time.monotonic() + 30
     while args.wait and not os.path.exists(args.wait):
         if time.monotonic() > end:

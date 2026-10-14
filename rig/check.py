@@ -6,8 +6,9 @@ Compares what the program in the terminal received, the log of client.py,
 with what play.py says it should have received, and prints the differences.
 
 Reports are compared, frames with op=event. For each expected report the
-fields it names must have the values it gives; fields it does not name are
-not looked at. The pseudo field dt is the difference between the t of a
+fields it names must have the values it gives, where a value of "absent"
+means that the field must not be there; fields it does not name are not
+looked at. The pseudo field dt is the difference between the t of a
 report and the t of the report before it from the same selector.
 
 The descriptions of devices, frames with op=device, are compared in the same
@@ -53,7 +54,7 @@ def reports(path: str) -> list[tuple[float, str, Report]]:
 
 
 def differences(want: Report, got: Report) -> list[str]:
-    return [f'{k}: expected {v}, got {got.get(k, "absent")}' for k, v in want.items() if got.get(k) != v]
+    return [f'{k}: expected {v}, got {got.get(k, "absent")}' for k, v in want.items() if got.get(k, 'absent') != v]
 
 
 def align(want: list[Report], got: list[Report]) -> list[tuple[int | None, int | None]]:

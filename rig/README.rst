@@ -260,6 +260,14 @@ Ubuntu).
                  client with ``--mouse`` and read the ``csi`` lines of its log
 ================ ====================================================================
 
+The tablet devices are given the ``Device Node`` and ``Device Product ID``
+properties that the libinput and wacom drivers give a tablet, by
+``xdevprop.c``, which ``xrun.sh`` builds: they name ``/dev/null`` and the ids
+of the Intuos5, and the terminal gets the stand-in libudev of the Wayland
+half, so the description of each tool has the size of the tablet. With
+``RIG_NO_UDEV`` the terminal asks the real libudev about ``/dev/null``, which
+is no tablet, and the description must have no size.
+
 ``RIG_XINPUT_TEST=1`` also records what ``xinput test-xi2 --root`` sees in
 ``xi2.log``. With a window over the root that is only the raw events; to see
 the events a window gets, with the positions the X server puts in them, run
