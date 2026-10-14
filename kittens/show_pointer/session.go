@@ -42,6 +42,7 @@ var sources = []source{
 	{"ids", "tablet-pointer", 8, 64, false},
 	{"actions", "tablet-pointer", 16, 32, false},
 	{"estimates", "tablet-pointer", 32, 128, false},
+	{"accidental", "tablet-pointer", 64, 256, false},
 	{"gestures", "gesture", 1, 1 | 2 | 4 | 8, true},
 	{"hold", "gesture", 2, 16, false},
 	{"scroll", "scroll", 1, 1, true},

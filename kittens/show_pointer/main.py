@@ -9,9 +9,11 @@ OPTIONS = r"""
 type=list
 Restrict what is turned on to the named sources, a comma separated list that
 can also be given by repeating this option. The sources are :code:`tools`,
-:code:`fingers`, :code:`pads`, :code:`actions` and :code:`estimates` of the
-tablet pointer protocol, :code:`gestures` and :code:`hold` of the gesture
-protocol and :code:`scroll`. The names :code:`tablet-pointer` and
+:code:`fingers`, :code:`pads`, :code:`actions`, :code:`estimates` and
+:code:`accidental` of the tablet pointer protocol, :code:`gestures` and
+:code:`hold` of the gesture protocol and :code:`scroll`. :code:`accidental`
+is the contacts the system takes for accidents, such as a palm or a thumb
+resting on a touchpad, which a terminal otherwise keeps back. The names :code:`tablet-pointer` and
 :code:`gesture` stand for every source of that protocol. By default
 everything the terminal offers is turned on.
 

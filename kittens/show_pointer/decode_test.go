@@ -93,6 +93,8 @@ func TestShowPointerDecode(t *testing.T) {
 		{"777;tablet-pointer;v=1:op=cap:id=42:caps=5:mode=0:w=1200:h=800:cw=12:ch=24",
 			"tablet capabilities can-report=tools, fingers on a touchpad mode=off area=1200x800px cell=12x24px id=42"},
 		{"777;tablet-pointer;v=1:op=mode:mode=7", "tablet mode=tools+fingers+pads"},
+		{"777;tablet-pointer;v=1:op=cap:id=43:caps=357:mode=66:w=1200:h=800:cw=12:ch=24",
+			"tablet capabilities can-report=tools, fingers on a touchpad, tool actions, hardware identifiers, accidental contacts mode=fingers+accidental area=1200x800px cell=12x24px id=43"},
 		// What this program does not know is shown as it came
 		{"777;tablet-pointer;v=1:op=event:kind=9:foo=bar", "tablet event kind=9 foo=bar"},
 		{"777;tablet-pointer;v=1:op=future:x=1", "tablet op=future x=1"},
