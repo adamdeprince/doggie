@@ -299,7 +299,7 @@ def scroll(rig: Rig) -> None:
     ten small steps, as a wheel with fine steps turns. A notch is five lines of 18 pixels with the default settings"""
     d = rig.devices['touchpad']
     x, y = centre(rig)
-    at = {'x': round(x), 'y': round(y)}
+    at = {'x': px(x), 'y': px(y)}
     for step, note in ((120, 'down'), (-120, 'up')):
         d.motion(absolute=False, vscroll=step)
         rig.expect('scroll', f'a notch {note}', dx=0, dy=75 * step, src=0, phase=0, **at)
