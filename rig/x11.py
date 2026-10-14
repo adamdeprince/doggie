@@ -327,10 +327,12 @@ def pads(rig: Rig) -> None:
         d.button(button, False)
         rig.expect('tablet-pointer', f'pads: key {key} up', kind=3, button=key, state=0)
         time.sleep(0.02)
-    # scrolling made of a ring is not a key, and nothing is reported of it
-    for button in (4, 5):
+    # scrolling made of a ring is not a key: no pad report is made of it, and the scroll protocol has it as the wheel
+    # notch it is to every other application
+    for button, dy in ((4, -9000), (5, 9000)):
         d.button(button, True)
         d.button(button, False)
+        rig.expect('scroll', f'button {button} of the pad scrolls as a wheel', dx=0, dy=dy, src=0, phase=0)
     time.sleep(0.05)
     d.button(2, True)
     rig.expect('tablet-pointer', 'pads: key 1 down after the scrolling', kind=3, button=1, state=1)
