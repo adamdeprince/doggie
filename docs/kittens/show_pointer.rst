@@ -45,8 +45,9 @@ scroll its scrollback. To watch only some of the sources, name them::
 
 A system that judges whether a contact is meant, as macOS does for a thumb
 resting on the trackpad, has its judgement shown with each finger as
-``meant`` or ``accidental``. A terminal keeps the accidental contacts from a
-program that does not ask for them, and the kitten asks, so it shows them all.
+``conf=meant`` or ``conf=accidental``. A terminal keeps the accidental
+contacts from a program that does not ask for them, and the kitten asks, so it
+shows them all.
 Leave ``accidental`` out of :option:`--only <kitty +kitten show_pointer --only>`
 to see what a program that does not ask is shown instead: a finger that comes
 to rest is cancelled, and begins again when it moves off.

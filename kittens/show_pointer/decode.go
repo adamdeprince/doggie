@@ -379,8 +379,10 @@ func (self *decoder) contact(r *reader, kind string) []string {
 	if v, ok := r.take_int("grip"); ok {
 		parts = append(parts, "grip="+fraction(v, 65535))
 	}
-	// Whether the system takes a finger to be meant or to be a palm
-	parts = add(parts, named(r, "conf", confidence))
+	// Whether the system takes a finger to be meant or to be a palm, under the name the protocol has for it
+	if name := named(r, "conf", confidence); name != "" {
+		parts = append(parts, "conf="+name)
+	}
 	// Which of the measurements are estimates the terminal may correct later
 	if v, ok := r.take_int("est"); ok {
 		parts = append(parts, "estimated="+measurement_names.describe(v, "+", "none"))
