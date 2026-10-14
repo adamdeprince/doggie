@@ -408,14 +408,16 @@ send_image_to_gpu(GLuint *tex_id, const void *data, GLsizei width, GLsizei heigh
     glTexImage2D(GL_TEXTURE_2D, 0, is_float ? GL_RGBA16F : GL_SRGB_ALPHA, width, height, 0, is_opaque ? GL_RGB : GL_RGBA, is_float ? GL_HALF_FLOAT : GL_UNSIGNED_BYTE, data);
 }
 
+// Copies a texture backed by a GPU surface, a rectangle texture on macOS and a 2D one on Linux, into an image texture
 void
-copy_rectangle_texture_to_texture(GLuint rect_tex_id, GLuint *tex_id, GLsizei width, GLsizei height) {
+copy_surface_texture_to_texture(bool rectangle, GLuint source_tex_id, GLuint *tex_id, GLsizei width, GLsizei height) {
+    const GLenum source_target = rectangle ? GL_TEXTURE_RECTANGLE : GL_TEXTURE_2D;
     GLint current_fb;
     glGetIntegerv(GL_READ_FRAMEBUFFER_BINDING, &current_fb);
     GLuint fb;
     glGenFramebuffers(1, &fb);
     glBindFramebuffer(GL_READ_FRAMEBUFFER, fb);
-    glFramebufferTexture2D(GL_READ_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_RECTANGLE, rect_tex_id, 0);
+    glFramebufferTexture2D(GL_READ_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, source_target, source_tex_id, 0);
     if (!(*tex_id)) glGenTextures(1, tex_id);
     glBindTexture(GL_TEXTURE_2D, *tex_id);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);

@@ -451,27 +451,95 @@ GPU surfaces (zero-copy)
 
 A local client that renders on the GPU, a video player or a drawing canvas, can
 share its output with the terminal without a single CPU copy by transmitting a
-*GPU surface*, ``t=g``. The payload is the name of the surface. On macOS it is
-``iosurface:<id>`` where ``<id>`` is the integer returned by
-``IOSurfaceGetID()``. The surface must be created with ``kIOSurfaceIsGlobal``
-set, otherwise ``IOSurfaceLookup()`` in the terminal cannot find it. Other
-kinds of surface, such as ``dmabuf:``, are reserved
-and refused with ``EINVAL``, as is ``t=g`` on platforms without an
-implementation. The surface must be 32-bit ``BGRA`` or ``RGBA`` with straight
-(not pre-multiplied) alpha, as for ``f=32``. The ``f``, ``s`` and ``v`` keys
-are ignored, the dimensions and pixel format come from the surface itself.
+*GPU surface*, ``t=g``. The payload is the name of the surface: an IOSurface
+on macOS and a dma-buf on Linux, as below. Other kinds of surface are refused
+with ``EINVAL``, as is ``t=g`` on platforms without an implementation.
 Chunking (``m``) and compression (``o``) are not allowed with ``t=g``.
 
-The terminal looks the surface up, keeps a reference to it for as long as the
-image exists, and samples it directly on the GPU. The image is *live*: it
-shows whatever the surface contains at the time the terminal draws, but the
-terminal only redraws when told to. After updating the surface, the client
-sends the refresh action::
+On macOS the payload is ``iosurface:<id>`` where ``<id>`` is the integer
+returned by ``IOSurfaceGetID()``. The surface must be created with
+``kIOSurfaceIsGlobal`` set, otherwise ``IOSurfaceLookup()`` in the terminal
+cannot find it. The surface must be 32-bit ``BGRA`` or ``RGBA`` with straight
+(not pre-multiplied) alpha, as for ``f=32``. The ``f``, ``s`` and ``v`` keys
+are ignored, the dimensions and pixel format come from the surface itself.
+
+On Linux it is a *dma-buf*, the kind of buffer that GPU drivers, Vulkan, GBM
+and udmabuf share between processes. A dma-buf is a file descriptor and has no
+name that another process could look up, so the payload names the process
+that holds it and its descriptors there::
+
+    dmabuf:<pid>:<fourcc>:<modifier>:<fd>,<offset>,<stride>[:<fd>,<offset>,<stride>...]
+
+``<pid>``
+    The id of the process that holds the buffer, as the terminal sees it, so
+    a client in a container with process ids of its own cannot use this.
+
+``<fourcc>``
+    The DRM format, as the four characters of its code. ``AB24``
+    (``DRM_FORMAT_ABGR8888``) has the bytes R, G, B, A in memory, the order of
+    ``f=32``, and ``AR24`` (``DRM_FORMAT_ARGB8888``) has B, G, R, A.
+    ``XB24`` and ``XR24`` are the same with the fourth byte ignored. Alpha is
+    straight, as for ``f=32``.
+
+``<modifier>``
+    The DRM format modifier of the buffer, in decimal or in hexadecimal after
+    ``0x``: ``0`` for a linear buffer, ``0x00ffffffffffffff``
+    (``DRM_FORMAT_MOD_INVALID``) to leave the layout to the driver, or the
+    one the allocator chose.
+
+``<fd>,<offset>,<stride>``
+    One to four planes, each the number of the descriptor in the process that
+    holds the buffer, the offset of the plane in it and its stride in bytes,
+    as the allocator gives them. The formats above have one plane, a modifier
+    can add more.
+
+A dma-buf does not know its size, so ``s`` and ``v`` are required and give the
+width and height in pixels; ``f`` is ignored.
+
+The terminal takes duplicates of the descriptors with ``pidfd_getfd(2)``, as a
+debugger could, and only from a process in the session of the program the
+window runs: the shell of the window and everything started from it. Any other
+process is refused, so that a program cannot have the terminal show the
+buffers of another window or of a program that is not its own. The kernel
+adds a condition of its own, that the terminal be allowed to trace the
+process. With Yama's ``ptrace_scope`` at ``0`` or ``1``, the default of most
+distributions, that holds for the processes the terminal started; at ``2`` or
+``3`` it holds for none, and every dma-buf is refused. A descriptor that is
+not a dma-buf is refused too. The terminal closes its duplicates once the
+buffer is imported, the driver keeping the buffer for as long as the image
+exists, and the client may close its own descriptors whenever it likes after
+the reply.
+
+The buffer is imported with ``EGL_EXT_image_dma_buf_import``, and
+``EGL_EXT_image_dma_buf_import_modifiers`` for a modifier other than ``0``
+and ``0x00ffffffffffffff``, so it works where kitty draws with EGL: under
+Wayland, and not under X11, where it draws with GLX. Every refusal is an
+``EINVAL`` with a message that says why: under X11, a payload that is not as
+above, no ``s`` or ``v``, a process outside the session, a descriptor that
+cannot be taken or is not a dma-buf, or a driver that cannot import the
+buffer. A query, ``a=q``, does all of it but the import, so its answer says
+whether the terminal could take the buffer.
+
+When it copies a dma-buf, the terminal relies on the synchronization that
+the drivers of dma-bufs do implicitly for the rendering the client submitted
+before it sent the command. A client whose driver does not, or that writes
+the buffer with the CPU, finishes its writes before it sends the command.
+
+This was tried on Ubuntu 26.04 with Mesa's software renderer, under a headless
+sway, with buffers made from memory with udmabuf in the formats ``AB24`` and
+``XR24`` and the modifiers ``0`` and ``0x00ffffffffffffff``: the content of
+the buffer showed, and after a refresh its new content. It has not been tried
+with buffers of a GPU driver or with other modifiers.
+
+The terminal keeps the surface for as long as the image exists, and copies
+it into the image on the GPU when it is transmitted and again on every
+refresh, so the image shows what the surface held at the last of those. After
+updating the surface, the client sends the refresh action::
 
     <ESC>_Ga=r,i=31<ESC>\
 
-which marks the image as changed so that the next frame shows the new
-content. The terminal responds ``OK`` unless responses are suppressed with
+which copies the surface again and marks the image as changed so that the
+next frame shows the new content. The terminal responds ``OK`` unless responses are suppressed with
 ``q``. Sending ``a=t`` or ``a=T`` again with ``t=g`` and the same surface
 for an existing image id is equivalent to a refresh followed by the usual
 placement. Deleting the image releases the surface. Animation frames
@@ -484,9 +552,12 @@ Relays such as multiplexers or Goblin Skiff that forward a terminal session
 to another machine cannot pass the surface along, but they can read it. On
 macOS any process of the same user can call ``IOSurfaceLookup()`` with the
 id, then ``IOSurfaceLock()`` and ``IOSurfaceGetBaseAddress()`` to read the
-pixels. A relay can poll the surface, for instance on every refresh action,
-and forward the pixels to the far side with an ordinary ``t=d``
-transmission.
+pixels. On Linux a relay that started the client can take the descriptors
+with ``pidfd_getfd(2)`` as the terminal does, and read the pixels of a linear
+buffer with ``mmap(2)``; the terminal itself refuses a dma-buf named through a
+multiplexer, whose clients are not in the session of the window. A relay can
+poll the surface, for instance on every refresh action, and forward the
+pixels to the far side with an ordinary ``t=d`` transmission.
 
 Querying support and available transmission mediums
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

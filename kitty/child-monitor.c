@@ -641,6 +641,22 @@ parse_input(ChildMonitor *self) {
     return input_read;
 }
 
+// The process the window runs, 0 when it runs none
+pid_t
+child_pid_for_window(id_type window_id) {
+    pid_t ans = 0;
+    if (!the_monitor || !window_id) return 0;
+    children_mutex(lock);
+    for (size_t i = 0; i < the_monitor->count && !ans; i++) {
+        if (children[i].id == window_id) ans = children[i].pid;
+    }
+    for (size_t i = 0; i < add_queue_count && !ans; i++) {
+        if (add_queue[i].id == window_id) ans = add_queue[i].pid;
+    }
+    children_mutex(unlock);
+    return ans;
+}
+
 static bool
 mark_child_for_close(ChildMonitor *self, id_type window_id) {
     bool found = false;

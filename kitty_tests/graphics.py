@@ -3,6 +3,7 @@
 
 import os
 import random
+import sys
 import tempfile
 import time
 import unittest
@@ -575,6 +576,100 @@ class TestGraphics(BaseTest):
         self.assertRaises(FileNotFoundError, shm_unlink, name)  # check that file was deleted
         s.reset()
         self.assertEqual(g.disk_cache.total_size, 0)
+
+    @unittest.skipUnless(sys.platform == 'linux', 'dma-bufs are Linux only')
+    def test_dmabuf_surfaces(self):
+        import fcntl
+        import struct
+        import subprocess
+        from kitty.fast_data_types import dmabuf_parse_spec, dmabuf_take_fds
+        s, g, pl, sl = load_helpers(self)
+
+        # What a dma-buf surface names
+        self.ae(dmabuf_parse_spec(b'dmabuf:42:AB24:0:7,0,256'), (42, 'AB24', 0, ((7, 0, 256),)))
+        self.ae(dmabuf_parse_spec(b'dmabuf:42:XR24:0x0100000000000002:7,0,1024:7,65536,128'),
+                (42, 'XR24', 0x0100000000000002, ((7, 0, 1024), (7, 65536, 128))))
+        self.ae(dmabuf_parse_spec(b'dmabuf:1:AR24:0x00ffffffffffffff:3,4096,64')[2], 0x00ffffffffffffff)
+        for bad, msg in (
+            (b'iosurface:1', 'Not a dma-buf'), (b'dmabuf:0:AB24:0:7,0,256', 'process id'), (b'dmabuf:-1:AB24:0:7,0,256', 'process id'),
+            (b'dmabuf:4294967296:AB24:0:7,0,256', 'process id'), (b'dmabuf:42:AB2:0:7,0,256', 'four characters'),
+            (b'dmabuf:42:NV12:0:7,0,256', 'Unsupported dma-buf format: NV12'), (b'dmabuf:42:AB24:x:7,0,256', 'modifier'),
+            (b'dmabuf:42:AB24:0x10000000000000000:7,0,256', 'modifier'), (b'dmabuf:42:AB24:0:', 'plane 1'), (b'dmabuf:42:AB24:0:7,0,0', 'plane 1'),
+            (b'dmabuf:42:AB24:0:7,0', 'plane 1'), (b'dmabuf:42:AB24:0:7,0,256;', 'after plane 1'), (b'dmabuf:42:AB24:0:7,0,256:', 'plane 2'),
+            (b'dmabuf:42:AB24:0:' + b':'.join([b'7,0,256'] * 5), 'at most 4 planes'),
+        ):
+            with self.assertRaises(ValueError, msg=bad) as cm:
+                dmabuf_parse_spec(bad)
+            self.assertIn(msg, str(cm.exception), bad)
+
+        # Which processes the terminal takes descriptors from: only those in the session of the window's program
+        me = os.getpid()
+        r, w = os.pipe()
+        try:
+            def take(spec, session_of=me):
+                with self.assertRaises(ValueError) as cm:
+                    dmabuf_take_fds(spec.encode(), session_of)
+                return str(cm.exception)
+            self.assertIn('no program in this window', take(f'dmabuf:{me}:AB24:0:{r},0,4', 0))
+            self.assertIn('is not a dma-buf', take(f'dmabuf:{me}:AB24:0:{r},0,4'))
+            self.assertIn('Cannot take descriptor 9999', take(f'dmabuf:{me}:AB24:0:9999,0,4'))
+            # a process id nobody has, pid_max itself is never given out
+            with open('/proc/sys/kernel/pid_max') as f:
+                pid_max = int(f.read())
+            self.assertIn('Cannot open process', take(f'dmabuf:{pid_max}:AB24:0:{r},0,4'))
+            other = subprocess.Popen(['sleep', '30'], start_new_session=True)
+            try:
+                self.assertIn('is not in the session', take(f'dmabuf:{other.pid}:AB24:0:0,0,4'))
+                # and the other way round, a program in a session of its own cannot name the test's process
+                self.assertIn('is not in the session', take(f'dmabuf:{me}:AB24:0:{r},0,4', other.pid))
+            finally:
+                other.kill()
+                other.wait()
+        finally:
+            os.close(r), os.close(w)
+
+        # The graphics command: dma-bufs are imported with EGL, which the terminal has only on Wayland
+        self.assertIn('Wayland', pl(f'dmabuf:{me}:AB24:0:0,0,4', t='g', s=1, v=1, i=5))
+
+        # A real dma-buf, made from memory with udmabuf where the user may
+        try:
+            dev = os.open('/dev/udmabuf', os.O_RDWR)
+        except OSError:
+            return
+        try:
+            mfd = os.memfd_create('kitty-test', os.MFD_ALLOW_SEALING)
+            os.ftruncate(mfd, 4096)
+            fcntl.fcntl(mfd, 1033, 2)  # F_ADD_SEALS, F_SEAL_SHRINK, which udmabuf requires
+            # UDMABUF_CREATE: _IOW('u', 0x42, struct udmabuf_create {u32 memfd, flags; u64 offset, size})
+            # a mutable buffer, so that the result of the call, the new descriptor, comes back
+            dmabuf = fcntl.ioctl(dev, 0x40187542, bytearray(struct.pack('IIQQ', mfd, 1, 0, 4096)))
+        except OSError:
+            dmabuf = -1
+        finally:
+            os.close(dev)
+        if dmabuf < 0:
+            os.close(mfd)
+            return
+        try:
+            fds = dmabuf_take_fds(f'dmabuf:{me}:AB24:0:{dmabuf},0,64'.encode(), me)
+            self.ae(len(fds), 1)
+            self.assertNotEqual(fds[0], dmabuf)
+            self.ae(os.fstat(fds[0]).st_ino, os.fstat(dmabuf).st_ino)
+            self.assertFalse(os.get_inheritable(fds[0]))
+            os.close(fds[0])
+            # from another process of the same session, which the terminal may trace being its parent
+            child = subprocess.Popen(['sleep', '30'], pass_fds=(dmabuf,))
+            try:
+                fds = dmabuf_take_fds(f'dmabuf:{child.pid}:AB24:0:{dmabuf},0,64:{dmabuf},0,64'.encode(), me)
+                self.ae(len(fds), 2)
+                for fd in fds:
+                    self.ae(os.fstat(fd).st_ino, os.fstat(dmabuf).st_ino)
+                    os.close(fd)
+            finally:
+                child.kill()
+                child.wait()
+        finally:
+            os.close(dmabuf), os.close(mfd)
 
     def test_load_images_from_file_edge_cases(self):
         s, g, pl, sl = load_helpers(self)
