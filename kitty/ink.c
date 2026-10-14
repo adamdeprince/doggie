@@ -13,6 +13,7 @@
 #include "state.h"
 #include "screen.h"
 #include "control-codes.h"
+#include "extension-fields.h"
 #include <math.h>
 
 // The width of the stroke is worked out exactly as the specification writes it
@@ -79,11 +80,11 @@ screen_ink_reset(Screen *self) {
 }
 
 static void
-set_brush(Screen *self, char *fields[], size_t count) {
+set_brush(Screen *self, const ExtensionFields *f) {
     InkBrush b = {.tools = DEFAULT_TOOLS, .remaining = 1, .exponent = 1, .w0 = -1, .w1 = -1, .fill = "#000000"};
     bool has_first = false;
-    for (size_t i = 0; i < count; i++) {
-        const char *key = fields[i], *val = key + strlen(key) + 1;
+    for (size_t i = 0; i < f->count; i++) {
+        const char *key = f->keys[i], *val = f->values[i];
         if (!strcmp(key, "i")) {
             if (!parse_u32(val, &b.image)) return;
         } else if (!strcmp(key, "g")) {
@@ -117,29 +118,18 @@ set_brush(Screen *self, char *fields[], size_t count) {
     self->ink.on = true;
 }
 
+// A frame from the program, see docs/extension-framing.rst for what is rejected
 void
 screen_ink(Screen *self, const char *data, size_t sz) {
-    char buf[128], reply[320], *saveptr = NULL, *fields[24];
-    const char *op = "";
-    int v = 0, mode = -1, id = -1;
-    size_t count = 0;
-    if (sz >= sizeof(buf)) return;
-    memcpy(buf, data, sz);
-    buf[sz] = 0;
-    for (char *tok = strtok_r(buf, ":", &saveptr); tok; tok = strtok_r(NULL, ":", &saveptr)) {
-        char *val = strchr(tok, '=');
-        if (!val) return;
-        *val++ = 0;
-        if (!strcmp(tok, "v")) v = atoi(val);
-        else if (!strcmp(tok, "op")) op = val;
-        else if (!strcmp(tok, "mode")) mode = atoi(val);
-        else if (!strcmp(tok, "id")) id = atoi(val);
-        else if (count < arraysz(fields)) fields[count++] = tok;
-    }
-    if (v != 1) return;
+    ExtensionFields f;
+    char reply[320];
+    const char *op;
+    long long mode = -1, id = -1;
+    if (!extension_fields_parse(&f, data, sz) || !extension_frame_header(&f, 1, &op)) return;
+    if (!extension_field_int(&f, "mode", 0, INT32_MAX, &mode) || !extension_field_int(&f, "id", 0, INT32_MAX, &id)) return;
     const InkBrush *b = &self->ink.brush;
     if (!strcmp(op, "query") && id >= 0) {
-        int n = snprintf(reply, sizeof(reply), "777;ink;v=1:op=cap:id=%d:caps=1:mode=%d", id, self->ink.on);
+        int n = snprintf(reply, sizeof(reply), "777;ink;v=1:op=cap:id=%lld:caps=1:mode=%d", id, self->ink.on);
         if (b->image) {
             char w0[32], w1[32], e[32];
             snprintf(
@@ -153,7 +143,7 @@ screen_ink(Screen *self, const char *data, size_t sz) {
             write_escape_code_to_child(self, ESC_OSC, reply);
         } else if (mode == 0) screen_ink_off(self);
         else if (mode == 1 && b->image) self->ink.on = true;  // with the brush last given, there is nothing to turn on without one
-    } else if (!strcmp(op, "brush")) set_brush(self, fields, count);
+    } else if (!strcmp(op, "brush")) set_brush(self, &f);
 }
 
 static InkStroke *

@@ -27,23 +27,16 @@ Framing
 
 Frames are ``OSC 777`` with the ``ink`` selector::
 
-    <OSC> 777 ; ink ; <fields> <ST>
+    <OSC> 777 ; ink ; v=1 : op=query : id=42 <ST>
 
-``<OSC>`` is ``<ESC> ]`` and ``<ST>`` is ``<ESC> \``; ``BEL`` is also
-accepted as a terminator. Fields are ASCII ``key=value`` pairs separated by
-colons, in any order. Values are decimal integers that carry no leading
-``+``, except the widths and the exponent of a brush, which are numbers as
-the records of a vector image write them and may have a fraction, and its
-color. Keys are case sensitive. A frame from a program is at most 127 bytes
-after the selector. A frame with a value out of range or a missing required
-field is rejected as a whole and changes nothing, and a rejected or
-incomplete frame must never reach a program as keystrokes. Spaces in the
-examples below are for clarity only.
-
-Every frame has ``v``, the protocol version, which is ``1``, and ``op``, one
-of ``query``, ``cap``, ``brush`` and ``mode``. A frame with any other version
-is ignored. As in the tablet pointer protocol, a program ignores a frame
-whose ``op`` it does not know and any field it does not know.
+They follow the rules every OSC 777 extension shares, which
+:doc:`extension-framing` gives: the syntax of the fields, which frames are
+rejected, among them every frame of more than 127 bytes, and the units.
+Values are decimal integers, except the widths and the exponent of a brush,
+which are numbers as the records of a vector image write them and may have a
+fraction, and its color. ``v``, the protocol version, is ``1``, and ``op`` is
+one of ``query``, ``cap``, ``brush`` and ``mode``. The terminal sends only
+replies, which are never merged or dropped.
 
 Discovery
 -------------
@@ -130,8 +123,10 @@ without a ``mode`` field reads the state and is answered with::
 The mode and the brush are local to the window. ``RIS`` turns ink off and
 forgets the brush. Programs must turn ink off when they exit, suspend or
 fail, and give the brush again when resumed; a program resuming after a
-reconnection queries to learn what survived rather than assuming. There is
-no user setting that overrides the program's choice.
+reconnection queries to learn what survived rather than assuming. A terminal
+may let its user refuse ink, for every program or for some. A refused mode
+reads back as off and nothing is drawn, so a program reads the mode back
+rather than assume it was granted.
 
 Ink needs the reports of tools: the window must have bit ``1`` of the mode of
 the :doc:`tablet-protocol` on. Without it a pen is a mouse, there are no
