@@ -272,8 +272,26 @@ func TestShowPointerModes(t *testing.T) {
 	ft := new_fake_terminal(t, false, false)
 	ft.session.start()
 	ft.written()
-	ft.feed(osc("tablet-pointer", "v=1:op=cap:id=2:caps=255:mode=0:w=1200:h=800:cw=12:ch=24"), osc("gesture", "v=1:op=cap:id=3:caps=31:mode=0"), da1)
+	ft.feed(osc("tablet-pointer", "v=1:op=cap:id=2:caps=511:mode=0:w=1200:h=800:cw=12:ch=24"), osc("gesture", "v=1:op=cap:id=3:caps=31:mode=0"), da1)
 	// Hardware identifiers are offered, but were not asked for
+	if diff := cmp.Diff(
+		osc("tablet-pointer", "v=1:op=mode:mode=119")+osc("tablet-pointer", "v=1:op=mode")+osc("gesture", "v=1:op=mode:mode=3")+osc("gesture", "v=1:op=mode")+"\x1b[c",
+		ft.written()); diff != "" {
+		t.Fatalf("The modes asked for are wrong:\n%s", diff)
+	}
+	ft.feed(osc("tablet-pointer", "v=1:op=mode:mode=119"), osc("gesture", "v=1:op=mode:mode=3"), da1)
+	if diff := cmp.Diff("tablet-pointer: reporting tools, fingers, pads, tool actions, estimated and predicted samples, accidental contacts (mode=119).", last(ft, 3)); diff != "" {
+		t.Fatalf("The modes turned on are described wrongly:\n%s", diff)
+	}
+	if diff := cmp.Diff("gesture: reporting pinch, rotate, swipe and smart zoom, hold (mode=3).", last(ft, 2)); diff != "" {
+		t.Fatalf("The modes turned on are described wrongly:\n%s", diff)
+	}
+
+	// The contacts a system takes for accidents are asked for only of a terminal that has them
+	ft = new_fake_terminal(t, false, false)
+	ft.session.start()
+	ft.written()
+	ft.feed(osc("tablet-pointer", "v=1:op=cap:id=2:caps=255:mode=0:w=1200:h=800:cw=12:ch=24"), osc("gesture", "v=1:op=cap:id=3:caps=31:mode=0"), da1)
 	if diff := cmp.Diff(
 		osc("tablet-pointer", "v=1:op=mode:mode=55")+osc("tablet-pointer", "v=1:op=mode")+osc("gesture", "v=1:op=mode:mode=3")+osc("gesture", "v=1:op=mode")+"\x1b[c",
 		ft.written()); diff != "" {

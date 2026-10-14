@@ -50,9 +50,9 @@ func (self value_names) name(value int64) string {
 }
 
 var (
-	tablet_cap_names  = bit_names{"tools", "fingers on a touchscreen", "fingers on a touchpad", "the shape of a finger contact", "pads", "tool actions", "hardware identifiers", "estimated and predicted samples"}
-	tablet_mode_names = bit_names{"tools", "fingers", "pads", "hardware identifiers", "tool actions", "estimated and predicted samples"}
-	tablet_mode_short = bit_names{"tools", "fingers", "pads", "ids", "actions", "estimates"}
+	tablet_cap_names  = bit_names{"tools", "fingers on a touchscreen", "fingers on a touchpad", "the shape of a finger contact", "pads", "tool actions", "hardware identifiers", "estimated and predicted samples", "accidental contacts"}
+	tablet_mode_names = bit_names{"tools", "fingers", "pads", "hardware identifiers", "tool actions", "estimated and predicted samples", "accidental contacts"}
+	tablet_mode_short = bit_names{"tools", "fingers", "pads", "ids", "actions", "estimates", "accidental"}
 	measurement_names = bit_names{"pressure", "tilt", "twist", "tangent", "z", "distance", "wheel", "shape", "place", "grip"}
 	button_names      = bit_names{"tip", "barrel", "barrel2", "back", "forward", "barrel3"}
 	modifier_names    = bit_names{"shift", "alt", "ctrl", "super"}
