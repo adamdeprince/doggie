@@ -1527,14 +1527,15 @@ handle_xi_tablet_event(_GLFWwindow *window, XITabletDevice *d, XIDeviceEvent *de
         // X buttons 1, 2 and 3 are the tip, BTN_STYLUS and BTN_STYLUS2
         .buttons = (buttons & 2 ? GLFW_TABLET_BUTTON_TIP : 0) | (buttons & 4 ? GLFW_TABLET_BUTTON_BARREL : 0) | (buttons & 8 ? GLFW_TABLET_BUTTON_BARREL2 : 0) |
                    (buttons & 256 ? GLFW_TABLET_BUTTON_BACK : 0) | (buttons & 512 ? GLFW_TABLET_BUTTON_FORWARD : 0),
-        .axes = (d->pressure.number >= 0 ? GLFW_TABLET_PRESSURE : 0) | (d->tilt_x.number >= 0 && d->tilt_y.number >= 0 ? GLFW_TABLET_TILT : 0) |
+        // Tilt that cannot be turned to the axes of the screen is left out, rather than reported on those of the tablet
+        .axes = (d->pressure.number >= 0 ? GLFW_TABLET_PRESSURE : 0) | (d->tilt_x.number >= 0 && d->tilt_y.number >= 0 && d->has_tilt_map ? GLFW_TABLET_TILT : 0) |
                 (d->rotation.number >= 0 ? GLFW_TABLET_TWIST : 0) | (d->wheel.number >= 0 ? GLFW_TABLET_TANGENT : 0) | (d->distance.number >= 0 ? GLFW_TABLET_DISTANCE : 0),
         .x = x,
         .y = y,
         .pressure = norm(d->pressure),
         .distance = norm(d->distance),
-        .tilt_x = d->tilt_x.value,
-        .tilt_y = d->tilt_y.value,
+        .tilt_x = d->has_tilt_map ? d->tilt_map[0] * d->tilt_x.value + d->tilt_map[1] * d->tilt_y.value : d->tilt_x.value,
+        .tilt_y = d->has_tilt_map ? d->tilt_map[2] * d->tilt_x.value + d->tilt_map[3] * d->tilt_y.value : d->tilt_y.value,
         .twist = d->rotation.value,
         .tangent = 2 * norm(d->wheel) - 1,
         .device = (uint64_t)d->deviceid,
@@ -2163,7 +2164,7 @@ processEvent(XEvent *event) {
                 else if (event->xcookie.evtype == XI_PropertyEvent) {
                     const XIPropertyEvent *pe = (XIPropertyEvent *)event->xcookie.data;
                     XITabletDevice *td = pe->property != None ? tablet_device_for_id(pe->deviceid) : NULL;
-                    if (td && pe->property == _glfw.x11.xi.COORDINATE_TRANSFORMATION_MATRIX) {
+                    if (td && (pe->property == _glfw.x11.xi.COORDINATE_TRANSFORMATION_MATRIX || pe->property == _glfw.x11.xi.WACOM_ROTATION)) {
                         _glfwGrabErrorHandlerX11();
                         read_xi_tablet_mapping(td);
                         _glfwReleaseErrorHandlerX11();

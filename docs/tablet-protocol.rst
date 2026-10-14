@@ -778,6 +778,31 @@ does not claim ``caps`` bit ``256`` anywhere. It describes a tool or a pad
 again when what it said of it has changed, which at present only a pad on
 Wayland does.
 
+Tilt is defined here on the axes of the screen. A system that turns a
+tablet, for a left-handed user or for a pen display that stands rotated,
+turns the position with it, and not always the tilt, which the tablet
+measures on its own axes. silkie turns tilt where the system says how the
+tablet is turned, and passes it on as it is given where it does not:
+
+* libinput turns a tablet only by a half turn, for left-handed use, and
+  then turns tilt and twist with the position itself.
+* On Wayland, ``tablet-v2`` gives tilt on the axes of the tablet, and a
+  compositor that maps a tablet to a rotated output, or turns it by a
+  calibration of its own, says nothing of that. Tilt is passed on as
+  given, so on a pen display turned a quarter turn it is on the axes of
+  the panel, not of the screen.
+* On X11 the wacom driver's ``Wacom Rotation`` and the server's
+  ``Coordinate Transformation Matrix`` turn the position and leave tilt on
+  the axes of the tablet. silkie reads both, again whenever they change,
+  and turns tilt by them, when the matrix keeps the axes at right angles,
+  as a quarter turn, a half turn, a mirror or a map to part of the screen
+  does. Tilt is left out for a matrix that turns the tablet by any other
+  angle or flattens it. Twist is not turned.
+* AppKit gives tilt as the tablet driver reports it, after whatever
+  orientation the user set in the driver.
+
+None of this was tried with a turned tablet.
+
 * On macOS, tablet data arrives with the mouse events of the tablet driver.
   Tilt is scaled from the driver's fraction of maximum tilt assuming 60
   degrees, as Wacom tablets report, and ``z`` is the driver's absolute Z.

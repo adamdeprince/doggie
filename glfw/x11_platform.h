@@ -287,6 +287,13 @@ typedef struct XITabletDevice {
     // has_unmap, which is unset when the matrix cannot be read or undone
     double unmap[9];
     bool has_unmap;
+    // Tilt is on the axes of the tablet, which the wacom driver's rotation and
+    // the server's matrix turn for the position and not for it. This takes it
+    // to those of the screen: x = tilt_map[0] * tx + tilt_map[1] * ty and y =
+    // tilt_map[2] * tx + tilt_map[3] * ty. Only with has_tilt_map, which is
+    // unset when they turn the tablet by other than a multiple of a right angle
+    int tilt_map[4];
+    bool has_tilt_map;
     // The libinput driver's area ratio is set: it stretches one axis and cuts
     // off what falls past its end, so x and y no longer span the tablet
     bool area_cropped;
@@ -547,7 +554,7 @@ typedef struct _GLFWlibraryX11 {
         Time last_smooth_scroll_time;
         int master_pointer_id;
         Atom LIBINPUT_SCROLL_METHOD_ENABLED, LIBINPUT_TAPPING, COORDINATE_TRANSFORMATION_MATRIX, FLOAT;
-        Atom DEVICE_NODE, DEVICE_PRODUCT_ID, LIBINPUT_AREA_RATIO;
+        Atom DEVICE_NODE, DEVICE_PRODUCT_ID, LIBINPUT_AREA_RATIO, WACOM_ROTATION;
         // The type both drivers give a pad, and the property the wacom driver says it with too
         Atom PAD_TYPE, WACOM_TOOL_TYPE;
         // A driver that can have pads has made one of these atoms, a property it gives its devices

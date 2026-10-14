@@ -180,10 +180,59 @@ tablet_tool_from_name(const char *name) {
 // the position in an event is the result. The matrix is read here so that it
 // can be undone, which is how the place on the tablet is had. The caller has
 // to have grabbed the error handler, since the device may be gone
+// The 2 by 2 matrix of the rotation the wacom driver applies to the position of
+// a tool, in its Rotate option or the Wacom Rotation property: none, a quarter
+// turn clockwise, one counterclockwise or a half turn
+static void
+wacom_rotation_matrix(int deviceid, int ans[4]) {
+    static const int rotations[4][4] = {{1, 0, 0, 1}, {0, 1, -1, 0}, {0, -1, 1, 0}, {-1, 0, 0, -1}};
+    int which = 0;
+    Atom type = None;
+    int format = 0;
+    unsigned long nitems = 0, bytes_after = 0;
+    unsigned char *data = NULL;
+    if (_glfw.x11.xi.WACOM_ROTATION != None) {
+        XIGetProperty(_glfw.x11.display, deviceid, _glfw.x11.xi.WACOM_ROTATION, 0, 1, False, XA_INTEGER, &type, &format, &nitems, &bytes_after, &data);
+        if (data) {
+            if (type == XA_INTEGER && format == 8 && nitems == 1 && data[0] < 4) which = data[0];
+            XFree(data);
+        }
+    }
+    memcpy(ans, rotations[which], sizeof(rotations[which]));
+}
+
+static int
+sign_of(double v) {
+    return v > 0 ? 1 : (v < 0 ? -1 : 0);
+}
+
+// Takes tilt from the axes of the tablet to those of the screen, through the
+// rotation of the driver and then the matrix m of the server, of which only
+// one that keeps the axes at right angles to each other, as a map to the
+// screen turned by a quarter or a half turn does, says where tilt goes
+static void
+set_xi_tilt_map(XITabletDevice *td, const double *m) {
+    int c[4];
+    if (!m || (m[1] == 0 && m[3] == 0)) c[0] = m ? sign_of(m[0]) : 1, c[1] = 0, c[2] = 0, c[3] = m ? sign_of(m[4]) : 1;
+    else if (m[0] == 0 && m[4] == 0) c[0] = 0, c[1] = sign_of(m[1]), c[2] = sign_of(m[3]), c[3] = 0;
+    else {
+        td->has_tilt_map = false;
+        return;
+    }
+    int r[4];
+    wacom_rotation_matrix(td->deviceid, r);
+    td->tilt_map[0] = c[0] * r[0] + c[1] * r[2];
+    td->tilt_map[1] = c[0] * r[1] + c[1] * r[3];
+    td->tilt_map[2] = c[2] * r[0] + c[3] * r[2];
+    td->tilt_map[3] = c[2] * r[1] + c[3] * r[3];
+    // a matrix that flattens an axis leaves tilt nowhere
+    td->has_tilt_map = td->tilt_map[0] * td->tilt_map[3] - td->tilt_map[1] * td->tilt_map[2] != 0;
+}
+
 void
 read_xi_tablet_mapping(XITabletDevice *td) {
     td->has_unmap = false;
-    if (td->x.number < 0 || td->y.number < 0) return;
+    set_xi_tilt_map(td, NULL);
     Atom type = None;
     int format = 0;
     unsigned long nitems = 0, bytes_after = 0;
@@ -196,6 +245,11 @@ read_xi_tablet_mapping(XITabletDevice *td) {
         float f[9];
         memcpy(f, data, sizeof(f));
         const double m[9] = {f[0], f[1], f[2], f[3], f[4], f[5], f[6], f[7], f[8]};
+        set_xi_tilt_map(td, m);
+        if (td->x.number < 0 || td->y.number < 0) {
+            XFree(data);
+            return;
+        }
         const double det = m[0] * (m[4] * m[8] - m[5] * m[7]) - m[1] * (m[3] * m[8] - m[5] * m[6]) + m[2] * (m[3] * m[7] - m[4] * m[6]);
         if (fabs(det) > 1e-9) {
             const double inverse[9] = {
@@ -296,6 +350,7 @@ read_xi_tablet_device(const XIDeviceInfo *device) {
         }
     }
     snprintf(td.name, sizeof(td.name), "%s", device->name);
+    set_xi_tilt_map(&td, NULL);
     if (has_tablet) {
         read_xi_tablet_mapping(&td);
         read_xi_tablet_node(&td);
@@ -759,6 +814,7 @@ initExtensions(void) {
     _glfw.x11.xi.LIBINPUT_AREA_RATIO = XInternAtom(_glfw.x11.display, "libinput Tablet Tool Area Ratio", False);
     // These are looked up and not made, so that what exists says which drivers the server has
     _glfw.x11.xi.WACOM_TOOL_TYPE = XInternAtom(_glfw.x11.display, "Wacom Tool Type", True);
+    _glfw.x11.xi.WACOM_ROTATION = XInternAtom(_glfw.x11.display, "Wacom Rotation", False);
     _glfw.x11.xi.has_pad_driver =
         _glfw.x11.xi.WACOM_TOOL_TYPE != None || XInternAtom(_glfw.x11.display, "libinput Send Events Mode Enabled", True) != None;
     _glfw.x11.xi.PAD_TYPE = XInternAtom(_glfw.x11.display, "PAD", False);
