@@ -256,6 +256,10 @@ Ubuntu).
 ``touch``        A touchscreen through XInput 2.2: one finger, then two
 ``gestures``     The gestures of XInput 2.4: pinches and a swipe
 ``scroll``       The scroll axis: a notch each way, then a notch in ten steps
+``pads``         The keys of a pad: a device of thirteen buttons, as the wacom driver
+                 makes one for a pad of nine keys, marked as a pad with its ``Wacom
+                 Tool Type`` property. Buttons 4 to 7 are the scrolling of a ring
+                 and must not be reported as keys
 ``mouse``        A mouse moves in eight steps and stops. Nothing is checked: run the
                  client with ``--mouse`` and read the ``csi`` lines of its log
 ================ ====================================================================
@@ -290,4 +294,4 @@ Limits
 * The terminal has to be the only client of the proxy, and sway must have no
   input devices of its own.
 * On X11 a tool has a position, a pressure and buttons, nothing else, and
-  there is no pad: that is all the test driver of the X server has.
+  a pad has only keys: that is all the test driver of the X server has.

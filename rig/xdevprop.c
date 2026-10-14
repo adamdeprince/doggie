@@ -7,10 +7,12 @@
 //
 //   xdevprop <device name> string <property> <value>
 //   xdevprop <device name> int32 <property> <value> [<value> ...]
+//   xdevprop <device name> atom <property> <atom name>
 
 #include <X11/Xatom.h>
 #include <X11/Xlib.h>
 #include <X11/extensions/XInput2.h>
+#include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -18,8 +20,9 @@
 
 int
 main(int argc, char **argv) {
-    if (argc < 5 || (strcmp(argv[2], "string") && strcmp(argv[2], "int32")) || (!strcmp(argv[2], "string") && argc != 5)) {
-        fprintf(stderr, "usage: %s <device name> string <property> <value> | <device name> int32 <property> <value>...\n", argv[0]);
+    const bool single = argc > 2 && (!strcmp(argv[2], "string") || !strcmp(argv[2], "atom"));
+    if (argc < 5 || (!single && strcmp(argv[2], "int32")) || (single && argc != 5)) {
+        fprintf(stderr, "usage: %s <device name> string|atom <property> <value> | <device name> int32 <property> <value>...\n", argv[0]);
         return 2;
     }
     Display *display = XOpenDisplay(NULL);
@@ -40,6 +43,9 @@ main(int argc, char **argv) {
     const Atom property = XInternAtom(display, argv[3], False);
     if (!strcmp(argv[2], "string")) {
         XIChangeProperty(display, deviceid, property, XA_STRING, 8, XIPropModeReplace, (unsigned char *)argv[4], (int)strlen(argv[4]));
+    } else if (!strcmp(argv[2], "atom")) {
+        const uint32_t value = (uint32_t)XInternAtom(display, argv[4], False);
+        XIChangeProperty(display, deviceid, property, XA_ATOM, 32, XIPropModeReplace, (unsigned char *)&value, 1);
     } else {
         const int n = argc - 4;
         uint32_t *values = calloc((size_t)n, sizeof(uint32_t));

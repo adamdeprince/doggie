@@ -130,6 +130,7 @@ Section "ServerLayout"
     InputDevice "Rig Wacom Intuos5 touch M Pen eraser" "SendCoreEvents"
     InputDevice "Rig touchscreen" "SendCoreEvents"
     InputDevice "Rig touchpad" "SendCoreEvents"
+    InputDevice "Rig Wacom Intuos5 touch M Pad pad" "SendCoreEvents"
 EndSection
 EOF
     device "Rig keyboard" Keyboard ""
@@ -139,6 +140,8 @@ EOF
     device "Rig Wacom Intuos5 touch M Pen eraser" PointerAbsoluteProximity '    Option "PointerHasPressure" "true"'
     device "Rig touchscreen" Touch ""
     device "Rig touchpad" PointerGesture ""
+    # A pad of nine keys, as the wacom driver makes it: a device of thirteen buttons, of which 4 to 7 scroll
+    device "Rig Wacom Intuos5 touch M Pad pad" PointerAbsolute '    Option "PointerButtonCount" "13"'
 } >"$run/xorg.conf"
 
 display=
@@ -160,6 +163,9 @@ if [ -n "$xdevprop" ]; then
         DISPLAY=:$display "$xdevprop" "$name" string "Device Node" /dev/null &&
             DISPLAY=:$display "$xdevprop" "$name" int32 "Device Product ID" 0x056a 0x0027 || { xdevprop=; udev=; }
     done
+    # The test driver types its devices itself, so the pad is one by the property the wacom driver says it with
+    [ -n "$xdevprop" ] && { DISPLAY=:$display "$xdevprop" "Rig Wacom Intuos5 touch M Pad pad" atom "Wacom Tool Type" PAD &&
+        DISPLAY=:$display "$xdevprop" "Rig Wacom Intuos5 touch M Pad pad" int32 "Device Product ID" 0x056a 0x0027 || xdevprop=; }
 fi
 if [ -n "${RIG_XINPUT_TEST:-}" ]; then # what the X server itself reports, to tell its doing from the terminal's
     DISPLAY=:$display xinput test-xi2 --root >"$run/xi2.log" 2>&1 &
@@ -180,7 +186,7 @@ kitty=$!
 pids+=($kitty)
 
 python3 "$here/x11.py" --sockets "$run/devices" --expect "$run/expect.jsonl" --wait "$run/ready" --size "$size" --display ":$display" \
-    ${udev:+--udev} ${xdevprop:+--node} "$@"
+    ${udev:+--udev} ${xdevprop:+--node --pad} "$@"
 played=$?
 touch "$run/stop"
 for _ in $(seq 100); do
