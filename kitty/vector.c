@@ -23,6 +23,7 @@
 
 #define MAX_ELEMENTS (1u << 22)
 #define MAX_DEPTH 64
+#define MAX_DASHES (1u << 18)  // dashes in the stroke of one path, beyond which a subpath is stroked solid
 #define TOLERANCE 0.25  // flattening error in device pixels
 #define SUBSAMPLES 16   // scanlines per pixel row
 
@@ -561,13 +562,24 @@ stroke_polyline(StrokeOut *o, double *pts, size_t n, bool closed, double hw, int
     return true;
 }
 
-// Splits a polyline into the "on" pieces of the dash pattern
+// Splits a polyline into the "on" pieces of the dash pattern. budget is how
+// many more dashes the path may be cut into: a polyline that would need more
+// is not dashed at all, so that a pattern far finer than the path is long
+// cannot take the terminal with it
 static bool
-dash_polyline(const Poly *p, const double *dash, unsigned ndash, double phase, PolyList *out) {
+dash_polyline(const Poly *p, const double *dash, unsigned ndash, double phase, PolyList *out, size_t *budget) {
     double total = 0;
     for (unsigned i = 0; i < ndash; i++) total += dash[i];
     size_t n = p->count / 2;
-    if (total <= 0 || n < 2) {
+    double plen = 0;
+    if (total > 0 && n >= 2) {
+        for (size_t i = 0; i + 1 < n; i++) plen += hypot(p->pts[2 * i + 2] - p->pts[2 * i], p->pts[2 * i + 3] - p->pts[2 * i + 1]);
+        if (p->closed) plen += hypot(p->pts[0] - p->pts[2 * n - 2], p->pts[1] - p->pts[2 * n - 1]);
+    }
+    // each period of the pattern ends ndash dashes and gaps, and the phase and the ends of the path add a period at most
+    const double needed = total > 0 ? (plen / total + 2) * ndash : 0;
+    const bool solid = total <= 0 || n < 2 || !(needed <= (double)*budget);
+    if (solid) {
         Poly *q = polylist_new(out);
         if (!q) return false;
         q->closed = p->closed;
@@ -575,12 +587,16 @@ dash_polyline(const Poly *p, const double *dash, unsigned ndash, double phase, P
             if (!poly_add(q, p->pts[2 * i], p->pts[2 * i + 1])) return false;
         return true;
     }
+    *budget -= (size_t)needed;
+    // Rounding cannot make the loops below run much past the count above, this only guarantees they end
+    size_t steps = 2 * (size_t)needed + 16;
     unsigned idx = 0;
     double left = dash[0];
     bool on = true;
     phase = fmod(phase, total * (ndash & 1 ? 2 : 1));
     if (phase < 0) phase += total * (ndash & 1 ? 2 : 1);
     while (phase > 0) {
+        if (!steps--) return false;
         if (phase >= left) {
             phase -= left;
             idx = (idx + 1) % ndash;
@@ -601,6 +617,7 @@ dash_polyline(const Poly *p, const double *dash, unsigned ndash, double phase, P
             if (!(cur = polylist_new(out)) || !poly_add(cur, x0, y0)) return false;
         }
         while (len - pos > left) {
+            if (!steps--) return false;
             pos += left;
             double t = pos / len, x = x0 + (x1 - x0) * t, y = y0 + (y1 - y0) * t;
             if (on) {
@@ -1797,9 +1814,10 @@ add_polys(const Render *r, const PolyList *polys, EdgeList *el) {
 static bool
 stroke_polys(PolyList *polys, const Elem *style, double hw, Mat m, Rect clip, double tol, EdgeList *el) {
     StrokeOut out = {el, m, clip};
+    size_t budget = MAX_DASHES;
     for (size_t i = 0; i < polys->count; i++) {
         PolyList pieces = {0};
-        bool ok = dash_polyline(polys->item + i, style->dash, style->ndash, style->dash_phase, &pieces);
+        bool ok = dash_polyline(polys->item + i, style->dash, style->ndash, style->dash_phase, &pieces, &budget);
         for (size_t k = 0; ok && k < pieces.count; k++)
             ok = stroke_polyline(&out, pieces.item[k].pts, pieces.item[k].count / 2, pieces.item[k].closed, hw, style->cap, style->join, style->miter_limit, tol);
         polylist_free(&pieces);
