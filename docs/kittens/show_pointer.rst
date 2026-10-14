@@ -26,8 +26,8 @@ press :kbd:`Ctrl+C`, :kbd:`Ctrl+D` or :kbd:`q`::
 
     tablet tool down device=3 contact=0 tool=pen x=100.00px y=200.00px cell=8,8 buttons=tip mods=none valid=pressure+tilt pressure=0.488 tilt=-12.00°,6.00° t=408211ms
     tablet tool move device=3 contact=0 tool=pen x=101.00px y=200.00px cell=8,8 buttons=tip mods=none valid=pressure+tilt pressure=0.502 tilt=-12.00°,6.00° t=408215ms dt=4ms
-    gesture pinch update x=100.00px y=200.00px cell=8,8 mods=none scale=+12.0% total=x1.340
-    scroll precise moving dx=+0.00px dy=+2.50px x=33px y=12px cell=2,0 mods=shift
+    gesture pinch update x=100.00px y=200.00px cell=8,8 mods=none scale=+12.0% total=x1.340 t=408230ms dt=8ms
+    scroll precise moving dx=+0.00px dy=+2.50px x=33.00px y=12.00px cell=2,0 mods=shift t=408244ms dt=8ms
 
 Values are converted to the units a person reads: positions in pixels and as
 the zero based column and row of the cell they fall in, pressure as a fraction

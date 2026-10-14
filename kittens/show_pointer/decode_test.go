@@ -127,6 +127,11 @@ func TestShowPointerDecode(t *testing.T) {
 		{"777;tablet-pointer;v=2:op=event:kind=3:device=5:button=1:state=7", "tablet pad device=5 button=1 v=2 state=7"},
 		{"777;gesture;v=1:op=event:kind=1:phase=2:x=25600:y=51200:mods=0:scale=120:total=1340",
 			"gesture pinch update x=100.00px y=200.00px cell=8,8 mods=none scale=+12.0% total=x1.340"},
+		// A gesture has the time of each report, and how long after the previous report of the same gesture it came
+		{"777;gesture;v=1:op=event:kind=1:phase=1:t=408211:tu=73:x=0:y=0:mods=0:scale=0:total=1000",
+			"gesture pinch begin x=0.00px y=0.00px cell=0,0 mods=none scale=+0.0% total=x1.000 t=408211.073ms"},
+		{"777;gesture;v=1:op=event:kind=1:phase=2:t=408219:tu=573:x=0:y=0:mods=0:scale=10:total=1010",
+			"gesture pinch update x=0.00px y=0.00px cell=0,0 mods=none scale=+1.0% total=x1.010 t=408219.573ms dt=8.500ms"},
 		{"777;gesture;v=1:op=event:kind=2:phase=2:x=0:y=0:mods=4:angle=-150:total=1200",
 			"gesture rotate update x=0.00px y=0.00px cell=0,0 mods=ctrl angle=-1.50° total=+12.00°"},
 		{"777;gesture;v=1:op=event:kind=3:phase=1:x=0:y=0:mods=0:dx=-1:dy=0:fingers=3",
@@ -136,9 +141,11 @@ func TestShowPointerDecode(t *testing.T) {
 		{"777;gesture;v=1:op=event:kind=5:phase=4:x=0:y=0:mods=0:fingers=4", "gesture hold cancel x=0.00px y=0.00px cell=0,0 mods=none fingers=4"},
 		{"777;gesture;v=1:op=event:kind=6:phase=1", "gesture event kind=6 phase=1"},
 		{"777;gesture;v=1:op=cap:id=3:caps=31:mode=3", "gesture capabilities can-report=pinch, rotate, swipe, smart zoom, hold mode=gestures+hold id=3"},
-		// The position of a scroll report is in whole pixels
-		{"777;scroll;v=1:op=event:dx=0:dy=250:x=33:y=12:mods=1:src=1:phase=2", "scroll precise moving dx=+0.00px dy=+2.50px x=33px y=12px cell=2,0 mods=shift"},
-		{"777;scroll;v=1:op=event:dx=-5000:dy=0:x=0:y=0:mods=0:src=0:phase=0", "scroll wheel dx=-50.00px dy=+0.00px x=0px y=0px cell=0,0 mods=none"},
+		{"777;scroll;v=1:op=event:dx=0:dy=250:x=8448:y=3072:mods=1:src=1:phase=2", "scroll precise moving dx=+0.00px dy=+2.50px x=33.00px y=12.00px cell=2,0 mods=shift"},
+		{"777;scroll;v=1:op=event:dx=-5000:dy=0:x=0:y=0:mods=0:src=0:phase=0", "scroll wheel dx=-50.00px dy=+0.00px x=0.00px y=0.00px cell=0,0 mods=none"},
+		{"777;scroll;v=1:op=event:t=5000:dx=0:dy=100:x=128:y=0:mods=0:src=0:phase=0", "scroll wheel dx=+0.00px dy=+1.00px x=0.50px y=0.00px cell=0,0 mods=none t=5000ms"},
+		{"777;scroll;v=1:op=event:t=5016:dx=0:dy=100:x=128:y=0:mods=0:src=0:phase=0",
+			"scroll wheel dx=+0.00px dy=+1.00px x=0.50px y=0.00px cell=0,0 mods=none t=5016ms dt=16ms"},
 		{"777;scroll;v=1:op=event:dx=1:dy=2:src=7:phase=9", "scroll dx=+0.01px dy=+0.02px src=7 phase=9"},
 		{"777;scroll;v=1:op=cap:id=4:caps=1:mode=1", "scroll capabilities can-report=pixel distances mode=on id=4"},
 		// A selector this program does not know
