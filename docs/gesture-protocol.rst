@@ -19,19 +19,12 @@ Framing
 
 Frames are ``OSC 777`` with the ``gesture`` selector::
 
-    <OSC> 777 ; gesture ; <fields> <ST>
+    <OSC> 777 ; gesture ; v=1 : op=query : id=42 <ST>
 
-``<OSC>`` is ``<ESC> ]`` and ``<ST>`` is ``<ESC> \``; ``BEL`` is also
-accepted as a terminator. Fields are ASCII ``key=value`` pairs separated by
-colons, in any order, with decimal integers that carry no leading ``+``.
-Keys are case sensitive. A frame with a duplicate key, a value out of range,
-or a missing required field is rejected as a whole, and a rejected or
-incomplete frame must never reach a program as keystrokes. Spaces in the
-examples below are for clarity only.
-
-Every frame has ``v``, the protocol version, currently ``1``, and ``op``, one
-of ``query``, ``cap``, ``mode`` and ``event``. A program ignores a frame whose
-``op`` it does not know.
+They follow the rules every OSC 777 extension shares, which
+:doc:`extension-framing` gives: the syntax of the fields, which frames are
+rejected, the units and the clock. ``v``, the protocol version, is currently
+``1``, and ``op`` is one of ``query``, ``cap``, ``mode`` and ``event``.
 
 Discovery
 -------------
@@ -75,7 +68,10 @@ The mode is local to the window, is reset by ``RIS``, and changing it
 cancels every gesture in progress. Programs must turn it off when they exit,
 suspend or fail, and turn it back on when resumed. Multiplexers keep it with
 the rest of the terminal state, restore it on reconnect, and turn it off when
-detaching. There is no user setting that overrides the program's choice.
+detaching. A terminal may let its user refuse the mode, or some of its bits,
+for every program or for some. A refused bit reads back as off and the
+gestures it names are not reported, so a program reads the mode back rather
+than assume it was granted.
 
 A ``mode`` request without a ``mode`` field reads the state instead of
 changing it, and is answered with::

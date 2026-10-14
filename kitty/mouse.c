@@ -13,6 +13,7 @@
 #include <math.h>
 #include "glfw-wrapper.h"
 #include "control-codes.h"
+#include "extension-fields.h"
 
 extern PyTypeObject Screen_Type;
 
@@ -1749,26 +1750,17 @@ gesture_caps(void) {
     return glfwGetSupportedGestures ? glfwGetSupportedGestures() : 0;
 }
 
+// A frame from the program, see docs/extension-framing.rst for what is rejected
 void
 screen_gesture_osc(Screen *screen, const char *data, size_t sz) {
-    char buf[128], reply[128], *saveptr = NULL;
-    const char *op = "";
-    int v = 0, mode = -1, id = -1;
-    if (sz >= sizeof(buf)) return;
-    memcpy(buf, data, sz);
-    buf[sz] = 0;
-    for (char *tok = strtok_r(buf, ":", &saveptr); tok; tok = strtok_r(NULL, ":", &saveptr)) {
-        char *val = strchr(tok, '=');
-        if (!val) return;
-        *val++ = 0;
-        if (!strcmp(tok, "v")) v = atoi(val);
-        else if (!strcmp(tok, "op")) op = val;
-        else if (!strcmp(tok, "mode")) mode = atoi(val);
-        else if (!strcmp(tok, "id")) id = atoi(val);
-    }
-    if (v != 1) return;
+    ExtensionFields f;
+    char reply[128];
+    const char *op;
+    long long mode = -1, id = -1;
+    if (!extension_fields_parse(&f, data, sz) || !extension_frame_header(&f, 1, &op)) return;
+    if (!extension_field_int(&f, "mode", 0, INT32_MAX, &mode) || !extension_field_int(&f, "id", 0, INT32_MAX, &id)) return;
     if (!strcmp(op, "query") && id >= 0) {
-        snprintf(reply, sizeof(reply), "777;gesture;v=1:op=cap:id=%d:caps=%u:mode=%u", id, gesture_caps(), screen->gesture.mode);
+        snprintf(reply, sizeof(reply), "777;gesture;v=1:op=cap:id=%lld:caps=%u:mode=%u", id, gesture_caps(), screen->gesture.mode);
         write_escape_code_to_child(screen, ESC_OSC, reply);
     } else if (!strcmp(op, "mode")) {
         if (mode < 0) {  // a read

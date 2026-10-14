@@ -502,6 +502,43 @@ class TestMouse(BaseTest):
         self.ae(c.wtcbuf, ev('kind=4:phase=4') + b'mods=0\x1b\\')
         self.assertFalse(report(4, 3))
 
+    def test_gesture_frames(self):
+        # A frame from a program follows the rules every extension shares, see docs/extension-framing.rst
+        s = self.create_screen()
+        c = s.callbacks
+
+        def mode():
+            c.clear()
+            parse_bytes(s, b'\x1b]777;gesture;v=1:op=mode\x1b\\')
+            return c.wtcbuf
+
+        def send(body):
+            parse_bytes(s, f'\x1b]777;gesture;{body}\x1b\\'.encode())
+            return mode()
+
+        on = b'\x1b]777;gesture;v=1:op=mode:mode=1\x1b\\'
+        off = b'\x1b]777;gesture;v=1:op=mode:mode=0\x1b\\'
+        # A key the terminal does not know is ignored, so that fields can be added
+        self.ae(send('v=1:op=mode:mode=1:later=x-y'), on)
+        # A frame is rejected as a whole for a duplicate key, a value that is not a decimal integer in range, a field
+        # that is not key=value, a missing v or op, or a version the terminal does not speak
+        for body in (
+            'v=1:op=mode:mode=0:mode=0', 'v=1:op=mode:mode=0:later=1:later=2', 'v=1:v=1:op=mode:mode=0', 'v=1:op=mode:mode=+0',
+            'v=1:op=mode:mode=0x', 'v=1:op=mode:mode=', 'v=1:op=mode:mode=-1', 'v=1:op=mode:mode=99999999999', 'v=1:op=mode:mode=0:',
+            'v=1::op=mode:mode=0', 'v=1:op=mode:mode=0:junk', 'v=1:op=mode:=0', 'op=mode:mode=0', 'v=1:mode=0', 'v=2:op=mode:mode=0',
+            'v=01x:op=mode:mode=0',
+        ):
+            self.ae(send(body), on, body)
+        # Fields are at most 127 bytes
+        body = 'v=1:op=mode:mode=0:p='
+        self.ae(send(body + 'x' * (128 - len(body))), on)
+        self.ae(send(body + 'x' * (127 - len(body))), off)
+        # and a query with an id out of range is not answered
+        c.clear()
+        parse_bytes(s, b'\x1b]777;gesture;v=1:op=query:id=-1\x1b\\')
+        parse_bytes(s, b'\x1b]777;gesture;v=1:op=query:id=2147483648\x1b\\')
+        self.ae(c.wtcbuf, b'')
+
     def test_v120_scroll_direction_reversal(self):
         # A high resolution wheel delivers one physical detent as several
         # VALUE120 events, and the fractional remainder is carried between them.
