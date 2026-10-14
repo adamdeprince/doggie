@@ -625,11 +625,16 @@ def gestures(rig: Rig) -> None:
     rig.play('hold', ['end', '$serial', '$time', 1])
     rig.expect('gesture', 'and begin to move', kind=5, phase=4)
     time.sleep(0.1)
+    # a report has the time the compositor gave its event, however late the event arrives
+    rig.play('hold', ['begin', '$serial', '$time-30', '$surface', 2], ['end', '$serial', '$time', 0])
+    rig.expect('gesture', 'two fingers rest, stamped 30 ms ago', kind=5, phase=1, fingers=2)
+    rig.expect('gesture', 'and lift, stamped now', kind=5, phase=3, dt=30)
+    time.sleep(0.1)
 
 
 def scroll(rig: Rig) -> None:
     "Two fingers scroll down on a touchpad and lift, then a wheel turns one notch each way"
-    at = {'x': round(rig.width / 2), 'y': round(rig.height / 2)}
+    at = {'x': px(rig.width / 2), 'y': px(rig.height / 2)}
     point(rig, rig.width / 2, rig.height / 2)
     for i in range(6):
         rig.play('pointer', ['axis_source', FINGER], ['axis', '$time', 0, 4.5], ['frame'])
@@ -647,7 +652,12 @@ def scroll(rig: Rig) -> None:
         rig.play('pointer', ['axis_source', 0], ['axis_value120', 0, 120 * notch], ['axis', '$time', 0, value], ['frame'])
         rig.expect('scroll', f'a wheel notch {note}', dx=0, src=0, phase=0, **at)
         time.sleep(0.3)
-    time.sleep(0.2)
+    # a report has the time the compositor gave its event, however late the event arrives
+    notch = [['axis_source', 0], ['axis_value120', 0, 120], ['axis', '$time-40', 0, 15], ['frame']]
+    rig.play('pointer', *notch, *(notch[:2] + [['axis', '$time', 0, 15], ['frame']]))
+    rig.expect('scroll', 'a wheel notch stamped 40 ms ago', dx=0, src=0, phase=0, **at)
+    rig.expect('scroll', 'and one stamped now', dx=0, src=0, phase=0, dt=40, **at)
+    time.sleep(0.5)
 
 
 def handover(rig: Rig) -> None:
@@ -675,7 +685,7 @@ def handover(rig: Rig) -> None:
         rig.expect('gesture', f'handover: a pinch {note} where the pointer is', kind=1, phase=phase, x=px(middle[0]), y=px(middle[1]))
     time.sleep(0.05)
     rig.play('pointer', ['axis_source', FINGER], ['axis', '$time', 0, 4.5], ['frame'])
-    rig.expect('scroll', 'handover: a scroll where the pointer is', dy=450, x=round(middle[0]), y=round(middle[1]))
+    rig.expect('scroll', 'handover: a scroll where the pointer is', dy=450, x=px(middle[0]), y=px(middle[1]))
     rig.play('pointer', ['axis_source', FINGER], ['axis_stop', '$time', 0], ['frame'])
     time.sleep(1.0)
     rig.mark(skip='scroll')
