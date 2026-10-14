@@ -487,7 +487,8 @@ typedef enum GestureKind { GESTURE_PINCH = 1, GESTURE_ROTATE, GESTURE_SWIPE, GES
 typedef enum GesturePhase { GESTURE_BEGIN = 1, GESTURE_UPDATE, GESTURE_END, GESTURE_CANCEL } GesturePhase;
 void screen_gesture_osc(Screen *self, const char *data, size_t sz);
 void screen_gesture_cancel(Screen *self);
-bool screen_gesture_report(Screen *self, int kind, int phase, int x, int y, int mods, double delta, int dx, int dy, unsigned fingers);
+bool screen_gesture_report(
+    Screen *self, int kind, int phase, monotonic_t timestamp, bool fine, int x, int y, int mods, double delta, int dx, int dy, unsigned fingers);
 bool screen_is_cursor_visible(const Screen *self);
 unsigned screen_multi_cursor_count(const Screen *self);
 bool screen_selection_range_for_line(Screen *self, index_type y, index_type *start, index_type *end);

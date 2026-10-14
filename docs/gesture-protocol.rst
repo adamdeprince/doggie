@@ -19,19 +19,12 @@ Framing
 
 Frames are ``OSC 777`` with the ``gesture`` selector::
 
-    <OSC> 777 ; gesture ; <fields> <ST>
+    <OSC> 777 ; gesture ; v=1 : op=query : id=42 <ST>
 
-``<OSC>`` is ``<ESC> ]`` and ``<ST>`` is ``<ESC> \``; ``BEL`` is also
-accepted as a terminator. Fields are ASCII ``key=value`` pairs separated by
-colons, in any order, with decimal integers that carry no leading ``+``.
-Keys are case sensitive. A frame with a duplicate key, a value out of range,
-or a missing required field is rejected as a whole, and a rejected or
-incomplete frame must never reach a program as keystrokes. Spaces in the
-examples below are for clarity only.
-
-Every frame has ``v``, the protocol version, currently ``1``, and ``op``, one
-of ``query``, ``cap``, ``mode`` and ``event``. A program ignores a frame whose
-``op`` it does not know.
+They follow the rules every OSC 777 extension shares, which
+:doc:`extension-framing` gives: the syntax of the fields, which frames are
+rejected, the units and the clock. ``v``, the protocol version, is currently
+``1``, and ``op`` is one of ``query``, ``cap``, ``mode`` and ``event``.
 
 Discovery
 -------------
@@ -75,7 +68,10 @@ The mode is local to the window, is reset by ``RIS``, and changing it
 cancels every gesture in progress. Programs must turn it off when they exit,
 suspend or fail, and turn it back on when resumed. Multiplexers keep it with
 the rest of the terminal state, restore it on reconnect, and turn it off when
-detaching. There is no user setting that overrides the program's choice.
+detaching. A terminal may let its user refuse the mode, or some of its bits,
+for every program or for some. A refused bit reads back as off and the
+gestures it names are not reported, so a program reads the mode back rather
+than assume it was granted.
 
 A ``mode`` request without a ``mode`` field reads the state instead of
 changing it, and is answered with::
@@ -90,14 +86,20 @@ Reports
 
 A report is a single frame per event::
 
-    <OSC> 777 ; gesture ; v=1 : op=event : kind=1 : phase=2 : x=25600 : y=51200 : mods=0 : scale=120 : total=1340 <ST>
+    <OSC> 777 ; gesture ; v=1 : op=event : kind=1 : phase=2 : t=408211 : tu=73 : x=25600 : y=51200 : mods=0 : scale=120 : total=1340 <ST>
 
-``kind``, ``phase``, ``x``, ``y`` and ``mods`` are always present:
+``kind``, ``phase``, ``t``, ``x``, ``y`` and ``mods`` are always present:
 
 ================ ==================================================================
 ``kind``         ``1`` pinch, ``2`` rotate, ``3`` swipe, ``4`` smart zoom,
                  ``5`` hold
 ``phase``        ``1`` begin, ``2`` update, ``3`` end, ``4`` cancel
+``t``            When the system says the event happened, in milliseconds on
+                 the clock the terminal uses for every extension, see
+                 :doc:`extension-framing`. A cancel the terminal makes itself
+                 has the time it made it
+``tu``           Microseconds past ``t``, ``0`` to ``999``, present only when
+                 the system stamps events more finely than a millisecond
 ``x``, ``y``     Position of the pointer in 1/256 of a physical pixel, signed,
                  zero based, relative to the top left of the cell area, within
                  ±1073741823. A physical pixel is one of the framebuffer the
@@ -154,6 +156,14 @@ that gesture is not reported, not even its ``end``. Programs must tolerate a
 repeated cancel and a fresh ``begin`` for a kind they still have open, which
 replaces the earlier gesture.
 
+A terminal or a relay that cannot keep up with the program may merge
+consecutive ``update`` reports of one gesture into one, and nothing else: a
+merged pinch has the product of the changes in magnification as its
+``scale``, a merged rotation the sum of the angles as its ``angle``, and both
+have the ``total``, ``t`` and ``tu`` of the last report merged. A ``begin``,
+an ``end`` and a ``cancel`` are never merged or dropped, see
+:doc:`extension-framing`.
+
 A multiplexer translates ``x,y`` by the pane's origin (borders included),
 forwards every other field unchanged, delivers each gesture only to the pane
 it began in, and cancels gestures when panes move or resize.
@@ -186,7 +196,9 @@ silkie passes on what the window system recognizes:
   swipe with three fingers only reaches applications when System Settings
   has it set to swipe between pages, and a smart zoom when the trackpad's
   smart zoom is enabled. AppKit does not say how many fingers made a
-  gesture, so ``fingers`` is absent.
+  gesture, so ``fingers`` is absent. Its events are stamped to the
+  microsecond, so ``tu`` is sent on macOS only: Wayland and X11 stamp
+  gestures in whole milliseconds.
 * On Wayland, through version 3 of ``pointer-gestures-unstable-v1``, and
   ``caps`` is zero on a compositor without it. A pinch there carries both
   scale and rotation, so one compositor pinch is reported as a pinch and a

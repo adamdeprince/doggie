@@ -1643,6 +1643,8 @@ handleGestureEvent(_GLFWwindow *window, NSEvent *event, GLFWGestureKind kind, GL
         .kind = kind,
         .phase = phase,
         .keyboard_modifiers = translateFlags([event modifierFlags]),
+        .timestamp = eventTimestamp(event),
+        .timestamp_is_fine = true,
         .x = pos.x,
         .y = [window->ns.view frame].size.height - pos.y,
         .delta = delta,
